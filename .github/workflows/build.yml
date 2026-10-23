@@ -9,12 +9,7 @@ jobs:
   apk:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Versões disponíveis (temporário)
-        run: |
-          curl -s https://dl.google.com/dl/android/maven2/com/android/tools/build/group-index.xml | grep -o '<gradle versions="[^"]*"' | tr ',' '\n' | grep -vE 'alpha|beta|rc' | tail -3
-          ls "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools" "$ANDROID_HOME/ndk"
+      - uses: actions/checkout@v7
 
       - name: Testa o daemon
         run: sudo tests/daemon_test.sh
@@ -25,15 +20,15 @@ jobs:
           "$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang" \
             -O2 -Wall -Werror -o app/src/main/jniLibs/arm64-v8a/libtinkerd.so daemon/tinkerd.c -lm
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: 17
+          java-version: 25
 
       - name: Gera o APK
         run: ./gradlew --no-daemon assembleDebug
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: tinker-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk

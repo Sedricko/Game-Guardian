@@ -1,15 +1,14 @@
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
 }
 
 android {
     namespace = "dev.tinker.app"
-    compileSdk = 35
+    compileSdk = 37
     defaultConfig {
         applicationId = "dev.tinker.app"
         minSdk = 24
-        targetSdk = 35
+        targetSdk = 37
         versionCode = 1
         versionName = "0.1"
         ndk { abiFilters += "arm64-v8a" }
