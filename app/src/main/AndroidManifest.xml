@@ -1,8 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- para mostrar nome e ícone dos jogos abertos -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+
     <application
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
         android:label="Tinker"
-        android:theme="@android:style/Theme.Material">
+        android:theme="@style/Theme.Tinker">
         <activity
             android:name=".MainActivity"
             android:exported="true"

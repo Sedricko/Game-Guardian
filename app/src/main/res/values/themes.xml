@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="tinker_bg">#0D1117</color>
+    <style name="Theme.Tinker" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/tinker_bg</item>
+    </style>
+</resources>

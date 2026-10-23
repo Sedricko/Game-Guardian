@@ -1,5 +1,6 @@
 plugins {
     id("com.android.application")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
@@ -7,10 +8,10 @@ android {
     compileSdk = 37
     defaultConfig {
         applicationId = "dev.tinker.app"
-        minSdk = 24
+        minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1"
+        versionCode = 2
+        versionName = "0.2"
         ndk { abiFilters += "arm64-v8a" }
     }
     compileOptions {
@@ -19,4 +20,12 @@ android {
     }
     // o daemon vai como lib*.so para ser extraído em nativeLibraryDir, onde o Android permite executar
     packaging { jniLibs { useLegacyPackaging = true } }
+    buildFeatures { compose = true }
+}
+
+dependencies {
+    implementation(platform("androidx.compose:compose-bom:2026.09.00"))
+    implementation("androidx.compose.material3:material3")
+    // shortcut: faixa até achar a última estável; fixar a versão no próximo commit
+    implementation("androidx.activity:activity-compose:[1.10,1.14.0-alpha01)")
 }
