@@ -1,0 +1,34 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Testa o daemon
+        run: sudo tests/daemon_test.sh
+
+      - name: Compila o daemon (arm64)
+        run: |
+          mkdir -p app/src/main/jniLibs/arm64-v8a
+          "$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang" \
+            -O2 -Wall -Werror -o app/src/main/jniLibs/arm64-v8a/libtinkerd.so daemon/tinkerd.c -lm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Gera o APK
+        run: ./gradlew --no-daemon assembleDebug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tinker-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
