@@ -11,6 +11,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Versões disponíveis (temporário)
+        run: |
+          curl -s https://dl.google.com/dl/android/maven2/com/android/tools/build/group-index.xml | grep -o '<gradle versions="[^"]*"' | tr ',' '\n' | grep -vE 'alpha|beta|rc' | tail -3
+          ls "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools" "$ANDROID_HOME/ndk"
+
       - name: Testa o daemon
         run: sudo tests/daemon_test.sh
 
