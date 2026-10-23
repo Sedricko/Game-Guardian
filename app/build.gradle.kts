@@ -14,6 +14,10 @@ android {
         versionName = "0.1"
         ndk { abiFilters += "arm64-v8a" }
     }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
     // o daemon vai como lib*.so para ser extraído em nativeLibraryDir, onde o Android permite executar
     packaging { jniLibs { useLegacyPackaging = true } }
 }
