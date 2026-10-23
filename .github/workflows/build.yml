@@ -11,6 +11,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Versões (temporário)
+        run: |
+          for g in androidx/compose/compose-bom androidx/activity/activity-compose androidx/core/core-splashscreen; do
+            echo "$g $(curl -s https://dl.google.com/dl/android/maven2/$g/maven-metadata.xml | grep -o '<release>[^<]*')"
+          done
+
       - name: Testa o daemon
         run: sudo tests/daemon_test.sh
 
