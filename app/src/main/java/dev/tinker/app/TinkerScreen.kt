@@ -576,7 +576,7 @@ private fun ResultCard(
                 Column(Modifier.weight(1f)) {
                     if (title.isNotBlank()) Text(title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(value, style = MaterialTheme.typography.titleMedium, fontFamily = FontFamily.Monospace, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text(addr, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                    Text(addr, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
                 }
                 Text(tag, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, maxLines = 1, modifier = Modifier.padding(start = 8.dp))
                 trailing()
@@ -680,9 +680,10 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
             val open = editing == key
             ResultCard(
                 shown(item.value, item.type), "0x${item.addr}" + when {
-                    old -> " · ⚠ de outra vez do jogo"
-                    item.pointer.isNotEmpty() -> if (item.verified) " · 🔗 ponteiro" else " · 🔗 ponteiro (confirma ao reabrir)"
-                    item.anchor.isNotEmpty() -> " · ↳ " + (s.saved.firstOrNull { it.id == item.anchor }?.let { it.name.ifEmpty { "0x" + it.addr } } ?: "?") + " " + offsetText(item.offset)
+                    // a linha do endereço é estreita no painel: marcas curtas, explicadas ao abrir o salvo e na Ajuda
+                    old -> "\n⚠ de outra vez do jogo: busque de novo"
+                    item.pointer.isNotEmpty() -> if (item.verified) " · 🔗" else " · 🔗 a confirmar"
+                    item.anchor.isNotEmpty() -> "\n↳ segue " + (s.saved.firstOrNull { it.id == item.anchor }?.let { it.name.ifEmpty { "0x" + it.addr } } ?: "?") + " " + offsetText(item.offset)
                     else -> ""
                 }, "${TYPE_NAMES[item.type]} · ${item.region}",
                 onClick = { editing = if (open) null else key },
