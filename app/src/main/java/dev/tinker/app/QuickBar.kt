@@ -22,6 +22,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,9 +42,11 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 
 /**
- * Barra rápida sobre o jogo: buscar e refinar (com número ou ↑ ↓ = ≠) sem abrir o painel inteiro.
+ * Barra rápida sobre o jogo: buscar e refinar (com número ou ↑ ↓ = ≠), pausar e editar sem abrir o painel inteiro;
+ * com poucos resultados mostra os valores ao vivo, para acompanhar o jogo.
  * onKeyboard(true) deixa a janela receber o teclado só enquanto o campo é usado; no resto do tempo o jogo fica com o foco.
  */
 @Composable
@@ -57,6 +60,13 @@ fun QuickBar(engine: Engine, onDrag: (Float, Float) -> Unit, onKeyboard: (Boolea
     val enabled = s.process != null && !s.busy
     val n = s.count ?: 0
     val small = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+    // poucos resultados: valores ao vivo (a aba Busca, que relê sozinha, não está aberta)
+    LaunchedEffect(n) {
+        while (n in 1L..5L) {
+            delay(1000)
+            if (!s.busy) runCatching { s.results = engine.list().second }
+        }
+    }
     fun act(work: suspend () -> String) {
         pad = false
         focus.clearFocus()
@@ -77,6 +87,8 @@ fun QuickBar(engine: Engine, onDrag: (Float, Float) -> Unit, onKeyboard: (Boolea
                 "⠿", fontSize = 22.sp, color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.pointerInput(Unit) { detectDragGestures { c, d -> c.consume(); onDrag(d.x, d.y) } }.padding(horizontal = 6.dp, vertical = 8.dp),
             )
+            TextButton(onClick = { act { if (s.paused) engine.resume() else engine.pause() } }, enabled = enabled, contentPadding = PaddingValues(0.dp),
+                modifier = Modifier.size(40.dp)) { Text(if (s.paused) "▶" else "⏸", fontSize = 18.sp) }
             OutlinedTextField(
                 s.value, { s.value = it }, singleLine = true, placeholder = { Text("Valor") }, readOnly = own,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
@@ -113,6 +125,14 @@ fun QuickBar(engine: Engine, onDrag: (Float, Float) -> Unit, onKeyboard: (Boolea
             // ▢ abre o painel completo (editar, congelar, salvar); – volta para a bolinha
             TextButton(onClick = { onKeyboard(false); onOpenPanel() }, contentPadding = PaddingValues(0.dp), modifier = Modifier.size(44.dp)) { Text("▢", fontSize = 20.sp) }
             TextButton(onClick = { onKeyboard(false); onBubble() }, contentPadding = PaddingValues(0.dp), modifier = Modifier.size(44.dp)) { Text("–", fontSize = 22.sp) }
+        }
+        // editar: todos os resultados (até 50) passam para o valor do campo
+        if (n in 1L..50L) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            OutlinedButton(onClick = { act { engine.writeAll(s.value) } }, enabled = enabled && s.value.isNotBlank(), contentPadding = small) {
+                Text("Editar ${if (n == 1L) "" else "os $n "}para ${s.value.ifBlank { "…" }}", maxLines = 1)
+            }
+            if (n <= 5L) Text(s.results.take(5).joinToString("  ") { it.value }, Modifier.weight(1f), style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary, maxLines = 1)
         }
         if (own && pad) NumPad(onKey = { s.value = applyKey(s.value, it) }, onDone = { pad = false })
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, maxLines = 3) }

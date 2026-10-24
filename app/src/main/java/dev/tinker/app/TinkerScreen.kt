@@ -1486,8 +1486,9 @@ private val HELP = listOf(
     "Menu flutuante" to "Abrir o Tinker já abre a bolinha sobre o jogo e tira o app da frente, como no GameGuardian (dá para desligar em " +
         "Ajustes). Toque na bolinha para abrir o painel. No topo: toque no nome do jogo para trocar; 👁 (segure) espia o jogo; ⏸/▶ pausa; " +
         "⚡ barra rápida; — minimiza; ✕ sai. Os ajustes ficam guardados.",
-    "Barra rápida" to "No menu flutuante, toque em Barra rápida: uma barra pequena fica sobre o jogo, com o campo de valor, Refinar e ↑ ↓ = ≠ " +
-        "(aumentou, diminuiu, não mudou, mudou). Arraste pelo ⠿. ▢ abre o painel completo para editar e congelar; – volta para a bolinha, " +
+    "Barra rápida" to "No menu flutuante, toque em ⚡: uma barra pequena fica sobre o jogo, com o campo de valor (e o teclado do Tinker), " +
+        "⏸/▶ para pausar, Buscar/Refinar e ↑ ↓ = ≠ (aumentou, diminuiu, não mudou, mudou). Com até 50 resultados aparece Editar (todos " +
+        "passam para o valor do campo); com até 5, os valores ao vivo, para acompanhar o jogo. Arraste pelo ⠿. ▢ abre o painel completo para editar e congelar; – volta para a bolinha, " +
         "e a bolinha passa a abrir a barra.",
     "Offset e ficha" to "Valores do mesmo objeto do jogo (ouro, gema, energia) ficam sempre à mesma distância (offset). Quando um salvo ganha " +
         "ponteiro, os salvos a até 4 KB dele passam a segui-lo sozinhos (↳ Ouro +0x8): ao reabrir o jogo, achando um, os outros vêm juntos. " +
