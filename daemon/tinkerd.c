@@ -166,7 +166,8 @@ static int set_ranges(const char *list) {
     unsigned m = 0;
     char buf[128];
     snprintf(buf, sizeof buf, "%s", list);
-    for (char *tok = strtok(buf, ","); tok; tok = strtok(NULL, ",")) {
+    char *save = NULL;
+    for (char *tok = strtok_r(buf, ",", &save); tok; tok = strtok_r(NULL, ",", &save)) {
         int found = 0;
         for (int i = 0; i < NREGIONS; i++) if (!strcmp(tok, REGIONS[i])) { m |= 1u << i; found = 1; }
         if (!found) return 0;
