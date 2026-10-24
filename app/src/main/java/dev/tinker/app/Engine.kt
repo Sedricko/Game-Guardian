@@ -38,7 +38,8 @@ val REGION_NAMES = mapOf(
 )
 
 data class GameProcess(val pid: Int, val pkg: String, val label: String, val icon: ImageBitmap?)
-data class Hit(val addr: String, val type: String, val region: String, val value: String)
+// base: na busca perto, o endereço de partida em volta do qual este foi achado
+data class Hit(val addr: String, val type: String, val region: String, val value: String, val base: String = "")
 data class Region(val code: String, val count: Long, val bytes: Long, val enabled: Boolean)
 data class SavedItem(val addr: String, val type: String, val region: String, val value: String, val frozen: Boolean = false, val name: String = "")
 
@@ -258,7 +259,10 @@ class Engine private constructor(private val app: Context) {
             appendLine("Memória do aparelho: ${mem.availMem shr 20} MB livres de ${mem.totalMem shr 20} MB${if (mem.lowMemory) " (POUCA MEMÓRIA)" else ""}")
             appendLine("Pausa automática: ${if (Session.autoPause) "ligada" else "desligada"}")
             val log = Diag.export().lines()
-            val problems = log.filter { l -> PROBLEM_WORDS.any { l.contains(it, ignoreCase = true) } }
+            val problems = log.filter { l ->
+                val msg = l.substringAfter(' ').substringAfter(' ')  // tira data e hora do registro
+                !msg.startsWith("===") && !LOGCAT_PREFIX.containsMatchIn(msg) && PROBLEM_WORDS.any { msg.contains(it, ignoreCase = true) }
+            }
             appendLine()
             appendLine("=== Resumo de problemas (${problems.size}) ===")
             appendLine(if (problems.isEmpty()) "Nenhum erro registrado." else problems.takeLast(20).joinToString("\n"))
@@ -293,18 +297,24 @@ class Engine private constructor(private val app: Context) {
      * Busca perto: procura um ou mais valores ("50" ou "50;75") nas `radius` linhas acima e abaixo de addr,
      * no tipo dado. Ex.: achou o ouro, procura a prata ali do lado.
      */
-    suspend fun searchNear(addr: String, type: String, radius: Int, values: String): List<Hit> = call { d ->
+    suspend fun searchNear(centers: List<String>, type: String, radius: Int, values: String): List<Hit> = call { d ->
         val wanted = parseValues(values)
         val size = TYPE_SIZES.getValue(type)
         val r = radius.coerceIn(1, 10000)
-        val center = addr.toLong(16) / size * size
-        val start = (center - r.toLong() * size).coerceAtLeast(0)
-        val hits = d.frozenGame { d.send("dump ${start.toString(16)} $type ${2 * r + 1}", quiet = true) }.lines.mapNotNull {
-            val (a, v) = it.split(" ", limit = 2)
-            if (matchesAny(v, type, wanted) && a.toLong(16) != center) Hit(a, type, "", v) else null
+        val bases = centers.map { it.toLong(16) / size * size }.toSet()
+        val found = LinkedHashMap<String, Hit>()  // um achado por endereço, mesmo se perto de dois pontos de partida
+        d.frozenGame {
+            centers.forEach { addr ->
+                val center = addr.toLong(16) / size * size
+                val start = (center - r.toLong() * size).coerceAtLeast(0)
+                d.send("dump ${start.toString(16)} $type ${2 * r + 1}", quiet = true).lines.forEach {
+                    val (a, v) = it.split(" ", limit = 2)
+                    if (a !in found && a.toLong(16) !in bases && matchesAny(v, type, wanted)) found[a] = Hit(a, type, "", v, base = addr)
+                }
+            }
         }
-        Diag.add("Busca perto de 0x$addr (±$r ${TYPE_NAMES[type]}): $values → ${hits.size} achados")
-        hits
+        Diag.add("Busca perto de ${centers.size} endereço(s) (±$r ${TYPE_NAMES[type]}): $values → ${found.size} achados")
+        found.values.toList()
     }
 
     /** Refino da busca perto: o valor mudou no jogo, fica só quem tem o valor novo. */

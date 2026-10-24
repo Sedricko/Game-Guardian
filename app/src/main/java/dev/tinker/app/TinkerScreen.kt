@@ -46,7 +46,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.PrimaryScrollableTabRow
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -115,8 +115,10 @@ fun TinkerPanel(engine: Engine, overlay: Boolean, onMinimize: () -> Unit = {}, o
                     run { engine.attach(p) }
                 }
             } else {
-                PrimaryScrollableTabRow(selectedTabIndex = s.tab, containerColor = MaterialTheme.colorScheme.background, edgePadding = 8.dp) {
-                    TABS.forEachIndexed { i, title -> Tab(selected = s.tab == i, onClick = { s.tab = i }, text = { Text(title, maxLines = 1) }) }
+                PrimaryTabRow(selectedTabIndex = s.tab, containerColor = MaterialTheme.colorScheme.background) {
+                    TABS.forEachIndexed { i, title ->
+                        Tab(selected = s.tab == i, onClick = { s.tab = i }, text = { Text(title, style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false) })
+                    }
                 }
                 when (s.tab) {
                     0 -> SearchTab(engine, run)
@@ -245,6 +247,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
     var editing by remember { mutableStateOf<String?>(null) }
     var editingAll by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf(setOf<String>()) }
+    var nearOpen by remember { mutableStateOf(false) }
     val enabled = s.process != null && !s.busy
     // valores ao vivo, como no Cheat Engine: relê os resultados mostrados a cada segundo
     LaunchedEffect(Unit) {
@@ -307,7 +310,14 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                     FilledTonalButton(onClick = { engine.addSaved(targets); s.status = "${targets.size} salvos na lista." }) { Text("Salvar $label") }
                     FilledTonalButton(onClick = { engine.addSaved(targets, frozen = true); s.status = "${targets.size} congelados (veja Salvos)." }) { Text("Congelar $label") }
                     OutlinedButton(onClick = { editingAll = !editingAll }, enabled = !s.busy) { Text("Editar $label") }
+                    OutlinedButton(onClick = { nearOpen = !nearOpen }, enabled = !s.busy) { Text("Buscar perto (${targets.size})") }
                 }
+            }
+        }
+        if (nearOpen && targets.isNotEmpty()) {
+            item {
+                // procura em volta de cada resultado escolhido (ou de todos os mostrados)
+                NearSearch(engine, targets.map { it.addr }, targets.first().type, chooseType = true, onError = { s.status = it })
             }
         }
         if (editingAll) {
@@ -529,7 +539,7 @@ private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
         }
         TypeChips(type) { t -> s.view = center to t }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        if (center != "0") NearSearch(engine, center, type, onError = { error = it })
+        if (center != "0") NearSearch(engine, listOf(center), type, chooseType = false, onError = { error = it })
         if (center != "0") {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { shift-- }) { Text("▲ Anteriores") }
@@ -559,18 +569,30 @@ private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
     }
 }
 
-/** Busca perto: valores (um ou vários com ;) nas N linhas acima e abaixo do endereço aberto. */
+/**
+ * Busca perto: valores (um ou vários com ;) nas N linhas acima e abaixo de cada endereço de partida.
+ * Na Memória o tipo é o da tela; na Busca dá para escolher.
+ */
 @Composable
-private fun NearSearch(engine: Engine, center: String, type: String, onError: (String) -> Unit) {
+private fun NearSearch(engine: Engine, centers: List<String>, initialType: String, chooseType: Boolean, onError: (String) -> Unit) {
     val s = Session
     val scope = rememberCoroutineScope()
     var values by remember { mutableStateOf("") }
     var radius by remember { mutableStateOf("100") }
-    var found by remember(center, type) { mutableStateOf<List<Hit>?>(null) }
+    var chosen by remember { mutableStateOf(initialType) }
+    val type = if (chooseType) chosen else initialType
+    var found by remember(centers, type) { mutableStateOf<List<Hit>?>(null) }
+    var working by remember { mutableStateOf(false) }
     var open by remember { mutableStateOf<String?>(null) }
     val size = TYPE_SIZES.getValue(type)
+    fun go(work: suspend () -> List<Hit>) = scope.launch {
+        working = true
+        runCatching { found = work() }.onFailure { onError(it.message ?: "Erro") }
+        working = false
+    }
     Panel {
-        Text("Buscar perto", style = MaterialTheme.typography.titleSmall)
+        Text(if (centers.size > 1) "Buscar perto de ${centers.size} endereços" else "Buscar perto", style = MaterialTheme.typography.titleSmall)
+        if (chooseType) TypeChips(chosen) { chosen = it }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
                 value = values, onValueChange = { values = it }, label = { Text("Valores (ex.: 50;75)") },
@@ -582,18 +604,16 @@ private fun NearSearch(engine: Engine, center: String, type: String, onError: (S
             )
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = {
-                scope.launch {
-                    runCatching { found = engine.searchNear(center, type, radius.toIntOrNull() ?: 100, values) }
-                        .onFailure { onError(it.message ?: "Erro") }
-                }
-            }, enabled = values.isNotBlank()) { Text("Buscar ${TYPE_NAMES[type]}") }
-            if (!found.isNullOrEmpty()) FilledTonalButton(onClick = {
-                // o valor mudou no jogo: digite o novo e a lista diminui
-                scope.launch { runCatching { found = engine.refineNear(found.orEmpty(), values) }.onFailure { onError(it.message ?: "Erro") } }
-            }, enabled = values.isNotBlank()) { Text("Refinar") }
+            Button(onClick = { go { engine.searchNear(centers, type, radius.toIntOrNull() ?: 100, values) } }, enabled = values.isNotBlank() && !working) {
+                Text("Buscar ${TYPE_NAMES[type]}")
+            }
+            // o valor mudou no jogo: digite o novo e a lista diminui
+            if (!found.isNullOrEmpty()) FilledTonalButton(onClick = { go { engine.refineNear(found.orEmpty(), values) } }, enabled = values.isNotBlank() && !working) {
+                Text("Refinar")
+            }
             if (found != null) TextButton(onClick = { found = null }) { Text("Limpar") }
         }
+        if (working) LinearProgressIndicator(Modifier.fillMaxWidth())
         found?.let { list ->
             Text(
                 when {
@@ -603,21 +623,25 @@ private fun NearSearch(engine: Engine, center: String, type: String, onError: (S
                 },
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            list.sortedBy { kotlin.math.abs(it.addr.toLong(16) - center.toLong(16)) }.take(50).forEach { hit ->
-                val delta = (hit.addr.toLong(16) - center.toLong(16) / size * size) / size
+            fun delta(h: Hit) = (h.addr.toLong(16) - h.base.toLong(16) / size * size) / size
+            list.sortedBy { kotlin.math.abs(delta(it)) }.take(50).forEach { hit ->
+                val d = delta(hit)
                 Column(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh)
                         .clickable { open = if (open == hit.addr) null else hit.addr }.padding(horizontal = 12.dp, vertical = 6.dp),
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(hit.addr, Modifier.weight(1f), fontFamily = FontFamily.Monospace, fontSize = 13.sp, maxLines = 1)
-                        Text("${if (delta > 0) "+" else ""}$delta linhas", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("  ${hit.value}", fontFamily = FontFamily.Monospace, fontSize = 14.sp, color = MaterialTheme.colorScheme.primary)
+                        Text(hit.value, fontFamily = FontFamily.Monospace, fontSize = 14.sp, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
+                    Text(
+                        "${if (d > 0) "+" else ""}$d linhas" + if (centers.size > 1) " de 0x${hit.base}" else "",
+                        fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
+                    )
                     if (open == hit.addr) {
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             TextButton(onClick = { engine.addSaved(listOf(hit.copy(region = "?"))); open = null }) { Text("Salvar") }
-                            TextButton(onClick = { s.view = hit.addr to type }) { Text("Ir para") }
+                            TextButton(onClick = { s.view = hit.addr to type; s.tab = TAB_MEMORY }) { Text("Ir para") }
                         }
                     }
                 }
