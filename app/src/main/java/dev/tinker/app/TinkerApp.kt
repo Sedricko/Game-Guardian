@@ -27,9 +27,12 @@ object Diag {
 
     fun init(c: Context) {
         file = File(c.filesDir, "tinker.log")
-        if (file.length() > 2_000_000) file.writeText(file.readText().takeLast(1_000_000))
-        lines.addAll(file.readLines().takeLast(500))
-        val version = c.packageManager.getPackageInfo(c.packageName, 0).versionName
+        // o registro nunca pode derrubar o app: numa instalação nova o arquivo ainda não existe
+        runCatching {
+            if (file.length() > 2_000_000) file.writeText(file.readText().takeLast(1_000_000))
+            if (file.exists()) lines.addAll(file.readLines().takeLast(500))
+        }
+        val version = runCatching { c.packageManager.getPackageInfo(c.packageName, 0).versionName }.getOrNull()
         add("Tinker $version iniciado · Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT}) · ${Build.MANUFACTURER} ${Build.MODEL} · ${Build.SUPPORTED_ABIS.joinToString()}")
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { t, e ->

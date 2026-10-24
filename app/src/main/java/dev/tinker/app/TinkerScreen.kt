@@ -104,18 +104,18 @@ fun TinkerPanel(engine: Engine, overlay: Boolean, onMinimize: () -> Unit = {}, o
                     picking = false
                     run { engine.attach(p) }
                 }
-                return@Column
-            }
-            PrimaryTabRow(selectedTabIndex = tab, containerColor = MaterialTheme.colorScheme.background) {
-                listOf("Busca", "Salvos", "Regiões", "Registro").forEachIndexed { i, title ->
-                    Tab(selected = tab == i, onClick = { tab = i }, text = { Text(title) })
+            } else {
+                PrimaryTabRow(selectedTabIndex = tab, containerColor = MaterialTheme.colorScheme.background) {
+                    listOf("Busca", "Salvos", "Regiões", "Registro").forEachIndexed { i, title ->
+                        Tab(selected = tab == i, onClick = { tab = i }, text = { Text(title) })
+                    }
                 }
-            }
-            when (tab) {
-                0 -> SearchTab(engine, run)
-                1 -> SavedTab(engine, run)
-                2 -> RegionsTab(engine) { error = it }
-                else -> LogTab(engine, overlay, onMinimize) { error = it }
+                when (tab) {
+                    0 -> SearchTab(engine, run)
+                    1 -> SavedTab(engine, run)
+                    2 -> RegionsTab(engine) { error = it }
+                    else -> LogTab(engine, overlay, onMinimize) { error = it }
+                }
             }
         }
     }
