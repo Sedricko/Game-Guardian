@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/uio.h>
+#include <sys/utsname.h>
 #include <unistd.h>
 
 static const struct { const char *name; int size, isfloat; } TYPES[] = {
@@ -342,6 +343,17 @@ int main(void) {
         a1[0] = a2[0] = a3[0] = 0;
         if (sscanf(line, "%31s %127s %127s %127s", cmd, a1, a2, a3) < 1) continue;
         if (!strcmp(cmd, "ps")) { cmd_ps(); continue; }
+        if (!strcmp(cmd, "info")) {
+            // para o relatório: confirma root, kernel, tamanho de página e SELinux
+            struct utsname u;
+            char se = '?';
+            FILE *f = fopen("/sys/fs/selinux/enforce", "r");
+            if (f) { se = (char)fgetc(f); fclose(f); }
+            uname(&u);
+            printf("ok uid=%d kernel=%s pagina=%ld selinux=%s\n", getuid(), u.release, sysconf(_SC_PAGESIZE),
+                   se == '1' ? "enforcing" : se == '0' ? "permissive" : "?");
+            continue;
+        }
         // buffer de falhas: por que um app (o jogo ou o Tinker) caiu
         if (!strcmp(cmd, "crashlog")) { run_logcat("-b crash -t 200"); continue; }
         if (!strcmp(cmd, "logs")) {

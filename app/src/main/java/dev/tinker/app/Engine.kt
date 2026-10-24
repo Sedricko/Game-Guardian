@@ -28,6 +28,8 @@ import java.io.IOException
 val TYPES = listOf("auto" to "Auto", "i32" to "Dword", "f32" to "Float", "i64" to "Qword", "f64" to "Double", "i16" to "Word", "i8" to "Byte")
 val TYPE_NAMES = TYPES.toMap()
 val TYPE_SIZES = mapOf("i8" to 1, "i16" to 2, "i32" to 4, "i64" to 8, "f32" to 4, "f64" to 8)
+val TABS = listOf("Busca", "Salvos", "Memória", "Registro", "Ajustes")
+const val TAB_MEMORY = 2
 val PANEL_SIZES = listOf(0.5f to "Metade", 0.85f to "Grande", 1f to "Tela cheia")
 
 val REGION_NAMES = mapOf(
@@ -38,7 +40,7 @@ val REGION_NAMES = mapOf(
 data class GameProcess(val pid: Int, val pkg: String, val label: String, val icon: ImageBitmap?)
 data class Hit(val addr: String, val type: String, val region: String, val value: String)
 data class Region(val code: String, val count: Long, val bytes: Long, val enabled: Boolean)
-data class SavedItem(val addr: String, val type: String, val region: String, val value: String, val frozen: Boolean = false)
+data class SavedItem(val addr: String, val type: String, val region: String, val value: String, val frozen: Boolean = false, val name: String = "")
 
 /** Estado da tela; fica fora da Activity para a janela flutuante e a Activity verem o mesmo. */
 object Session {
@@ -55,7 +57,8 @@ object Session {
     var panelSize by mutableIntStateOf(1)  // índice em PANEL_SIZES
     var peek by mutableStateOf(false)
     var autoPause by mutableStateOf(true)  // pausa o jogo durante busca/refino, para o valor não mudar no meio
-    var view by mutableStateOf<Pair<String, String>?>(null)  // visualizador de memória: endereço e tipo  // segurando o "olho": painel quase invisível
+    var view by mutableStateOf<Pair<String, String>?>(null)
+    var tab by mutableIntStateOf(0)  // índice em TABS  // visualizador de memória: endereço e tipo  // segurando o "olho": painel quase invisível
     val saved = mutableStateListOf<SavedItem>()
 }
 
@@ -68,6 +71,7 @@ class Engine private constructor(private val app: Context) {
 
     private var daemon: Daemon? = null
     private var closedPid = 0
+    private val freezeFailing = HashSet<String>()  // endereços congelados que estão falhando (avisa uma vez)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val savedFile = File(app.filesDir, "saved.json")
 
@@ -78,19 +82,23 @@ class Engine private constructor(private val app: Context) {
 
     private fun Daemon.send(command: String, quiet: Boolean = false): Daemon.Reply {
         if (!quiet) Diag.add("> $command")
+        val t0 = System.nanoTime()
         try {
             val r = call(command)
-            if (!quiet) Diag.add("< ok ${r.status}".trimEnd())
+            if (!quiet) Diag.add("< ok ${r.status}".trimEnd() + " (${(System.nanoTime() - t0) / 1_000_000} ms)")
             return r
         } catch (e: IOException) {
-            Diag.add("< erro: ${e.message} (comando: $command)")
+            Diag.add("< erro: ${e.message} (comando: $command, ${(System.nanoTime() - t0) / 1_000_000} ms)")
             throw e
         }
     }
 
     private suspend fun <T> call(work: (Daemon) -> T): T = withContext(Dispatchers.IO) {
         val d = daemon ?: try {
-            Daemon(app.applicationInfo.nativeLibraryDir + "/libtinkerd.so").also { daemon = it; Diag.add("Daemon iniciado com root") }
+            Daemon(app.applicationInfo.nativeLibraryDir + "/libtinkerd.so") { Diag.add("[daemon stderr] $it") }.also {
+                daemon = it
+                Diag.add("Daemon iniciado com root: ${runCatching { it.call("info").status }.getOrElse { "info indisponível (${it.message})" }}")
+            }
         } catch (e: IOException) {
             Diag.add("Falha ao iniciar o daemon: ${e.message}")
             throw e
@@ -246,6 +254,14 @@ class Engine private constructor(private val app: Context) {
             appendLine("Jogo: ${p?.let { "${it.label} (${it.pkg}, PID ${it.pid})${if (Session.paused) " · pausado" else ""}" } ?: "nenhum"}")
             appendLine("Regiões ativas: ${Session.regions.filter { it.enabled }.joinToString { it.code }.ifEmpty { "padrão" }}")
             appendLine("Salvos: ${Session.saved.size} (congelados: ${Session.saved.count { it.frozen }})")
+            val mem = android.app.ActivityManager.MemoryInfo().also { app.getSystemService(android.app.ActivityManager::class.java).getMemoryInfo(it) }
+            appendLine("Memória do aparelho: ${mem.availMem shr 20} MB livres de ${mem.totalMem shr 20} MB${if (mem.lowMemory) " (POUCA MEMÓRIA)" else ""}")
+            appendLine("Pausa automática: ${if (Session.autoPause) "ligada" else "desligada"}")
+            val log = Diag.export().lines()
+            val problems = log.filter { l -> PROBLEM_WORDS.any { l.contains(it, ignoreCase = true) } }
+            appendLine()
+            appendLine("=== Resumo de problemas (${problems.size}) ===")
+            appendLine(if (problems.isEmpty()) "Nenhum erro registrado." else problems.takeLast(20).joinToString("\n"))
             appendLine()
             appendLine("=== Registro do Tinker ===")
             appendLine(Diag.export())
@@ -342,6 +358,37 @@ class Engine private constructor(private val app: Context) {
         return msg
     }
 
+    fun rename(item: SavedItem, name: String) {
+        Diag.add("Salvo 0x${item.addr} renomeado para \"$name\"")
+        replace(item) { it.copy(name = name.trim()) }
+    }
+
+    /** Lista de salvos em JSON, para guardar ou passar para outra pessoa (base das tabelas de cheat). */
+    fun exportSaved(): String = JSONObject()
+        .put("tinker", 1)
+        .put("jogo", Session.process?.pkg ?: "")
+        .put("nome_do_jogo", Session.process?.label ?: "")
+        .put("itens", JSONArray().apply { Session.saved.forEach { put(it.toJson()) } })
+        .toString(2)
+
+    /** Aceita o formato do exportSaved ou só a lista. Devolve uma mensagem para a tela. */
+    fun importSaved(text: String): String {
+        val root = runCatching { JSONObject(text) }.getOrNull()
+        val a = root?.optJSONArray("itens") ?: runCatching { JSONArray(text) }.getOrNull()
+            ?: throw IllegalArgumentException("Isso não parece uma lista do Tinker (JSON).")
+        var added = 0
+        for (i in 0 until a.length()) {
+            val item = a.getJSONObject(i).toSaved()
+            if (Session.saved.none { it.addr == item.addr && it.type == item.type }) { Session.saved.add(item); added++ }
+        }
+        storeSaved()
+        val game = root?.optString("jogo").orEmpty()
+        val other = game.isNotEmpty() && Session.process != null && game != Session.process?.pkg
+        Diag.add("Importados $added de ${a.length()} salvos${if (game.isNotEmpty()) " (lista de $game)" else ""}")
+        return "$added de ${a.length()} importados." + if (other) " Atenção: a lista é de outro jogo ($game)." else
+            " Os endereços só valem se o jogo não reiniciou desde a exportação."
+    }
+
     fun setFrozen(items: List<SavedItem>, frozen: Boolean) {
         Diag.add("${if (frozen) "Congelados" else "Descongelados"} ${items.size} salvos")
         items.forEach { item -> replace(item) { it.copy(frozen = frozen) } }
@@ -369,10 +416,15 @@ class Engine private constructor(private val app: Context) {
             val frozen = Session.saved.filter { it.frozen }
             val d = daemon
             if (frozen.isEmpty() || d == null || !d.isAttached) continue
-            try {
-                frozen.forEach { d.send("write ${it.addr} ${it.type} ${it.value}", quiet = true) }
-            } catch (e: IOException) {
-                if (e.message == "o jogo fechou") gameClosed(d)
+            for (item in frozen) {
+                val key = item.addr + item.type
+                try {
+                    d.send("write ${item.addr} ${item.type} ${item.value}", quiet = true)
+                    if (freezeFailing.remove(key)) Diag.add("Congelamento voltou a funcionar em 0x${item.addr}")
+                } catch (e: IOException) {
+                    if (e.message == "o jogo fechou") { gameClosed(d); break }
+                    if (freezeFailing.add(key)) Diag.add("AVISO: congelamento falhou em 0x${item.addr} (${TYPE_NAMES[item.type]} = ${item.value}): ${e.message}")
+                }
             }
         }
     }
@@ -380,20 +432,27 @@ class Engine private constructor(private val app: Context) {
     private fun loadSaved() = runCatching {
         if (!savedFile.exists()) return@runCatching
         val a = JSONArray(savedFile.readText())
-        for (i in 0 until a.length()) {
-            val o = a.getJSONObject(i)
-            Session.saved.add(SavedItem(o.getString("addr"), o.getString("type"), o.getString("region"), o.getString("value")))
-        }
+        for (i in 0 until a.length()) Session.saved.add(a.getJSONObject(i).toSaved().copy(frozen = false))
     }
 
     private fun storeSaved() = runCatching {
         val a = JSONArray()
-        Session.saved.forEach { a.put(JSONObject().put("addr", it.addr).put("type", it.type).put("region", it.region).put("value", it.value)) }
+        Session.saved.forEach { a.put(it.toJson()) }
         savedFile.writeText(a.toString())
     }
 }
 
 private fun String.arg() = trim().ifBlank { "x" }
+
+private fun SavedItem.toJson() = JSONObject().put("addr", addr).put("type", type).put("region", region).put("value", value).put("name", name).put("frozen", frozen)
+
+private fun JSONObject.toSaved(): SavedItem {
+    val type = getString("type")
+    require(type in TYPE_SIZES) { "Tipo desconhecido na lista: $type" }
+    val addr = getString("addr").removePrefix("0x").lowercase()
+    require(addr.toLongOrNull(16) != null) { "Endereço inválido na lista: $addr" }
+    return SavedItem(addr, type, optString("region", "?"), optString("value", "?"), optBoolean("frozen", false), optString("name", ""))
+}
 
 private fun parseValues(values: String): List<Double> =
     values.split(';', ',', ' ').mapNotNull { it.trim().toDoubleOrNull() }
@@ -404,6 +463,8 @@ private fun matchesAny(value: String, type: String, wanted: List<Double>): Boole
     // float guardado nunca é exato: 1.1 digitado vira 1.10000002 na memória
     return wanted.any { w -> if (type.startsWith("f")) kotlin.math.abs(x - w) <= 1e-4 * maxOf(1.0, kotlin.math.abs(w)) else x == w }
 }
+
+private val PROBLEM_WORDS = listOf("erro", "falha", "aviso", "fechou", "exception")
 
 private val LOGCAT_PREFIX = Regex("""^\S+ \S+\s+\d+\s+\d+ """)
 

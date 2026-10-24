@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalMaterial3Api::class)
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 
 package dev.tinker.app
 
@@ -20,6 +20,8 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -44,7 +46,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -81,7 +83,6 @@ import kotlinx.coroutines.launch
 fun TinkerPanel(engine: Engine, overlay: Boolean, onMinimize: () -> Unit = {}, onOpenOverlay: () -> Unit = {}, onResize: () -> Unit = {}, onExit: () -> Unit = {}) {
     val s = Session
     val scope = rememberCoroutineScope()
-    var tab by remember { mutableIntStateOf(0) }
     var picking by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
@@ -105,7 +106,7 @@ fun TinkerPanel(engine: Engine, overlay: Boolean, onMinimize: () -> Unit = {}, o
 
     Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
         Column {
-            Header(overlay, onPick = { picking = true }, onMinimize = onMinimize, onOpenOverlay = onOpenOverlay, onResize = onResize, onExit = onExit, run = run)
+            Header(overlay, onPick = { picking = true }, onMinimize = onMinimize, onOpenOverlay = onOpenOverlay, onExit = onExit, run = run)
             error?.let { Banner(it) { error = null } }
             if (s.busy) LinearProgressIndicator(Modifier.fillMaxWidth()) else Box(Modifier.padding(top = 4.dp))
             if (picking) {
@@ -113,19 +114,16 @@ fun TinkerPanel(engine: Engine, overlay: Boolean, onMinimize: () -> Unit = {}, o
                     picking = false
                     run { engine.attach(p) }
                 }
-            } else if (s.view != null) {
-                MemoryView(engine, run)
             } else {
-                PrimaryTabRow(selectedTabIndex = tab, containerColor = MaterialTheme.colorScheme.background) {
-                    listOf("Busca", "Salvos", "Regiões", "Registro").forEachIndexed { i, title ->
-                        Tab(selected = tab == i, onClick = { tab = i }, text = { Text(title) })
-                    }
+                PrimaryScrollableTabRow(selectedTabIndex = s.tab, containerColor = MaterialTheme.colorScheme.background, edgePadding = 8.dp) {
+                    TABS.forEachIndexed { i, title -> Tab(selected = s.tab == i, onClick = { s.tab = i }, text = { Text(title, maxLines = 1) }) }
                 }
-                when (tab) {
+                when (s.tab) {
                     0 -> SearchTab(engine, run)
-                    1 -> SavedTab(engine, run)
-                    2 -> RegionsTab(engine) { error = it }
-                    else -> LogTab(engine, overlay, onMinimize) { error = it }
+                    1 -> SavedTab(engine, overlay, onMinimize, run)
+                    TAB_MEMORY -> MemoryView(engine, run)
+                    3 -> LogTab(engine, overlay, onMinimize) { error = it }
+                    else -> SettingsTab(engine, overlay, onResize, run) { error = it }
                 }
             }
         }
@@ -133,11 +131,10 @@ fun TinkerPanel(engine: Engine, overlay: Boolean, onMinimize: () -> Unit = {}, o
 }
 
 @Composable
-private fun Header(overlay: Boolean, onPick: () -> Unit, onMinimize: () -> Unit, onOpenOverlay: () -> Unit, onResize: () -> Unit, onExit: () -> Unit, run: (suspend () -> String) -> Unit) {
+private fun Header(overlay: Boolean, onPick: () -> Unit, onMinimize: () -> Unit, onOpenOverlay: () -> Unit, onExit: () -> Unit, run: (suspend () -> String) -> Unit) {
     val s = Session
     val engine = Engine.get(LocalContext.current)
     val p = s.process
-    var confirmKill by remember { mutableStateOf(false) }
     val small = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
     Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -160,7 +157,7 @@ private fun Header(overlay: Boolean, onPick: () -> Unit, onMinimize: () -> Unit,
             if (overlay) TextButton(onClick = onMinimize, contentPadding = small) { Text("Minimizar") }
             TextButton(onClick = onExit, contentPadding = small) { Text("Sair", color = MaterialTheme.colorScheme.error) }
         }
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             if (overlay) {
                 // como o olho do GameGuardian: segure para ver o jogo, solte para voltar
                 Box(
@@ -174,22 +171,8 @@ private fun Header(overlay: Boolean, onPick: () -> Unit, onMinimize: () -> Unit,
                 OutlinedButton(onClick = { run { if (s.paused) engine.resume() else engine.pause() } }, enabled = !s.busy, contentPadding = small) {
                     Text(if (s.paused) "Continuar" else "Pausar", maxLines = 1)
                 }
-                OutlinedButton(onClick = {
-                    if (confirmKill) run { engine.killGame() }
-                    confirmKill = !confirmKill
-                }, enabled = !s.busy, contentPadding = small) { Text(if (confirmKill) "Confirmar" else "Fechar jogo", maxLines = 1) }
             }
-            if (overlay) {
-                OutlinedButton(onClick = onResize, contentPadding = small) { Text("Tamanho: ${PANEL_SIZES[s.panelSize].second}", maxLines = 1) }
-            } else {
-                Button(onClick = onOpenOverlay, contentPadding = small) { Text("Menu flutuante", maxLines = 1) }
-            }
-        }
-        if (overlay) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Transparência", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-                Slider(value = s.alpha, onValueChange = { s.alpha = it }, valueRange = 0.35f..1f, modifier = Modifier.padding(start = 12.dp).weight(1f))
-            }
+            if (!overlay) Button(onClick = onOpenOverlay, contentPadding = small) { Text("Menu flutuante", maxLines = 1) }
         }
     }
 }
@@ -248,7 +231,7 @@ private fun InlineEditor(initial: String, label: String, onSave: (String) -> Uni
     var text by remember { mutableStateOf(initial) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         ValueField(text, label, { text = it })
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = { onSave(text) }, enabled = text.isNotBlank()) { Text("Salvar") }
             TextButton(onClick = onCancel) { Text("Cancelar") }
             extra()
@@ -298,11 +281,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                     ) { Text("Refinar") }
                 }
                 Text(s.status, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Pausar o jogo durante a busca", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                    Switch(checked = s.autoPause, onCheckedChange = { s.autoPause = it })
-                }
-                TextButton(onClick = { s.view = "0" to "i32" }, enabled = s.process != null) { Text("Ir para endereço…") }
+                TextButton(onClick = { s.view = null; s.tab = TAB_MEMORY }, enabled = s.process != null) { Text("Ir para endereço…") }
             }
         }
         val count = s.count ?: return@LazyColumn
@@ -324,7 +303,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
         }
         if (s.results.isNotEmpty()) {
             item {
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilledTonalButton(onClick = { engine.addSaved(targets); s.status = "${targets.size} salvos na lista." }) { Text("Salvar $label") }
                     FilledTonalButton(onClick = { engine.addSaved(targets, frozen = true); s.status = "${targets.size} congelados (veja Salvos)." }) { Text("Congelar $label") }
                     OutlinedButton(onClick = { editingAll = !editingAll }, enabled = !s.busy) { Text("Editar $label") }
@@ -356,7 +335,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                 if (open) {
                     InlineEditor(hit.value, "Novo valor", onSave = { v -> editing = null; run { engine.write(hit.addr, hit.type, v) } }, onCancel = { editing = null }) {
                         TextButton(onClick = { engine.addSaved(listOf(hit)); editing = null }) { Text("Salvar na lista") }
-                        TextButton(onClick = { s.view = hit.addr to hit.type; editing = null }) { Text("Ver próximos") }
+                        TextButton(onClick = { s.view = hit.addr to hit.type; s.tab = TAB_MEMORY; editing = null }) { Text("Ver próximos") }
                     }
                 }
             }
@@ -367,7 +346,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
 @Composable
 private fun ResultCard(
     value: String, addr: String, tag: String, onClick: () -> Unit,
-    checked: Boolean, onCheck: (Boolean) -> Unit,
+    checked: Boolean, onCheck: (Boolean) -> Unit, title: String = "",
     trailing: @Composable () -> Unit = {}, below: @Composable () -> Unit = {},
 ) {
     Card(
@@ -380,10 +359,11 @@ private fun ResultCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(checked = checked, onCheckedChange = onCheck)
                 Column(Modifier.weight(1f)) {
-                    Text(value, style = MaterialTheme.typography.titleMedium, fontFamily = FontFamily.Monospace)
-                    Text(addr, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (title.isNotBlank()) Text(title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(value, style = MaterialTheme.typography.titleMedium, fontFamily = FontFamily.Monospace, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(addr, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                 }
-                Text(tag, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                Text(tag, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, maxLines = 1, modifier = Modifier.padding(start = 8.dp))
                 trailing()
             }
             below()
@@ -392,8 +372,17 @@ private fun ResultCard(
 }
 
 @Composable
-private fun SavedTab(engine: Engine, run: (suspend () -> String) -> Unit) {
+private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, run: (suspend () -> String) -> Unit) {
     val s = Session
+    val context = LocalContext.current
+    var info by remember { mutableStateOf<String?>(null) }
+    fun import(text: String) {
+        info = runCatching { engine.importSaved(text) }.getOrElse { "Não importou: ${it.message}" }
+    }
+    // abrir arquivo só existe na tela principal: o painel flutuante não recebe resultado de outra tela
+    val openFile = if (!overlay) androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri -> uri?.let { u -> runCatching { context.contentResolver.openInputStream(u)!!.use { it.reader().readText() } }.onSuccess(::import).onFailure { info = "Não leu o arquivo: ${it.message}" } } } else null
     var editing by remember { mutableStateOf<String?>(null) }
     var editingMany by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf(setOf<String>()) }
@@ -408,6 +397,28 @@ private fun SavedTab(engine: Engine, run: (suspend () -> String) -> Unit) {
     val targets = chosen.ifEmpty { s.saved.toList() }
     val label = if (chosen.isEmpty()) "todos" else "${chosen.size}"
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                OutlinedButton(onClick = {
+                    val file = File(context.cacheDir, "reports").apply { mkdirs() }
+                        .let { File(it, "tinker-salvos-${System.currentTimeMillis() / 1000}.json") }.apply { writeText(engine.exportSaved()) }
+                    info = saveToDownloads(context, file, "application/json")?.let { "Salvo em Download/Tinker/${file.name}" } ?: "Lista pronta: ${file.name}"
+                    if (overlay) onMinimize()  // o seletor de apps abre atrás do painel
+                    shareFile(context, file, "application/json")
+                }, enabled = s.saved.isNotEmpty()) { Text("Exportar") }
+                OutlinedButton(onClick = {
+                    context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Lista do Tinker", engine.exportSaved()))
+                    info = "Lista copiada. Cole onde quiser."
+                }, enabled = s.saved.isNotEmpty()) { Text("Copiar lista") }
+                OutlinedButton(onClick = {
+                    val clip = context.getSystemService(ClipboardManager::class.java).primaryClip
+                    val text = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString()
+                    if (text.isNullOrBlank()) info = "A área de transferência está vazia." else import(text)
+                }) { Text("Colar lista") }
+                if (openFile != null) OutlinedButton(onClick = { openFile.launch(arrayOf("application/json", "text/plain", "*/*")) }) { Text("Abrir arquivo") }
+            }
+            info?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 4.dp)) }
+        }
         if (s.saved.isEmpty()) {
             item {
                 Text(
@@ -420,11 +431,11 @@ private fun SavedTab(engine: Engine, run: (suspend () -> String) -> Unit) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(checked = selected.containsAll(all), onCheckedChange = { selected = if (it) all else emptySet() })
-                Text("${s.saved.size} salvos · ${s.saved.count { it.frozen }} congelados", style = MaterialTheme.typography.titleMedium)
+                Text("${s.saved.size} salvos · ${s.saved.count { it.frozen }} congelados", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
         item {
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilledTonalButton(onClick = { engine.setFrozen(targets, true) }) { Text("Congelar $label") }
                 FilledTonalButton(onClick = { engine.setFrozen(targets, false) }) { Text("Descongelar $label") }
                 OutlinedButton(onClick = { editingMany = !editingMany }, enabled = !s.busy) { Text("Editar $label") }
@@ -445,7 +456,7 @@ private fun SavedTab(engine: Engine, run: (suspend () -> String) -> Unit) {
             ResultCard(
                 item.value, "0x${item.addr}", "${TYPE_NAMES[item.type]} · ${item.region}",
                 onClick = { editing = if (open) null else key },
-                checked = key in selected, onCheck = { selected = if (it) selected + key else selected - key },
+                checked = key in selected, onCheck = { selected = if (it) selected + key else selected - key }, title = item.name,
                 trailing = {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(start = 12.dp)) {
                         Switch(checked = item.frozen, onCheckedChange = { engine.setFrozen(listOf(item), it) })
@@ -456,13 +467,23 @@ private fun SavedTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                 if (open) {
                     InlineEditor(item.value, "Novo valor", onSave = { v -> editing = null; run { engine.setSaved(listOf(item), v) } }, onCancel = { editing = null }) {
                         TextButton(onClick = { engine.removeSaved(listOf(item)); editing = null }) { Text("Remover") }
-                        TextButton(onClick = { s.view = item.addr to item.type; editing = null }) { Text("Ver próximos") }
+                        TextButton(onClick = { s.view = item.addr to item.type; s.tab = TAB_MEMORY; editing = null }) { Text("Ver próximos") }
                     }
+                    NameEditor(item.name) { engine.rename(item, it) }
                     Text("Ler como outro tipo:", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     TypeChips(item.type) { t -> engine.changeType(item, t); editing = null }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun NameEditor(current: String, onSave: (String) -> Unit) {
+    var name by remember(current) { mutableStateOf(current) }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Nome (ex.: Ouro)") }, singleLine = true, modifier = Modifier.weight(1f))
+        TextButton(onClick = { onSave(name) }, enabled = name != current) { Text("Salvar nome") }
     }
 }
 
@@ -479,7 +500,7 @@ private fun TypeChips(current: String, onPick: (String) -> Unit) {
 @Composable
 private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
     val s = Session
-    val (center, type) = s.view ?: return
+    val (center, type) = s.view ?: ("0" to "i32")
     var shift by remember(center) { mutableIntStateOf(0) }
     var rows by remember { mutableStateOf(listOf<Hit>()) }
     var editing by remember { mutableStateOf<String?>(null) }
@@ -493,9 +514,11 @@ private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
         }
     }
     Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Memória", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-            TextButton(onClick = { s.view = null }) { Text("Voltar") }
+        if (center == "0") {
+            Text(
+                if (s.process == null) "Escolha o jogo primeiro." else "Digite um endereço ou use \"Ver próximos\" num resultado da Busca ou dos Salvos.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp),
+            )
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(
@@ -508,7 +531,7 @@ private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         if (center != "0") NearSearch(engine, center, type, onError = { error = it })
         if (center != "0") {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { shift-- }) { Text("▲ Anteriores") }
                 OutlinedButton(onClick = { shift++ }) { Text("▼ Seguintes") }
             }
@@ -521,9 +544,9 @@ private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
                         .background(if (here) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLow)
                         .clickable { editing = if (editing == row.addr) null else row.addr }.padding(horizontal = 12.dp, vertical = 6.dp),
                 ) {
-                    Row {
-                        Text(row.addr, Modifier.weight(1f), fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(row.value, fontFamily = FontFamily.Monospace, fontSize = 14.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(row.addr, Modifier.weight(1f), fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                        Text(row.value, fontFamily = FontFamily.Monospace, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     if (editing == row.addr) {
                         InlineEditor(row.value, "Novo valor (${TYPE_NAMES[type]})", onSave = { v -> editing = null; run { engine.write(row.addr, type, v) } }, onCancel = { editing = null }) {
@@ -558,7 +581,7 @@ private fun NearSearch(engine: Engine, center: String, type: String, onError: (S
                 singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f),
             )
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = {
                 scope.launch {
                     runCatching { found = engine.searchNear(center, type, radius.toIntOrNull() ?: 100, values) }
@@ -586,13 +609,13 @@ private fun NearSearch(engine: Engine, center: String, type: String, onError: (S
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh)
                         .clickable { open = if (open == hit.addr) null else hit.addr }.padding(horizontal = 12.dp, vertical = 6.dp),
                 ) {
-                    Row {
-                        Text(hit.addr, Modifier.weight(1f), fontFamily = FontFamily.Monospace, fontSize = 13.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(hit.addr, Modifier.weight(1f), fontFamily = FontFamily.Monospace, fontSize = 13.sp, maxLines = 1)
                         Text("${if (delta > 0) "+" else ""}$delta linhas", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text("  ${hit.value}", fontFamily = FontFamily.Monospace, fontSize = 14.sp, color = MaterialTheme.colorScheme.primary)
                     }
                     if (open == hit.addr) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             TextButton(onClick = { engine.addSaved(listOf(hit.copy(region = "?"))); open = null }) { Text("Salvar") }
                             TextButton(onClick = { s.view = hit.addr to type }) { Text("Ir para") }
                         }
@@ -604,18 +627,53 @@ private fun NearSearch(engine: Engine, center: String, type: String, onError: (S
 }
 
 @Composable
-private fun RegionsTab(engine: Engine, onError: (String) -> Unit) {
+private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, run: (suspend () -> String) -> Unit, onError: (String) -> Unit) {
     val s = Session
     val scope = rememberCoroutineScope()
+    var confirmKill by remember { mutableStateOf(false) }
     LaunchedEffect(s.process) {
         if (s.process != null) runCatching { s.regions = engine.regions() }.onFailure { onError(it.message ?: "Erro") }
     }
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
+            Panel {
+                Text("Busca", style = MaterialTheme.typography.titleSmall)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Pausar o jogo durante a busca e o refino", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                    Switch(checked = s.autoPause, onCheckedChange = { s.autoPause = it })
+                }
+            }
+        }
+        if (overlay) {
+            item {
+                Panel {
+                    Text("Painel flutuante", style = MaterialTheme.typography.titleSmall)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Tamanho: ${PANEL_SIZES[s.panelSize].second}", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                        OutlinedButton(onClick = onResize) { Text("Trocar") }
+                    }
+                    Text("Transparência", style = MaterialTheme.typography.bodyMedium)
+                    Slider(value = s.alpha, onValueChange = { s.alpha = it }, valueRange = 0.35f..1f)
+                }
+            }
+        }
+        if (s.process != null) {
+            item {
+                Panel {
+                    Text("Jogo", style = MaterialTheme.typography.titleSmall)
+                    OutlinedButton(onClick = {
+                        if (confirmKill) run { engine.killGame() }
+                        confirmKill = !confirmKill
+                    }, enabled = !s.busy) { Text(if (confirmKill) "Toque de novo para fechar o jogo" else "Fechar jogo", maxLines = 1) }
+                }
+            }
+        }
+        item {
+            Text("Regiões de memória", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
             Text(
                 if (s.process == null) "Escolha o jogo para ver as regiões de memória."
-                else "Regiões de memória do jogo. Marque onde a busca procura; menos regiões = busca mais rápida.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                else "Marque onde a busca procura; menos regiões = busca mais rápida.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         items(s.regions, key = { it.code }) { r ->
@@ -625,10 +683,10 @@ private fun RegionsTab(engine: Engine, onError: (String) -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(r.code, Modifier.width(40.dp), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                    Text(r.code, Modifier.width(40.dp), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, maxLines = 1)
                     Column(Modifier.weight(1f)) {
-                        Text(REGION_NAMES[r.code] ?: r.code, style = MaterialTheme.typography.bodyLarge)
-                        Text("${r.count} blocos · ${formatBytes(r.bytes)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(REGION_NAMES[r.code] ?: r.code, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("${r.count} blocos · ${formatBytes(r.bytes)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                     }
                     Checkbox(checked = r.enabled, onCheckedChange = { on ->
                         scope.launch { runCatching { s.regions = engine.setRegion(r.code, on) }.onFailure { onError(it.message ?: "Erro") } }
@@ -664,7 +722,7 @@ private fun LogTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, onE
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(vertical = 8.dp),
         )
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Button(onClick = {
                 fetch {
                     val file = engine.report()
@@ -697,12 +755,12 @@ private fun LogTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, onE
 }
 
 /** Cópia em Download/Tinker para achar no gerenciador de arquivos. Só Android 10+, onde não precisa de permissão. */
-private fun saveToDownloads(context: Context, file: File): Uri? {
+private fun saveToDownloads(context: Context, file: File, mime: String = "text/plain"): Uri? {
     if (Build.VERSION.SDK_INT < 29) return null
     return runCatching {
         val values = ContentValues().apply {
             put(MediaStore.Downloads.DISPLAY_NAME, file.name)
-            put(MediaStore.Downloads.MIME_TYPE, "text/plain")
+            put(MediaStore.Downloads.MIME_TYPE, mime)
             put(MediaStore.Downloads.RELATIVE_PATH, "Download/Tinker")
         }
         val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)!!
@@ -711,14 +769,14 @@ private fun saveToDownloads(context: Context, file: File): Uri? {
     }.onFailure { Diag.add("Não salvou em Downloads: ${it.message}") }.getOrNull()
 }
 
-private fun shareFile(context: Context, file: File) {
+private fun shareFile(context: Context, file: File, mime: String = "text/plain") {
     val uri = FileProvider.getUriForFile(context, context.packageName + ".files", file)
-    val send = Intent(Intent.ACTION_SEND).setType("text/plain")
+    val send = Intent(Intent.ACTION_SEND).setType(mime)
         .putExtra(Intent.EXTRA_STREAM, uri)
         .putExtra(Intent.EXTRA_SUBJECT, "Relatório do Tinker")
         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     send.clipData = ClipData.newRawUri(file.name, uri)
-    context.startActivity(Intent.createChooser(send, "Compartilhar relatório").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION))
+    context.startActivity(Intent.createChooser(send, "Compartilhar ${file.name}").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION))
 }
 
 @Composable

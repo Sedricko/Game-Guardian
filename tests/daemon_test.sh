@@ -12,6 +12,7 @@ read -r pid iaddr faddr < "$out/info"
 
 got=$("$out/tinkerd" <<CMDS
 search i32 1
+info
 attach $pid
 regions
 search i32 123456789
@@ -36,6 +37,7 @@ CMDS
 echo "$got"
 check() { grep -qE "$1" <<<"$got" || { echo "FALHOU: esperava uma linha com /$1/"; exit 1; }; }
 check "^err nenhum jogo escolhido$"
+check "^ok uid=[0-9]+ kernel=.+ pagina=[0-9]+ selinux="
 check "^(Ch|A) [0-9]+ [0-9]+ 1$"                # regions lista a região do malloc, marcada para busca
 check "^$iaddr i32 (Ch|A) 987654321$"           # write + refine + list
 check "^ok 987654321$"                          # read

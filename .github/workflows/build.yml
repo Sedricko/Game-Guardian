@@ -29,8 +29,14 @@ jobs:
           cache: gradle
 
       - name: Gera o APK
-        run: ./gradlew --no-daemon assembleDebug
+        run: ./gradlew --no-daemon assembleDebug assembleRelease
 
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tinker-apk
+          path: app/build/outputs/apk/release/app-release.apk
+
+      # versão de depuração, maior, só para investigar problemas da versão otimizada
       - uses: actions/upload-artifact@v7
         with:
           name: tinker-debug-apk
