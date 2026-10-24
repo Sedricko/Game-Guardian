@@ -1393,15 +1393,34 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
         item {
             Panel {
                 Text("Assistente (IA)", style = MaterialTheme.typography.titleSmall)
-                Text("O botão ✨ na Busca, na Ficha, na lista de classes e no Registro manda o que está na tela para o Claude e mostra a resposta: " +
-                    "onde está o valor, o que cada campo faz, o que deu errado. Precisa de internet e de uma chave da API (console.anthropic.com), " +
-                    "que é paga por uso. Nada é enviado sem você tocar em Perguntar.",
+                Text("O botão ✨ na Busca, na Ficha, na lista de classes e no Registro manda o que está na tela para a IA e mostra a resposta: " +
+                    "onde está o valor, o que cada campo faz, o que deu errado. Precisa de internet. Nada é enviado sem você tocar em Perguntar.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("claude" to "Claude", "gemini" to "Gemini").forEach { (id, label) ->
+                        FilterChip(selected = s.aiProvider == id, onClick = { s.aiProvider = id; engine.saveSettings() }, label = { Text(label) })
+                    }
+                }
+                val gemini = s.aiProvider == "gemini"
+                Text(
+                    if (gemini) "Chave grátis em aistudio.google.com (Get API key). No nível gratuito há limite por dia, e o Google pode usar o que for enviado para melhorar os modelos."
+                    else "Chave em console.anthropic.com (API Keys), paga por uso; a assinatura do claude.ai não vale aqui.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 OutlinedTextField(
-                    s.aiKey, { s.aiKey = it.trim(); engine.saveSettings() }, label = { Text("Chave da API (sk-ant-…)") }, singleLine = true,
+                    if (gemini) s.geminiKey else s.aiKey,
+                    { if (gemini) s.geminiKey = it.trim() else s.aiKey = it.trim(); engine.saveSettings() },
+                    label = { Text(if (gemini) "Chave do Gemini (AIza…)" else "Chave da API do Claude (sk-ant-…)") }, singleLine = true,
                     visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(),
                 )
-                if (s.aiKey.isNotBlank()) TextButton(onClick = { s.aiKey = ""; engine.saveSettings() }) { Text("Apagar chave") }
+                if (gemini) OutlinedTextField(
+                    s.geminiModel, { s.geminiModel = it.trim(); engine.saveSettings() }, label = { Text("Modelo do Gemini") }, singleLine = true,
+                    supportingText = { Text("Se o nome não existir mais, o Tinker troca sozinho pelo Flash mais novo.") }, modifier = Modifier.fillMaxWidth(),
+                )
+                if ((if (gemini) s.geminiKey else s.aiKey).isNotBlank()) TextButton(onClick = {
+                    if (gemini) s.geminiKey = "" else s.aiKey = ""
+                    engine.saveSettings()
+                }) { Text("Apagar chave") }
             }
         }
         item { HelpPanel() }
@@ -1464,9 +1483,9 @@ private val HELP = listOf(
         "Sem nenhum caminho? Aumente os níveis ou a distância, ou desligue \"Ponteiros só nas libs do jogo\" em Ajustes.",
     "O jogo fechou" to "Quando o jogo fecha sozinho (queda ou fechado pelo Android), o Tinker percebe em alguns segundos, abre o menu " +
         "flutuante e pergunta se quer reabrir. Reabrindo, ele se liga ao jogo e os salvos voltam sozinhos. O motivo da queda fica na aba Registro.",
-    "Assistente (IA)" to "Coloque a chave da API do Claude em Ajustes → Assistente (IA). Depois, toque em ✨: na Busca, qual resultado é o certo e o próximo passo; na lista de classes, pergunte onde " +
+    "Assistente (IA)" to "Em Ajustes → Assistente (IA), escolha Claude ou Gemini e coloque a chave (a do Gemini é grátis em aistudio.google.com). Depois, toque em ✨: na Busca, qual resultado é o certo e o próximo passo; na lista de classes, pergunte onde " +
         "está o valor (as classes citadas viram atalho para abrir); na ficha, o que cada campo faz; no Registro, o que deu errado. " +
-        "Só o que está na tela é enviado, e só quando você toca em Perguntar. Precisa de internet; cada pergunta é cobrada na sua conta da API.",
+        "Só o que está na tela é enviado, e só quando você toca em Perguntar. Precisa de internet; no Claude cada pergunta é cobrada; no Gemini gratuito há limite por dia.",
     "Reportar um problema" to "Na aba Registro, toque em Compartilhar relatório e envie o arquivo .txt. Ele tem tudo que é preciso para investigar.",
 )
 

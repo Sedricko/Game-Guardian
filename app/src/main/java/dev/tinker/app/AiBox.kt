@@ -45,8 +45,8 @@ fun AiBox(
     var loading by remember { mutableStateOf(false) }
     TextButton(onClick = { open = !open }) { Text((if (open) "▾ " else "▸ ") + "✨ $title") }
     if (!open) return
-    if (s.aiKey.isBlank()) {
-        Text("Coloque a chave da API do Claude em Ajustes → Assistente (IA) para usar.", style = MaterialTheme.typography.bodySmall,
+    if (!Assistant.ready()) {
+        Text("Coloque a chave do Claude ou do Gemini em Ajustes → Assistente (IA) para usar.", style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         return
     }

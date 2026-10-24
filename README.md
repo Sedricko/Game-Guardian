@@ -99,9 +99,10 @@ lidos da memória do jogo; nos outros, o tipo é adivinhado (inteiro, decimal, p
 (já entra ligado pelo offset) ou editar; num ponteiro, para abrir o objeto para onde ele aponta. Salvos dentro de um objeto IL2CPP
 ganham o nome do campo sozinhos. Na lista de endereços da aba Memória, o que muda também fica destacado.
 
-## Assistente de IA (Claude)
+## Assistente de IA (Claude ou Gemini)
 
-Em **Ajustes → Assistente (IA)**, coloque uma chave da API do Claude (console.anthropic.com; paga por uso). Os botões **✨**
+Em **Ajustes → Assistente (IA)**, escolha **Claude** (chave em console.anthropic.com, paga por uso) ou **Gemini** (chave grátis
+em aistudio.google.com, com limite por dia; se o modelo configurado sair de linha, o Tinker troca sozinho pelo Flash mais novo). Os botões **✨**
 mandam o que está na tela e mostram a resposta: na Busca, *qual desses é o valor certo?* e *qual o próximo passo?*; na lista de classes, *onde fica o ouro?* (as classes citadas viram atalho para
 abrir a ficha); na ficha, *o que cada campo faz?*; no Registro, *o que deu errado?*. Nada é enviado sem tocar em **Perguntar**.
 

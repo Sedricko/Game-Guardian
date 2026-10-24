@@ -140,6 +140,9 @@ object Session {
     val recipes = mutableStateListOf<Recipe>()
     var engine by mutableStateOf<GameEngine?>(null)
     var aiKey by mutableStateOf("")  // chave da API do Claude para o assistente; vazia = assistente desligado
+    var aiProvider by mutableStateOf("claude")  // "claude" ou "gemini"
+    var geminiKey by mutableStateOf("")
+    var geminiModel by mutableStateOf("gemini-2.5-flash")  // se sair de linha, o assistente troca sozinho pelo Flash mais novo
     val classes = mutableStateListOf<String>()  // classes IL2CPP abertas por nome neste jogo (atalhos)
     val history = mutableStateListOf<Recent>()  // últimas buscas, para repetir com um toque
     var pointerInfo by mutableStateOf("")
@@ -174,7 +177,8 @@ class Engine private constructor(private val app: Context) {
         prefs.edit().putBoolean("autoPause", Session.autoPause).putBoolean("findEncrypted", Session.findEncrypted)
             .putBoolean("autoPointers", Session.autoPointers).putBoolean("gameLibsOnly", Session.gameLibsOnly)
             .putBoolean("autoOverlay", Session.autoOverlay).putBoolean("ownKeypad", Session.ownKeypad).putFloat("alpha", Session.alpha).putInt("panelSize", Session.panelSize)
-            .putString("aiKey", Session.aiKey).apply()
+            .putString("aiKey", Session.aiKey).putString("aiProvider", Session.aiProvider).putString("geminiKey", Session.geminiKey)
+            .putString("geminiModel", Session.geminiModel).apply()
     }
 
     /** Pede a permissão de sobreposição sozinho só na primeira vez; recusou, o app abre normal nas próximas. */
@@ -188,6 +192,9 @@ class Engine private constructor(private val app: Context) {
         Session.autoOverlay = prefs.getBoolean("autoOverlay", true)
         Session.ownKeypad = prefs.getBoolean("ownKeypad", true)
         Session.aiKey = prefs.getString("aiKey", "").orEmpty()
+        Session.aiProvider = prefs.getString("aiProvider", "claude").orEmpty()
+        Session.geminiKey = prefs.getString("geminiKey", "").orEmpty()
+        Session.geminiModel = prefs.getString("geminiModel", Session.geminiModel).orEmpty().ifBlank { "gemini-2.5-flash" }
         Session.alpha = prefs.getFloat("alpha", Session.alpha)
         Session.panelSize = prefs.getInt("panelSize", Session.panelSize).coerceIn(0, PANEL_SIZES.lastIndex)
         loadSaved()
@@ -605,7 +612,7 @@ class Engine private constructor(private val app: Context) {
     /** Pergunta ao assistente com o contexto da tela; o registro guarda só a pergunta (o contexto pode ser grande). */
     suspend fun askAi(context: String, question: String): String = withContext(Dispatchers.IO) {
         Diag.add("Assistente: ${question.take(200)} (${context.length / 1024} KB de contexto)")
-        Assistant.ask(Session.aiKey, context, question)
+        Assistant.ask(context, question).also { saveSettings() }  // o Gemini pode ter trocado de modelo sozinho
     }
 
     private fun gameLine() = "Jogo: ${Session.process?.let { "${it.label} (${it.pkg})" } ?: "nenhum"} · motor ${Session.engine ?: "?"}"
