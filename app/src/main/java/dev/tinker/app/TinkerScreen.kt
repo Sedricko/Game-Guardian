@@ -1413,10 +1413,7 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                     label = { Text(if (gemini) "Chave do Gemini (AIza…)" else "Chave da API do Claude (sk-ant-…)") }, singleLine = true,
                     visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(),
                 )
-                if (gemini) OutlinedTextField(
-                    s.geminiModel, { s.geminiModel = it.trim(); engine.saveSettings() }, label = { Text("Modelo do Gemini") }, singleLine = true,
-                    supportingText = { Text("Se o nome não existir mais, o Tinker troca sozinho pelo Flash mais novo.") }, modifier = Modifier.fillMaxWidth(),
-                )
+                if (gemini) GeminiModels(engine)
                 if ((if (gemini) s.geminiKey else s.aiKey).isNotBlank()) TextButton(onClick = {
                     if (gemini) s.geminiKey = "" else s.aiKey = ""
                     engine.saveSettings()
@@ -1488,6 +1485,38 @@ private val HELP = listOf(
         "Só o que está na tela é enviado, e só quando você toca em Perguntar. Precisa de internet; no Claude cada pergunta é cobrada; no Gemini gratuito há limite por dia.",
     "Reportar um problema" to "Na aba Registro, toque em Compartilhar relatório e envie o arquivo .txt. Ele tem tudo que é preciso para investigar.",
 )
+
+/** Modelos do Gemini: ao colar a chave, pergunta ao Google quais ela pode usar e escolhe o melhor; dá para trocar tocando. */
+@Composable
+private fun GeminiModels(engine: Engine) {
+    val s = Session
+    val scope = rememberCoroutineScope()
+    var info by remember { mutableStateOf<String?>(null) }
+    var checking by remember { mutableStateOf(false) }
+    fun detect() {
+        if (checking || s.geminiKey.isBlank()) return
+        checking = true
+        info = "Vendo quais modelos a chave pode usar…"
+        scope.launch { info = runCatching { engine.detectGeminiModels() }.getOrElse { it.message }; checking = false }
+    }
+    // chave nova (colada ou digitada): espera parar de mudar e detecta sozinho
+    LaunchedEffect(s.geminiKey) {
+        if (s.geminiKey.length < 20) return@LaunchedEffect
+        delay(1200)
+        detect()
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Modelo: ${s.geminiModel}", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        OutlinedButton(onClick = ::detect, enabled = !checking && s.geminiKey.isNotBlank()) { Text("Detectar") }
+    }
+    if (checking) LinearProgressIndicator(Modifier.fillMaxWidth())
+    info?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
+    if (s.geminiModels.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        s.geminiModels.take(12).forEach { m ->
+            FilterChip(selected = m == s.geminiModel, onClick = { s.geminiModel = m; engine.saveSettings() }, label = { Text(m, maxLines = 1) })
+        }
+    }
+}
 
 /** Linha de ajuste: título, explicação curta e o interruptor. */
 @Composable

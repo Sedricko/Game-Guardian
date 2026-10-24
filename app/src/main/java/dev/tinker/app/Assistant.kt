@@ -77,7 +77,7 @@ Se o jogo for online e o servidor confere o valor, avise que editar não vai val
         return try {
             var (code, reply) = http("models/${Session.geminiModel.trim()}:generateContent", key, body)
             // modelo saiu de linha ou nome errado: escolhe sozinho o Flash mais novo da conta e tenta de novo
-            if (code == 404) newestFlash(key)?.let { m ->
+            if (code == 404) geminiModels(key).firstOrNull()?.let { m ->
                 Diag.add("Gemini: modelo ${Session.geminiModel} não existe mais, usando $m")
                 Session.geminiModel = m
                 http("models/$m:generateContent", key, body).let { code = it.first; reply = it.second }
@@ -98,16 +98,14 @@ Se o jogo for online e o servidor confere o valor, avise que editar não vai val
         }
     }
 
-    /** O "gemini-N-flash" de maior versão que a chave pode usar. */
-    private fun newestFlash(key: String): String? {
-        val (code, reply) = http("models?pageSize=1000", key, null)
-        if (code != 200) return null
-        val ms = runCatching { JSONObject(reply).optJSONArray("models") }.getOrNull() ?: return null
-        return (0 until ms.length()).map { ms.getJSONObject(it) }
+    /** Modelos Gemini que a chave pode usar para texto, o melhor primeiro (vazio: chave errada ou sem internet). */
+    fun geminiModels(key: String): List<String> {
+        val (code, reply) = runCatching { http("models?pageSize=1000", key, null) }.getOrNull() ?: return emptyList()
+        if (code != 200) return emptyList()
+        val ms = runCatching { JSONObject(reply).optJSONArray("models") }.getOrNull() ?: return emptyList()
+        return rankGemini((0 until ms.length()).map { ms.getJSONObject(it) }
             .filter { m -> m.optJSONArray("supportedGenerationMethods")?.let { a -> (0 until a.length()).any { a.getString(it) == "generateContent" } } == true }
-            .map { it.getString("name").removePrefix("models/") }
-            .mapNotNull { n -> Regex("""gemini-(\d+(?:\.\d+)?)-flash""").matchEntire(n)?.let { n to it.groupValues[1].toDouble() } }
-            .maxByOrNull { it.second }?.first
+            .map { it.getString("name").removePrefix("models/") })
     }
 
     private fun http(path: String, key: String, body: String?): Pair<Int, String> {
@@ -129,4 +127,21 @@ Se o jogo for online e o servidor confere o valor, avise que editar não vai val
             c.disconnect()
         }
     }
+}
+
+/**
+ * Ordem de escolha: estáveis antes de preview/experimental; Flash (rápido, com nível grátis) antes de Pro e de Lite;
+ * versão mais nova primeiro. Só modelos de texto "gemini-…" (fora imagem, áudio, embedding).
+ */
+internal fun rankGemini(names: List<String>): List<String> {
+    val skip = listOf("image", "tts", "audio", "live", "embedding", "vision", "robotics", "computer")
+    fun version(n: String) = Regex("""gemini-(\d+(?:\.\d+)?)""").find(n)?.groupValues?.get(1)?.toDoubleOrNull() ?: 0.0
+    fun tier(n: String) = when {
+        "-flash-lite" in n -> 2
+        "-flash" in n -> 0
+        "-pro" in n -> 1
+        else -> 3
+    }
+    return names.filter { n -> n.startsWith("gemini-") && skip.none { it in n } }.distinct()
+        .sortedWith(compareBy<String>({ n -> listOf("preview", "exp").any { it in n } }, ::tier, { -version(it) }, { it.length }))
 }

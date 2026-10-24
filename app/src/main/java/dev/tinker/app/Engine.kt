@@ -142,6 +142,7 @@ object Session {
     var aiKey by mutableStateOf("")  // chave da API do Claude para o assistente; vazia = assistente desligado
     var aiProvider by mutableStateOf("claude")  // "claude" ou "gemini"
     var geminiKey by mutableStateOf("")
+    var geminiModels by mutableStateOf(listOf<String>())  // os que a chave do Gemini pode usar, o melhor primeiro
     var geminiModel by mutableStateOf("gemini-2.5-flash")  // se sair de linha, o assistente troca sozinho pelo Flash mais novo
     val classes = mutableStateListOf<String>()  // classes IL2CPP abertas por nome neste jogo (atalhos)
     val history = mutableStateListOf<Recent>()  // últimas buscas, para repetir com um toque
@@ -613,6 +614,18 @@ class Engine private constructor(private val app: Context) {
     suspend fun askAi(context: String, question: String): String = withContext(Dispatchers.IO) {
         Diag.add("Assistente: ${question.take(200)} (${context.length / 1024} KB de contexto)")
         Assistant.ask(context, question).also { saveSettings() }  // o Gemini pode ter trocado de modelo sozinho
+    }
+
+    /** Pergunta ao Google quais modelos a chave pode usar; se o escolhido não está entre eles, troca pelo melhor. */
+    suspend fun detectGeminiModels(): String = withContext(Dispatchers.IO) {
+        val ms = Assistant.geminiModels(Session.geminiKey)
+        Session.geminiModels = ms
+        if (ms.isEmpty()) return@withContext "Não consegui ver os modelos: confira a chave e a internet."
+        val before = Session.geminiModel
+        if (before !in ms) Session.geminiModel = ms.first()
+        saveSettings()
+        Diag.add("Gemini: ${ms.size} modelos na chave; usando ${Session.geminiModel}")
+        if (before != Session.geminiModel) "Chave ok: ${ms.size} modelos. Escolhido ${Session.geminiModel}." else "Chave ok: ${ms.size} modelos. Mantido ${Session.geminiModel}."
     }
 
     private fun gameLine() = "Jogo: ${Session.process?.let { "${it.label} (${it.pkg})" } ?: "nenhum"} · motor ${Session.engine ?: "?"}"
