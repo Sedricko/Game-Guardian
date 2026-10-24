@@ -21,7 +21,11 @@ class MainActivity : ComponentActivity() {
         val engine = Engine.get(this)
         setContent {
             TinkerTheme {
-                Box(Modifier.fillMaxSize().safeDrawingPadding()) { TinkerPanel(engine, overlay = false, onOpenOverlay = ::openOverlay) }
+                Box(Modifier.fillMaxSize().safeDrawingPadding()) { TinkerPanel(engine, overlay = false, onOpenOverlay = ::openOverlay, onExit = {
+                    engine.shutdown()
+                    stopService(Intent(this@MainActivity, OverlayService::class.java))
+                    finishAndRemoveTask()
+                }) }
             }
         }
     }

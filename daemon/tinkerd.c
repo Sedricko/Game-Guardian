@@ -258,6 +258,26 @@ static void cmd_read(const char *addr, const char *tname) {
     printf("ok %s\n", out);
 }
 
+// Lê COUNT valores seguidos a partir de ADDR: o visualizador de memória ("endereços próximos").
+static void cmd_dump(const char *addr, const char *tname, const char *count) {
+    int t = find_type(tname);
+    if (t < 0) { printf("err tipo inválido: %s\n", tname); return; }
+    size_t n = strtoul(count, NULL, 10), sz = TYPES[t].size;
+    if (n < 1 || n > 512) n = 64;
+    uint64_t a = strtoull(addr, NULL, 16);
+    unsigned char *buf = malloc(n * sz);
+    int whole = !read_mem(a, buf, n * sz);  // falha se cruzar uma página sem mapa; aí lê um por um
+    char out[64];
+    for (size_t i = 0; i < n; i++) {
+        unsigned char *p = buf + i * sz;
+        if (whole || !read_mem(a + i * sz, p, sz)) format(t, p, out);
+        else strcpy(out, "?");
+        printf("%" PRIx64 " %s\n", a + i * sz, out);
+    }
+    free(buf);
+    puts("ok");
+}
+
 static void cmd_write(const char *addr, const char *tname, const char *value) {
     int t = find_type(tname);
     value_t v;
@@ -350,6 +370,7 @@ int main(void) {
         else if (!strcmp(cmd, "refine")) cmd_refine(a1);
         else if (!strcmp(cmd, "list")) cmd_list(strtoul(a1, NULL, 10));
         else if (!strcmp(cmd, "read")) cmd_read(a1, a2);
+        else if (!strcmp(cmd, "dump")) cmd_dump(a1, a2, a3);
         else if (!strcmp(cmd, "write")) cmd_write(a1, a2, a3);
         else if (!strcmp(cmd, "writeall")) cmd_writeall(a1);
         else if (!strcmp(cmd, "pause")) puts(kill(target, SIGSTOP) ? "err não pausou" : "ok");

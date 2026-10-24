@@ -27,6 +27,7 @@ import java.io.IOException
 
 val TYPES = listOf("auto" to "Auto", "i32" to "Dword", "f32" to "Float", "i64" to "Qword", "f64" to "Double", "i16" to "Word", "i8" to "Byte")
 val TYPE_NAMES = TYPES.toMap()
+val TYPE_SIZES = mapOf("i8" to 1, "i16" to 2, "i32" to 4, "i64" to 8, "f32" to 4, "f64" to 8)
 val PANEL_SIZES = listOf(0.5f to "Metade", 0.85f to "Grande", 1f to "Tela cheia")
 
 val REGION_NAMES = mapOf(
@@ -52,7 +53,8 @@ object Session {
     var paused by mutableStateOf(false)
     var alpha by mutableFloatStateOf(0.92f)
     var panelSize by mutableIntStateOf(1)  // índice em PANEL_SIZES
-    var peek by mutableStateOf(false)  // segurando o "olho": painel quase invisível
+    var peek by mutableStateOf(false)
+    var view by mutableStateOf<Pair<String, String>?>(null)  // visualizador de memória: endereço e tipo  // segurando o "olho": painel quase invisível
     val saved = mutableStateListOf<SavedItem>()
 }
 
@@ -114,6 +116,20 @@ class Engine private constructor(private val app: Context) {
         Diag.add("=== Últimas linhas do logcat do jogo ===")
         runCatching { dedupe(d.call("logs").lines).forEach(Diag::add) }
         Diag.add("=== Fim do relatório da queda ===")
+    }
+
+    /** Botão Sair: nunca deixa o jogo pausado e encerra o daemon root. */
+    fun shutdown() {
+        scope.launch {
+            if (Session.paused) runCatching { resume() }
+            daemon?.close()
+            daemon = null
+            Session.process = null
+            Session.count = null
+            Session.results = emptyList()
+            Session.status = "Escolha o jogo para começar."
+            Diag.add("Tinker encerrado pelo botão Sair")
+        }
     }
 
     suspend fun apps(): List<GameProcess> = call { d ->
@@ -233,6 +249,24 @@ class Engine private constructor(private val app: Context) {
     }
 
     // Lista de salvos
+
+    /** Valores vizinhos de addr (24 antes, 24 depois), lidos como type; shift anda em blocos de 48. */
+    suspend fun nearby(addr: String, type: String, shift: Int): List<Hit> = call { d ->
+        val size = TYPE_SIZES.getValue(type)
+        val center = addr.toLong(16) / size * size  // alinhado ao tipo
+        val start = (center + (shift * 48L - 24L) * size).coerceAtLeast(0)
+        d.send("dump ${start.toString(16)} $type 48", quiet = true).lines.map {
+            val (a, v) = it.split(" ", limit = 2)
+            Hit(a, type, "", v)
+        }
+    }
+
+    /** "Pegar Double e salvar em Float": muda o tipo de um salvo, mesmo endereço. */
+    fun changeType(item: SavedItem, type: String) {
+        if (Session.saved.any { it.addr == item.addr && it.type == type }) return
+        Diag.add("Salvo 0x${item.addr}: ${TYPE_NAMES[item.type]} → ${TYPE_NAMES[type]}")
+        replace(item) { it.copy(type = type, value = "?", frozen = false) }
+    }
 
     /** Salva vários de uma vez; com frozen=true já entram congelados no valor atual. */
     fun addSaved(hits: List<Hit>, frozen: Boolean = false) {

@@ -78,7 +78,7 @@ import kotlinx.coroutines.launch
  * diálogos nem bottom sheets (janelas extras não funcionam dentro de um overlay).
  */
 @Composable
-fun TinkerPanel(engine: Engine, overlay: Boolean, onMinimize: () -> Unit = {}, onOpenOverlay: () -> Unit = {}, onResize: () -> Unit = {}) {
+fun TinkerPanel(engine: Engine, overlay: Boolean, onMinimize: () -> Unit = {}, onOpenOverlay: () -> Unit = {}, onResize: () -> Unit = {}, onExit: () -> Unit = {}) {
     val s = Session
     val scope = rememberCoroutineScope()
     var tab by remember { mutableIntStateOf(0) }
@@ -105,7 +105,7 @@ fun TinkerPanel(engine: Engine, overlay: Boolean, onMinimize: () -> Unit = {}, o
 
     Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
         Column {
-            Header(overlay, onPick = { picking = true }, onMinimize = onMinimize, onOpenOverlay = onOpenOverlay, onResize = onResize, run = run)
+            Header(overlay, onPick = { picking = true }, onMinimize = onMinimize, onOpenOverlay = onOpenOverlay, onResize = onResize, onExit = onExit, run = run)
             error?.let { Banner(it) { error = null } }
             if (s.busy) LinearProgressIndicator(Modifier.fillMaxWidth()) else Box(Modifier.padding(top = 4.dp))
             if (picking) {
@@ -113,6 +113,8 @@ fun TinkerPanel(engine: Engine, overlay: Boolean, onMinimize: () -> Unit = {}, o
                     picking = false
                     run { engine.attach(p) }
                 }
+            } else if (s.view != null) {
+                MemoryView(engine, run)
             } else {
                 PrimaryTabRow(selectedTabIndex = tab, containerColor = MaterialTheme.colorScheme.background) {
                     listOf("Busca", "Salvos", "Regiões", "Registro").forEachIndexed { i, title ->
@@ -131,7 +133,7 @@ fun TinkerPanel(engine: Engine, overlay: Boolean, onMinimize: () -> Unit = {}, o
 }
 
 @Composable
-private fun Header(overlay: Boolean, onPick: () -> Unit, onMinimize: () -> Unit, onOpenOverlay: () -> Unit, onResize: () -> Unit, run: (suspend () -> String) -> Unit) {
+private fun Header(overlay: Boolean, onPick: () -> Unit, onMinimize: () -> Unit, onOpenOverlay: () -> Unit, onResize: () -> Unit, onExit: () -> Unit, run: (suspend () -> String) -> Unit) {
     val s = Session
     val engine = Engine.get(LocalContext.current)
     val p = s.process
@@ -180,6 +182,7 @@ private fun Header(overlay: Boolean, onPick: () -> Unit, onMinimize: () -> Unit,
             } else {
                 Button(onClick = onOpenOverlay, contentPadding = small) { Text("Menu flutuante") }
             }
+            TextButton(onClick = onExit, contentPadding = small) { Text("Sair", color = MaterialTheme.colorScheme.error) }
         }
     }
 }
@@ -288,6 +291,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                     ) { Text("Refinar") }
                 }
                 Text(s.status, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                TextButton(onClick = { s.view = "0" to "i32" }, enabled = s.process != null) { Text("Ir para endereço…") }
             }
         }
         val count = s.count ?: return@LazyColumn
@@ -341,6 +345,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                 if (open) {
                     InlineEditor(hit.value, "Novo valor", onSave = { v -> editing = null; run { engine.write(hit.addr, hit.type, v) } }, onCancel = { editing = null }) {
                         TextButton(onClick = { engine.addSaved(listOf(hit)); editing = null }) { Text("Salvar na lista") }
+                        TextButton(onClick = { s.view = hit.addr to hit.type; editing = null }) { Text("Ver próximos") }
                     }
                 }
             }
@@ -440,6 +445,78 @@ private fun SavedTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                 if (open) {
                     InlineEditor(item.value, "Novo valor", onSave = { v -> editing = null; run { engine.setSaved(listOf(item), v) } }, onCancel = { editing = null }) {
                         TextButton(onClick = { engine.removeSaved(listOf(item)); editing = null }) { Text("Remover") }
+                        TextButton(onClick = { s.view = item.addr to item.type; editing = null }) { Text("Ver próximos") }
+                    }
+                    Text("Ler como outro tipo:", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    TypeChips(item.type) { t -> engine.changeType(item, t); editing = null }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TypeChips(current: String, onPick: (String) -> Unit) {
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        TYPES.filter { it.first != "auto" }.forEach { (code, label) ->
+            FilterChip(selected = code == current, onClick = { onPick(code) }, label = { Text(label) })
+        }
+    }
+}
+
+/** Visualizador de memória: valores em volta de um endereço, no tipo escolhido, ao vivo. */
+@Composable
+private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
+    val s = Session
+    val (center, type) = s.view ?: return
+    var shift by remember(center) { mutableIntStateOf(0) }
+    var rows by remember { mutableStateOf(listOf<Hit>()) }
+    var editing by remember { mutableStateOf<String?>(null) }
+    var goTo by remember(center) { mutableStateOf(if (center == "0") "" else center) }
+    var error by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(center, type, shift) {
+        if (center == "0") return@LaunchedEffect
+        while (true) {
+            runCatching { rows = engine.nearby(center, type, shift); error = null }.onFailure { error = it.message }
+            delay(1000)
+        }
+    }
+    Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Memória", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+            TextButton(onClick = { s.view = null }) { Text("Voltar") }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+                value = goTo, onValueChange = { goTo = it.removePrefix("0x").trim() }, label = { Text("Endereço (hex)") },
+                singleLine = true, modifier = Modifier.weight(1f),
+            )
+            Button(onClick = { if (goTo.toLongOrNull(16) != null) s.view = goTo.lowercase() to type else error = "Endereço inválido: $goTo" }) { Text("Ir") }
+        }
+        TypeChips(type) { t -> s.view = center to t }
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        if (center != "0") {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { shift-- }) { Text("▲ Anteriores") }
+                OutlinedButton(onClick = { shift++ }) { Text("▼ Seguintes") }
+            }
+        }
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            items(rows, key = { it.addr }) { row ->
+                val here = row.addr.toLong(16) == center.toLong(16) / TYPE_SIZES.getValue(type) * TYPE_SIZES.getValue(type)
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                        .background(if (here) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLow)
+                        .clickable { editing = if (editing == row.addr) null else row.addr }.padding(horizontal = 12.dp, vertical = 6.dp),
+                ) {
+                    Row {
+                        Text(row.addr, Modifier.weight(1f), fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(row.value, fontFamily = FontFamily.Monospace, fontSize = 14.sp)
+                    }
+                    if (editing == row.addr) {
+                        InlineEditor(row.value, "Novo valor (${TYPE_NAMES[type]})", onSave = { v -> editing = null; run { engine.write(row.addr, type, v) } }, onCancel = { editing = null }) {
+                            TextButton(onClick = { engine.addSaved(listOf(row.copy(region = "?"))); editing = null }) { Text("Salvar") }
+                        }
                     }
                 }
             }

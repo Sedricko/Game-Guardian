@@ -15,6 +15,8 @@ class Daemon(path: String) {
         if (!hello.startsWith("ok tinkerd")) throw IOException("Daemon não respondeu: $hello")
     }
 
+    fun close() = process.destroy()
+
     var isAttached = false
         private set
 

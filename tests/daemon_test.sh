@@ -19,6 +19,7 @@ write $iaddr i32 987654321
 refine 987654321
 list 10
 read $iaddr i32
+dump $iaddr i32 3
 search f64,f32 3.5
 list 1000
 writeall 7.25
@@ -37,6 +38,8 @@ check "^err nenhum jogo escolhido$"
 check "^(Ch|A) [0-9]+ [0-9]+ 1$"                # regions lista a região do malloc, marcada para busca
 check "^$iaddr i32 (Ch|A) 987654321$"           # write + refine + list
 check "^ok 987654321$"                          # read
+check "^$iaddr 987654321$"                      # dump: primeiro valor
+check "^[0-9a-f]+ 555$"                         # dump: o vizinho seguinte
 check "^$faddr f32 (Ch|A) 3.5$"                 # auto acha o float
 check "^ok [1-9][0-9]* 0$"                      # writeall sem falhas
 check "^err valor inválido: 1.5$"               # 1.5 não é Dword
