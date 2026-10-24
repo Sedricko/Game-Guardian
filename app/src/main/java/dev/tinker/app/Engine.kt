@@ -238,6 +238,18 @@ class Engine private constructor(private val app: Context) {
      */
     suspend fun followGame(startDaemon: Boolean): String? {
         if (daemon == null && !startDaemon) return null
+        // o app e o menu flutuante chamam juntos ao abrir: um só escolhe o jogo (a restauração leva alguns segundos)
+        if (!following.compareAndSet(false, true)) return null
+        try {
+            return followOnce(startDaemon)
+        } finally {
+            following.set(false)
+        }
+    }
+
+    private val following = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    private suspend fun followOnce(startDaemon: Boolean): String? {
         val pkg = Session.process?.pkg ?: runCatching { lastGameFile.readText().trim() }.getOrNull()?.takeIf { it.isNotEmpty() } ?: return null
         val pid = call(start = startDaemon) { d ->
             d.send("ps", quiet = true).lines.firstNotNullOfOrNull { l -> l.substringBefore(' ').toIntOrNull()?.takeIf { l.substringAfter(' ') == pkg } }
@@ -478,19 +490,23 @@ class Engine private constructor(private val app: Context) {
         Session.saved.toList().sortedBy { it.anchor.isNotEmpty() }.forEach { old ->
             val item = Session.saved.firstOrNull { it.id == old.id } ?: return@forEach
             if (item.pid == pid) return@forEach  // mesmo processo: o endereço ainda vale
+            val why = mutableListOf<String>()  // por que não voltou: vai para o registro
             val how = when {
-                item.pointer.isNotEmpty() -> confirmPointer(item, pid)
-                item.anchor.isNotEmpty() -> "offset".takeIf { resolve(item).pid == pid }
+                item.pointer.isNotEmpty() -> confirmPointer(item, pid, why)
+                item.anchor.isNotEmpty() -> "offset".takeIf { resolve(item).pid == pid }.also { if (it == null) why += "o salvo que ele segue não voltou" }
                 else -> null
-            } ?: fromChains(item, pid) ?: (if (signature) fromSignature(item, pid) else null)
+            } ?: fromChains(item, pid, why) ?: (if (signature) fromSignature(item, pid, why) else null)
             when {
                 how != null -> back += "${label(item)} ($how)"
-                item.pid != 0 || item.chains.isNotEmpty() || item.sig.isNotEmpty() -> lost += label(item)
+                item.pid != 0 || item.chains.isNotEmpty() || item.sig.isNotEmpty() -> {
+                    lost += label(item)
+                    if (!retry) Diag.add("Não voltou: ${label(item)} (último valor ${item.value}): ${why.joinToString("; ").ifEmpty { "nada para seguir" }}")
+                }
             }
         }
         if (back.isEmpty() && (lost.isEmpty() || retry)) return ""  // nova tentativa sem novidade: não repete o aviso
         val msg = (if (back.isEmpty()) "" else "Voltaram sozinhos: ${back.joinToString()}. ") +
-            (if (lost.isEmpty()) "" else "Não achados (busque de novo): ${lost.joinToString()}.")
+            (if (lost.isEmpty()) "" else "Ainda não achados (o Tinker tenta de novo por 5 min; depois, busque de novo): ${lost.joinToString()}.")
         Diag.add("Restauração dos salvos: $msg")
         return msg.trim()
     }
@@ -519,11 +535,12 @@ class Engine private constructor(private val app: Context) {
     }
 
     /** Ponteiro em uso ao reabrir: segue; se ainda não estava confirmado, só vale se chegar no último valor (aí fica confirmado). */
-    private fun Daemon.confirmPointer(item: SavedItem, pid: Int): String? {
-        if (item.verified) return "ponteiro".takeIf { resolve(item).pid == pid }
-        val wanted = telling(item) ?: return null
-        val a = runCatching { send("resolve ${item.pointer}", quiet = true).status }.getOrNull() ?: return null
-        if (!matchesAny(runCatching { send("read $a ${item.type}", quiet = true).status }.getOrDefault("?"), item.type, wanted)) return null
+    private fun Daemon.confirmPointer(item: SavedItem, pid: Int, why: MutableList<String>): String? {
+        if (item.verified) return "ponteiro".takeIf { resolve(item).pid == pid }.also { if (it == null) why += "ponteiro confirmado não resolve agora" }
+        val wanted = telling(item) ?: return null.also { why += "último valor não serve para conferir" }
+        val a = runCatching { send("resolve ${item.pointer}", quiet = true).status }.getOrNull() ?: return null.also { why += "ponteiro escolhido não resolve agora" }
+        val v = runCatching { send("read $a ${item.type}", quiet = true).status }.getOrDefault("?")
+        if (!matchesAny(v, item.type, wanted)) return null.also { why += "ponteiro escolhido chega em 0x$a com valor $v" }
         if (moveTo(item, a, "Ponteiro").pid != pid) return null
         replace(item) { it.copy(verified = true) }
         Diag.add("Ponteiro de ${label(item)} confirmado ao reabrir o jogo: ${item.pointer}")
@@ -543,29 +560,52 @@ class Engine private constructor(private val app: Context) {
     }
 
     /** Caminhos guardados: fica quem chega no último valor conhecido; se todos chegam no mesmo endereço, usa o melhor. */
-    private fun Daemon.fromChains(item: SavedItem, pid: Int): String? {
+    /**
+     * Caminhos guardados. 1) Quem chega no último valor; se todos chegam no mesmo endereço, usa o melhor.
+     * 2) Consenso: o valor pode ter mudado com o jogo fechado (o jogo carregou outro save, o valor estava congelado);
+     *    se vários caminhos, de pelo menos duas bases diferentes, chegam no mesmo endereço e quase nenhum discorda, é ele.
+     */
+    private fun Daemon.fromChains(item: SavedItem, pid: Int, why: MutableList<String>): String? {
         if (item.chains.isEmpty()) return null
-        val wanted = telling(item) ?: return null
-        val kept = matching(item.chains, item.type) { matchesAny(it, item.type, wanted) }
-        if (kept.isEmpty() || kept.map { it.second }.distinct().size != 1) {
-            if (kept.isNotEmpty()) replace(item) { it.copy(chains = kept.map { k -> k.first }) }
-            return null
+        val at = item.chains.mapNotNull { c -> runCatching { send("resolve $c", quiet = true).status }.getOrNull()?.let { c to it } }
+        val wanted = telling(item)
+        if (wanted != null) {
+            val same = at.filter { (_, a) -> matchesAny(runCatching { send("read $a ${item.type}", quiet = true).status }.getOrDefault("?"), item.type, wanted) }
+            if (same.isNotEmpty() && same.map { it.second }.distinct().size == 1) {
+                usePointer(item, same.first().first)
+                if (Session.saved.firstOrNull { it.id == item.id }?.pid == pid) return "ponteiro"
+            }
+            if (same.size > 1) why += "${same.size} caminhos chegam no último valor, em ${same.map { it.second }.distinct().size} lugares"
         }
-        usePointer(item, kept.first().first)
-        return "ponteiro".takeIf { Session.saved.firstOrNull { it.id == item.id }?.pid == pid }
+        val groups = at.groupBy { it.second }.values.sortedByDescending { it.size }
+        val best = groups.firstOrNull().orEmpty()
+        val second = groups.getOrNull(1)?.size ?: 0
+        val bases = best.map { it.first.substringBefore(' ') }.distinct().size
+        if (best.size >= 3 && bases >= 2 && best.size >= 2 * second) {
+            val moved = moveTo(item, best.first().second, "Consenso")
+            if (moved.pid == pid) {
+                // ainda não confirmado: o próximo descarte (enquanto você joga) e a próxima abertura conferem
+                replace(item) { it.copy(pointer = best.first().first, verified = false) }
+                Diag.add("${label(item)} achado por consenso: ${best.size} caminhos de $bases bases chegam em 0x${moved.addr} (valor mudou com o jogo fechado)")
+                return "${best.size} caminhos concordam"
+            }
+        }
+        why += "caminhos: ${at.size} de ${item.chains.size} resolvem, maior grupo ${best.size} ($bases bases), segundo $second"
+        return null
     }
 
     /** Assinatura: procura os bytes em volta; vale se sobrar um lugar só (com o último valor, ou o único achado). */
-    private fun Daemon.fromSignature(item: SavedItem, pid: Int): String? {
-        if (!sigUseful(item.sig)) return null
+    private fun Daemon.fromSignature(item: SavedItem, pid: Int, why: MutableList<String>): String? {
+        if (!sigUseful(item.sig)) return null.also { why += "assinatura ainda aprendendo" }
         val r = runCatching { send("aobfind ${item.sig}", quiet = true) }.getOrNull() ?: return null
-        if (r.status.toLongOrNull() != r.lines.size.toLong()) return null  // mais de 50 lugares: a assinatura não identifica
+        // mais de 50 lugares: a assinatura não identifica
+        if (r.status.toLongOrNull() != r.lines.size.toLong()) return null.also { why += "assinatura em ${r.status} lugares" }
         val places = r.lines.map { (it.toLong(16) + item.sigOff).toString(16) }
         val wanted = telling(item)
         val same = if (wanted == null) emptyList() else places.filter { a ->
             matchesAny(runCatching { send("read $a ${item.type}", quiet = true).status }.getOrDefault("?"), item.type, wanted)
         }
-        val addr = same.singleOrNull() ?: places.singleOrNull() ?: return null
+        val addr = same.singleOrNull() ?: places.singleOrNull() ?: return null.also { why += "assinatura em ${places.size} lugares (${same.size} com o último valor)" }
         return "assinatura".takeIf { moveTo(item, addr, "Assinatura").pid == pid }
     }
 
