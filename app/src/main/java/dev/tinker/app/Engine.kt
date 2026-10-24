@@ -27,6 +27,7 @@ import java.io.IOException
 
 val TYPES = listOf("auto" to "Auto", "i32" to "Dword", "f32" to "Float", "i64" to "Qword", "f64" to "Double", "i16" to "Word", "i8" to "Byte")
 val TYPE_NAMES = TYPES.toMap()
+val PANEL_SIZES = listOf(0.5f to "Metade", 0.85f to "Grande", 1f to "Tela cheia")
 
 val REGION_NAMES = mapOf(
     "Jh" to "Java heap", "J" to "Java", "Ch" to "C++ heap", "Ca" to "C++ alloc", "Cd" to "C++ .data",
@@ -50,6 +51,7 @@ object Session {
     var busy by mutableStateOf(false)
     var paused by mutableStateOf(false)
     var alpha by mutableFloatStateOf(0.92f)
+    var panelSize by mutableIntStateOf(1)  // índice em PANEL_SIZES
     val saved = mutableStateListOf<SavedItem>()
 }
 
@@ -107,9 +109,9 @@ class Engine private constructor(private val app: Context) {
         Session.saved.replaceAll { it.copy(frozen = false) }
         Session.status = "O jogo fechou. Veja a aba Registro para o motivo."
         Diag.add("=== O jogo ${p.label} (PID ${p.pid}) fechou. Falhas registradas pelo Android: ===")
-        runCatching { d.call("crashlog").lines.forEach { Diag.add(it.removePrefix("| ")) } }
+        runCatching { dedupe(d.call("crashlog").lines).forEach(Diag::add) }
         Diag.add("=== Últimas linhas do logcat do jogo ===")
-        runCatching { d.call("logs").lines.forEach { Diag.add(it.removePrefix("| ")) } }
+        runCatching { dedupe(d.call("logs").lines).forEach(Diag::add) }
         Diag.add("=== Fim do relatório da queda ===")
     }
 
@@ -187,14 +189,44 @@ class Engine private constructor(private val app: Context) {
 
     suspend fun crashLog() = call { d ->
         Diag.add("=== Falhas registradas pelo Android (buffer crash) ===")
-        d.send("crashlog", quiet = true).lines.forEach { Diag.add(it.removePrefix("| ")) }
+        dedupe(d.send("crashlog", quiet = true).lines).forEach(Diag::add)
         Diag.add("=== Fim ===")
     }
 
     suspend fun gameLog() = call { d ->
         Diag.add("=== Logcat do jogo ===")
-        d.send("logs", quiet = true).lines.forEach { Diag.add(it.removePrefix("| ")) }
+        dedupe(d.send("logs", quiet = true).lines).forEach(Diag::add)
         Diag.add("=== Fim ===")
+    }
+
+    /** Relatório completo num .txt: aparelho, jogo, registro do Tinker, falhas e logcat do jogo. */
+    suspend fun report(): File = withContext(Dispatchers.IO) {
+        suspend fun section(title: String, cmd: String) = "=== $title ===\n" + runCatching {
+            dedupe(call { d -> d.send(cmd, quiet = true).lines }).joinToString("\n")
+        }.getOrElse { "(não foi possível ler: ${it.message})" }
+        val p = Session.process
+        val crash = section("Falhas registradas pelo Android (crash)", "crashlog")
+        val game = if (p != null) section("Logcat do jogo", "logs") else "=== Logcat do jogo ===\n(nenhum jogo escolhido)"
+        val text = buildString {
+            appendLine("=== Relatório do Tinker ===")
+            appendLine("Gerado em: ${java.text.SimpleDateFormat("dd/MM/yyyy HH:mm:ss", java.util.Locale.US).format(java.util.Date())}")
+            appendLine("App: Tinker ${runCatching { app.packageManager.getPackageInfo(app.packageName, 0).versionName }.getOrNull()}")
+            appendLine("Aparelho: ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} · Android ${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT}) · ${android.os.Build.SUPPORTED_ABIS.joinToString()}")
+            appendLine("Jogo: ${p?.let { "${it.label} (${it.pkg}, PID ${it.pid})${if (Session.paused) " · pausado" else ""}" } ?: "nenhum"}")
+            appendLine("Regiões ativas: ${Session.regions.filter { it.enabled }.joinToString { it.code }.ifEmpty { "padrão" }}")
+            appendLine("Salvos: ${Session.saved.size} (congelados: ${Session.saved.count { it.frozen }})")
+            appendLine()
+            appendLine("=== Registro do Tinker ===")
+            appendLine(Diag.export())
+            appendLine(crash)
+            appendLine()
+            appendLine(game)
+        }
+        val dir = File(app.cacheDir, "reports").apply { mkdirs() }
+        dir.listFiles()?.forEach { it.delete() }  // só o último relatório fica no cache
+        File(dir, "tinker-relatorio-${java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date())}.txt")
+            .apply { writeText(text) }
+            .also { Diag.add("Relatório gerado: ${it.name} (${it.length() / 1024} KB)") }
     }
 
     // Lista de salvos
@@ -266,6 +298,15 @@ class Engine private constructor(private val app: Context) {
 }
 
 private fun String.arg() = trim().ifBlank { "x" }
+
+private val LOGCAT_PREFIX = Regex("""^\S+ \S+\s+\d+\s+\d+ """)
+
+/** Tira o "| " do protocolo e corta linhas repetidas (ex.: o SDK de anúncios do jogo tentando conectar sem parar). */
+private fun dedupe(lines: List<String>): List<String> {
+    val seen = HashSet<String>()
+    val out = lines.map { it.removePrefix("| ") }.filter { seen.add(it.replace(LOGCAT_PREFIX, "")) }
+    return if (out.size < lines.size) out + "(${lines.size - out.size} linhas repetidas omitidas)" else out
+}
 
 private fun Drawable.toImageBitmap(): ImageBitmap {
     val bitmap = Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888)

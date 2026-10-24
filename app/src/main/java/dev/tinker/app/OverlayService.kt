@@ -46,6 +46,7 @@ class OverlayService : Service() {
     private val owner = OverlayOwner()
     private var bubble: ComposeView? = null
     private var panel: ComposeView? = null
+    private var panelParams: LayoutParams? = null
 
     private val bubbleParams = LayoutParams(
         LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT,
@@ -108,7 +109,7 @@ class OverlayService : Service() {
         bubble = null
         // focável para o teclado funcionar; NOT_TOUCH_MODAL deixa o toque fora do painel ir para o jogo
         val params = LayoutParams(
-            LayoutParams.MATCH_PARENT, (resources.displayMetrics.heightPixels * 0.72).toInt(),
+            LayoutParams.MATCH_PARENT, panelHeight(),
             LayoutParams.TYPE_APPLICATION_OVERLAY, LayoutParams.FLAG_NOT_TOUCH_MODAL, PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP
@@ -116,11 +117,22 @@ class OverlayService : Service() {
         }
         val view = compose {
             Box(Modifier.fillMaxSize().graphicsLayer { alpha = Session.alpha }.clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp))) {
-                TinkerPanel(Engine.get(this@OverlayService), overlay = true, onMinimize = ::closePanel)
+                TinkerPanel(Engine.get(this@OverlayService), overlay = true, onMinimize = ::closePanel, onResize = ::resizePanel)
             }
         }
         panel = view
+        panelParams = params
         wm.addView(view, params)
+    }
+
+    private fun panelHeight() = (resources.displayMetrics.heightPixels * PANEL_SIZES[Session.panelSize].first).toInt()
+
+    private fun resizePanel() {
+        Session.panelSize = (Session.panelSize + 1) % PANEL_SIZES.size
+        val view = panel ?: return
+        val params = panelParams ?: return
+        params.height = panelHeight()
+        wm.updateViewLayout(view, params)
     }
 
     private fun closePanel() {

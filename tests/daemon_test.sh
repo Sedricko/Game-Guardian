@@ -44,6 +44,11 @@ check "^err região inválida$"
 check "^err valor inválido: nada$"
 [ "$(grep -c '^ok$' <<<"$got")" -ge 6 ] || { echo "FALHOU: oks"; exit 1; }
 
+# Auto: um valor que também casa como Qword só pode aparecer uma vez, como Dword
+auto=$(printf 'attach %s\nsearch auto 555\nlist 10\n' "$pid" | "$out/tinkerd")
+echo "$auto"
+grep -qx "ok 1" <<<"$auto" && grep -qE " i32 (Ch|A) 555$" <<<"$auto" || { echo "FALHOU: Auto duplicou o endereço"; exit 1; }
+
 kill $tpid; wait $tpid 2>/dev/null || true
 dead=$(printf 'attach %s\n' "$pid" | "$out/tinkerd")
 grep -q "^err processo $pid não existe$" <<<"$dead" || { echo "FALHOU: jogo fechado"; exit 1; }

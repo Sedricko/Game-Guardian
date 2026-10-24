@@ -7,6 +7,8 @@ int main(void) {
     volatile int *i = malloc(4096);
     volatile float *f = malloc(4096);
     i[7] = 123456789;
+    i[8] = 555;  // endereço múltiplo de 8 com zero depois: casa também como Qword
+    i[9] = 0;
     f[3] = 3.5f;
     printf("%d %lx %lx\n", getpid(), (unsigned long)&i[7], (unsigned long)&f[3]);
     fflush(stdout);

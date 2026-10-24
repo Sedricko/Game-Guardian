@@ -176,7 +176,7 @@ static int set_ranges(const char *list) {
     return 1;
 }
 
-typedef struct { int types[NTYPES], ntypes; value_t v[NTYPES]; unsigned char *buf; } scan_t;
+typedef struct { int types[NTYPES], ntypes, step; value_t v[NTYPES]; unsigned char *buf; } scan_t;
 
 static void scan_region(uint64_t s, uint64_t e, int region, void *ctx) {
     scan_t *sc = ctx;
@@ -185,11 +185,14 @@ static void scan_region(uint64_t s, uint64_t e, int region, void *ctx) {
     for (uint64_t a = s; a < e; a += CHUNK) {
         size_t n = e - a < CHUNK ? e - a : CHUNK;
         if (read_mem(a, sc->buf, n)) continue;
-        for (int k = 0; k < sc->ntypes; k++) {
-            int t = sc->types[k], sz = TYPES[t].size;
-            for (size_t i = 0; i + sz <= n; i += sz)
-                if (matches(t, sc->buf + i, &sc->v[t])) push(a + i, t, region);
-        }
+        // um resultado por endereço: no Auto, Dword/Float ganham de Qword/Double,
+        // senão o Qword no mesmo lugar sobrescreveria os 4 bytes vizinhos ao editar
+        for (size_t i = 0; i + sc->step <= n; i += sc->step)
+            for (int k = 0; k < sc->ntypes; k++) {
+                int t = sc->types[k], sz = TYPES[t].size;
+                if (i % sz || i + sz > n) continue;
+                if (matches(t, sc->buf + i, &sc->v[t])) { push(a + i, t, region); break; }
+            }
     }
 }
 
@@ -205,6 +208,8 @@ static void cmd_search(const char *tname, const char *value) {
         if (parse_value(t, value, &sc.v[t])) sc.types[sc.ntypes++] = t;
     }
     if (!sc.ntypes) { printf("err valor inválido: %s\n", value); return; }
+    sc.step = 8;
+    for (int k = 0; k < sc.ntypes; k++) if (TYPES[sc.types[k]].size < sc.step) sc.step = TYPES[sc.types[k]].size;
     sc.buf = malloc(1 << 20);
     nres = 0;
     int r = each_region(scan_region, &sc);

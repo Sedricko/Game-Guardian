@@ -4,7 +4,14 @@ package dev.tinker.app
 
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ContentValues
+import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.MediaStore
+import androidx.core.content.FileProvider
+import java.io.File
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -69,7 +76,7 @@ import kotlinx.coroutines.launch
  * diálogos nem bottom sheets (janelas extras não funcionam dentro de um overlay).
  */
 @Composable
-fun TinkerPanel(engine: Engine, overlay: Boolean, onMinimize: () -> Unit = {}, onOpenOverlay: () -> Unit = {}) {
+fun TinkerPanel(engine: Engine, overlay: Boolean, onMinimize: () -> Unit = {}, onOpenOverlay: () -> Unit = {}, onResize: () -> Unit = {}) {
     val s = Session
     val scope = rememberCoroutineScope()
     var tab by remember { mutableIntStateOf(0) }
@@ -96,7 +103,7 @@ fun TinkerPanel(engine: Engine, overlay: Boolean, onMinimize: () -> Unit = {}, o
 
     Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
         Column {
-            Header(overlay, onPick = { picking = true }, onMinimize = onMinimize, onOpenOverlay = onOpenOverlay, run = run)
+            Header(overlay, onPick = { picking = true }, onMinimize = onMinimize, onOpenOverlay = onOpenOverlay, onResize = onResize, run = run)
             error?.let { Banner(it) { error = null } }
             if (s.busy) LinearProgressIndicator(Modifier.fillMaxWidth()) else Box(Modifier.padding(top = 4.dp))
             if (picking) {
@@ -122,45 +129,46 @@ fun TinkerPanel(engine: Engine, overlay: Boolean, onMinimize: () -> Unit = {}, o
 }
 
 @Composable
-private fun Header(overlay: Boolean, onPick: () -> Unit, onMinimize: () -> Unit, onOpenOverlay: () -> Unit, run: (suspend () -> String) -> Unit) {
+private fun Header(overlay: Boolean, onPick: () -> Unit, onMinimize: () -> Unit, onOpenOverlay: () -> Unit, onResize: () -> Unit, run: (suspend () -> String) -> Unit) {
     val s = Session
     val engine = Engine.get(LocalContext.current)
     val p = s.process
     var confirmKill by remember { mutableStateOf(false) }
-    Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    val small = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+    Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            AppIcon(p, 40)
-            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                Text(p?.label ?: "Tinker", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            AppIcon(p, 32)
+            Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
+                Text(p?.label ?: "Tinker", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
                     when {
                         p == null -> "Nenhum jogo escolhido"
                         s.paused -> "PID ${p.pid} · pausado"
                         else -> "PID ${p.pid}"
                     },
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.labelSmall,
                     color = if (s.paused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            FilledTonalButton(onClick = onPick, enabled = !s.busy) { Text(if (p == null) "Escolher jogo" else "Trocar") }
-            if (overlay) TextButton(onClick = onMinimize) { Text("Minimizar") }
+            FilledTonalButton(onClick = onPick, enabled = !s.busy, contentPadding = small) { Text(if (p == null) "Escolher jogo" else "Trocar") }
+            if (overlay) TextButton(onClick = onMinimize, contentPadding = small) { Text("Minimizar") }
         }
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
             if (p != null) {
-                OutlinedButton(onClick = { run { if (s.paused) engine.resume() else engine.pause() } }, enabled = !s.busy) {
-                    Text(if (s.paused) "Continuar jogo" else "Pausar jogo")
+                OutlinedButton(onClick = { run { if (s.paused) engine.resume() else engine.pause() } }, enabled = !s.busy, contentPadding = small) {
+                    Text(if (s.paused) "Continuar" else "Pausar")
                 }
                 OutlinedButton(onClick = {
                     if (confirmKill) run { engine.killGame() }
                     confirmKill = !confirmKill
-                }, enabled = !s.busy) { Text(if (confirmKill) "Confirmar: fechar" else "Fechar jogo") }
+                }, enabled = !s.busy, contentPadding = small) { Text(if (confirmKill) "Confirmar" else "Fechar jogo") }
             }
-            if (!overlay) Button(onClick = onOpenOverlay) { Text("Menu flutuante") }
-        }
-        if (overlay) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Transparência", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Slider(value = s.alpha, onValueChange = { s.alpha = it }, valueRange = 0.35f..1f, modifier = Modifier.padding(start = 12.dp).weight(1f))
+            if (overlay) {
+                OutlinedButton(onClick = onResize, contentPadding = small) { Text("Tamanho: ${PANEL_SIZES[s.panelSize].second}") }
+                Text("Transparência", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Slider(value = s.alpha, onValueChange = { s.alpha = it }, valueRange = 0.35f..1f, modifier = Modifier.width(140.dp))
+            } else {
+                Button(onClick = onOpenOverlay, contentPadding = small) { Text("Menu flutuante") }
             }
         }
     }
@@ -398,35 +406,76 @@ private fun formatBytes(b: Long) = when {
 private fun LogTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, onError: (String) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    fun fetch(work: suspend () -> Unit) = scope.launch { runCatching { work() }.onFailure { onError(it.message ?: "Erro") } }
+    var info by remember { mutableStateOf<String?>(null) }
+    var working by remember { mutableStateOf(false) }
+    fun fetch(work: suspend () -> Unit) = scope.launch {
+        working = true
+        runCatching { work() }.onFailure { onError(it.message ?: "Erro") }
+        working = false
+    }
     Column(Modifier.padding(horizontal = 16.dp)) {
         Text(
-            "Tudo que o Tinker faz fica registrado aqui. Se o jogo fechar, o motivo é anexado sozinho.",
+            "Tudo que o Tinker faz fica registrado. Se o jogo fechar, o motivo é anexado sozinho. " +
+                "O relatório junta registro, falhas do Android e logcat do jogo num arquivo .txt.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(vertical = 8.dp),
         )
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilledTonalButton(onClick = { fetch { engine.crashLog() } }) { Text("Falhas (crash)") }
-            FilledTonalButton(onClick = { fetch { engine.gameLog() } }, enabled = Session.process != null) { Text("Logcat do jogo") }
-            OutlinedButton(onClick = {
-                if (overlay) onMinimize()  // o seletor de apps abre atrás do painel
-                val send = Intent(Intent.ACTION_SEND).setType("text/plain")
-                    .putExtra(Intent.EXTRA_SUBJECT, "Registro do Tinker")
-                    .putExtra(Intent.EXTRA_TEXT, Diag.export())
-                context.startActivity(Intent.createChooser(send, "Compartilhar registro").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            }) { Text("Compartilhar") }
-            OutlinedButton(onClick = {
-                context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Registro do Tinker", Diag.export()))
-            }) { Text("Copiar") }
-            TextButton(onClick = { Diag.clear() }) { Text("Limpar") }
+            Button(onClick = {
+                fetch {
+                    val file = engine.report()
+                    info = saveToDownloads(context, file)?.let { "Salvo em Download/Tinker/${file.name}" } ?: "Relatório pronto: ${file.name}"
+                    if (overlay) onMinimize()  // o seletor de apps abre atrás do painel
+                    shareFile(context, file)
+                }
+            }, enabled = !working) { Text("Compartilhar relatório") }
+            FilledTonalButton(onClick = {
+                fetch {
+                    val text = engine.report().readText()
+                    // a área de transferência do Android aguenta ~1 MB; fica o final, que tem o mais recente
+                    val clip = if (text.length > 400_000) "(início cortado)\n" + text.takeLast(400_000) else text
+                    context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Relatório do Tinker", clip))
+                    info = "Relatório copiado (${clip.length / 1024} KB). Cole onde quiser."
+                }
+            }, enabled = !working) { Text("Copiar tudo") }
+            OutlinedButton(onClick = { fetch { engine.crashLog() } }, enabled = !working) { Text("Ver falhas") }
+            OutlinedButton(onClick = { fetch { engine.gameLog() } }, enabled = !working && Session.process != null) { Text("Ver logcat do jogo") }
+            TextButton(onClick = { Diag.clear(); info = null }) { Text("Limpar") }
         }
+        if (working) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
+        info?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp)) }
         LazyColumn(Modifier.padding(top = 8.dp), reverseLayout = true) {
             items(Diag.lines.asReversed()) { line ->
                 Text(line, fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
+}
+
+/** Cópia em Download/Tinker para achar no gerenciador de arquivos. Só Android 10+, onde não precisa de permissão. */
+private fun saveToDownloads(context: Context, file: File): Uri? {
+    if (Build.VERSION.SDK_INT < 29) return null
+    return runCatching {
+        val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, file.name)
+            put(MediaStore.Downloads.MIME_TYPE, "text/plain")
+            put(MediaStore.Downloads.RELATIVE_PATH, "Download/Tinker")
+        }
+        val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)!!
+        context.contentResolver.openOutputStream(uri)!!.use { out -> file.inputStream().use { it.copyTo(out) } }
+        uri
+    }.onFailure { Diag.add("Não salvou em Downloads: ${it.message}") }.getOrNull()
+}
+
+private fun shareFile(context: Context, file: File) {
+    val uri = FileProvider.getUriForFile(context, context.packageName + ".files", file)
+    val send = Intent(Intent.ACTION_SEND).setType("text/plain")
+        .putExtra(Intent.EXTRA_STREAM, uri)
+        .putExtra(Intent.EXTRA_SUBJECT, "Relatório do Tinker")
+        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    send.clipData = ClipData.newRawUri(file.name, uri)
+    context.startActivity(Intent.createChooser(send, "Compartilhar relatório").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION))
 }
 
 @Composable
