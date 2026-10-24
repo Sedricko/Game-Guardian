@@ -5,6 +5,11 @@ on:
   pull_request:
   workflow_dispatch:
 
+# um push novo cancela o build anterior do mesmo branch: senão um build velho que termina depois troca o APK da release
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   apk:
     runs-on: ubuntu-latest
