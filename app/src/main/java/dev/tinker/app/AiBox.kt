@@ -43,6 +43,7 @@ fun AiBox(
     var question by remember { mutableStateOf("") }
     var answer by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
+    var steps by remember { mutableStateOf(listOf<String>()) }
     TextButton(onClick = { open = !open }) { Text((if (open) "▾ " else "▸ ") + "✨ $title") }
     if (!open) return
     if (!Assistant.ready()) {
@@ -55,8 +56,9 @@ fun AiBox(
         question = q
         loading = true
         answer = null
+        steps = emptyList()
         scope.launch {
-            answer = runCatching { engine.askAi(context(), q) }.getOrElse { it.message ?: "Erro" }
+            answer = runCatching { engine.askAi(context(), q) { st -> steps = steps + st } }.getOrElse { it.message ?: "Erro" }
             loading = false
         }
     }
@@ -72,6 +74,8 @@ fun AiBox(
             LinearProgressIndicator(Modifier.fillMaxWidth())
             Text("Pensando… (pode levar até um minuto)", style = MaterialTheme.typography.bodySmall)
         }
+        // o que a IA olhou sozinha na memória (procurar classe, abrir objeto, buscar)
+        steps.takeLast(8).forEach { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         answer?.let { a ->
             SelectionContainer { Text(a, style = MaterialTheme.typography.bodyMedium) }
             // classes citadas pela IA viram atalho para abrir a ficha

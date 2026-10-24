@@ -610,11 +610,76 @@ class Engine private constructor(private val app: Context) {
 
     // Assistente de IA
 
-    /** Pergunta ao assistente com o contexto da tela; o registro guarda só a pergunta (o contexto pode ser grande). */
-    suspend fun askAi(context: String, question: String): String = withContext(Dispatchers.IO) {
-        Diag.add("Assistente: ${question.take(200)} (${context.length / 1024} KB de contexto)")
-        Assistant.ask(context, question).also { saveSettings() }  // o Gemini pode ter trocado de modelo sozinho
+    /**
+     * Pergunta ao assistente com o contexto da tela e as ferramentas (ele mesmo procura classes, abre objetos e busca valores).
+     * O registro guarda a pergunta, as ferramentas usadas e o começo da resposta (o contexto pode ser grande).
+     */
+    suspend fun askAi(context: String, question: String, onStep: (String) -> Unit = {}): String = withContext(Dispatchers.IO) {
+        Diag.add("Assistente (${Session.aiProvider}): ${question.take(200)} (${context.length / 1024} KB de contexto)")
+        val tools = if (Session.process != null) aiTools() else emptyList()
+        Assistant.ask(context, question, tools, onStep).also {
+            saveSettings()  // o Gemini pode ter trocado de modelo sozinho
+            Diag.add("Assistente respondeu: ${it.take(600).replace('\n', ' ')}")
+        }
     }
+
+    private var classCache: Pair<Int, List<GameClass>>? = null
+
+    private suspend fun gameClasses(): List<GameClass> =
+        classCache?.takeIf { it.first == currentPid }?.second ?: listClasses().also { classCache = currentPid to it }
+
+    /** Busca/refino feitos pela IA aparecem na aba Busca, como se fossem seus. */
+    private suspend fun resultsText(status: String): String {
+        val (count, hits) = list()
+        withContext(Dispatchers.Main) {
+            Session.count = count
+            Session.results = hits
+            Session.status = status
+        }
+        val names = if (count in 1..20) runCatching { il2Names(hits.map { it.addr }) }.getOrDefault(emptyMap()) else emptyMap()
+        return "$status\nResultados: ${count ?: 0}" + hits.take(30).joinToString("") { "\n0x${it.addr} ${it.type} ${it.region} = ${it.value}" + (names[it.addr]?.let { n -> " [$n]" } ?: "") }
+    }
+
+    private suspend fun objectText(center: String): String {
+        val c = il2cpp(center)
+        val rows = if (c != null) ficha(c.start, ((c.fields.maxOfOrNull { it.offset } ?: 0) + 8).coerceIn(16, 0x400), c, center)
+        else ficha((center.toLong(16) - 0x40).coerceAtLeast(0).toString(16), 0x80, null, center)
+        return (c?.let { "${it.name} em 0x${it.start}" } ?: "Sem classe IL2CPP em volta de 0x$center (tipos adivinhados)") +
+            rows.take(120).joinToString("") { "\n+${it.off.toString(16)} ${it.label} = ${it.value} (0x${it.addr})" }
+    }
+
+    /** O que a IA pode fazer sozinha: só olhar e buscar; editar e congelar ficam com você. */
+    private fun aiTools(): List<AiTool> = listOf(
+        AiTool("procurar_classes", "Procura classes IL2CPP do jogo cujo nome contém alguma das palavras (ex.: gold coin money). Devolve até 80, com o número de campos.",
+            mapOf("palavras" to "palavras separadas por espaço, em inglês como no código do jogo"), listOf("palavras")) { a ->
+            val words = a.optString("palavras").split(Regex("""[\s,;]+""")).filter { it.length >= 2 }
+            val all = gameClasses()
+            val hit = all.filter { c -> words.any { c.name.contains(it, ignoreCase = true) } }
+            "${hit.size} de ${all.size} classes" + hit.take(80).joinToString("") { "\n${it.name} (${it.fields} campos)" }
+        },
+        AiTool("abrir_classe", "Acha os objetos vivos de uma classe (ex.: PlayerData) e mostra cada campo com o valor de agora (até 3 objetos).",
+            mapOf("classe" to "nome da classe, com ou sem namespace"), listOf("classe")) { a ->
+            val objs = findObjects(a.optString("classe"))
+            if (objs.isEmpty()) "Nenhum objeto ${a.optString("classe")} agora (a classe pode não estar carregada nesta tela do jogo)."
+            else "${objs.size} objetos" + objs.take(3).mapIndexed { i, o ->
+                "\n--- objeto #${i + 1} (0x$o)\n" + objectText((o.toLong(16) + (Session.engine?.header ?: 0x10L)).toString(16))
+            }.joinToString("")
+        },
+        AiTool("ver_endereco", "Mostra a ficha em volta de um endereço (de um resultado da busca): classe e campos com valores.",
+            mapOf("endereco" to "endereço em hexadecimal, ex.: 7197b90978"), listOf("endereco")) { a ->
+            val addr = parseAddress(a.optString("endereco")) ?: return@AiTool "Endereço inválido."
+            objectText(addr)
+        },
+        AiTool("buscar_valor", "Nova busca na memória pelo valor que a pessoa vê no jogo. Substitui os resultados atuais.",
+            mapOf("valor" to "número, faixa (100~200) ou vários com ; (100;250)", "tipos" to "opcional: i32,f32,i64,f64 separados por vírgula; vazio = Auto"),
+            listOf("valor")) { a ->
+            val types = a.optString("tipos").split(',').map { it.trim() }.filter { it in TYPE_SIZES && !it.startsWith("x") }.toSet()
+            resultsText(search(types, a.optString("valor")))
+        },
+        AiTool("refinar", "Refina os resultados atuais pelo valor novo (depois que a pessoa mudou o valor no jogo).",
+            mapOf("valor" to "o valor de agora"), listOf("valor")) { a -> resultsText(refine(a.optString("valor"))) },
+        AiTool("ver_resultados", "Mostra os resultados atuais da busca, com o campo IL2CPP quando há até 20.", emptyMap(), emptyList()) { resultsText(Session.status) },
+    )
 
     /** Pergunta ao Google quais modelos a chave pode usar; se o escolhido não está entre eles, troca pelo melhor. */
     suspend fun detectGeminiModels(): String = withContext(Dispatchers.IO) {
@@ -633,8 +698,10 @@ class Engine private constructor(private val app: Context) {
     /** Classes do próprio jogo (sem as de bibliotecas como Unity e System), para a IA apontar onde está o valor. */
     fun classesContext(all: List<GameClass>): String {
         val game = all.filterNot { c -> LIBS.any { c.name.startsWith(it) } }
-        return gameLine() + "\nClasses do jogo (${game.size} de ${all.size}; as de bibliotecas ficaram de fora), com o número de campos:\n" +
-            game.joinToString("\n") { "${it.name} (${it.fields})" }
+        // com a ferramenta procurar_classes a IA acha o resto; mandar milhares de nomes a cada rodada estoura o limite do plano grátis
+        val shown = game.sortedByDescending { it.fields }.take(400)
+        return gameLine() + "\nO jogo tem ${all.size} classes, ${game.size} do próprio jogo. As ${shown.size} do jogo com mais campos " +
+            "(use procurar_classes para as outras):\n" + shown.joinToString("\n") { "${it.name} (${it.fields})" }
     }
 
     /** Ficha aberta: classe e cada campo com o valor de agora. */

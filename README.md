@@ -105,6 +105,9 @@ Em **Ajustes → Assistente (IA)**, escolha **Claude** (chave em console.anthrop
 em aistudio.google.com, com limite por dia; ao colar a chave, o Tinker pergunta ao Google quais modelos ela pode usar, escolhe o melhor e mostra os outros para trocar). Os botões **✨**
 mandam o que está na tela e mostram a resposta: na Busca, *qual desses é o valor certo?* e *qual o próximo passo?*; na lista de classes, *onde fica o ouro?* (as classes citadas viram atalho para
 abrir a ficha); na ficha, *o que cada campo faz?*; no Registro, *o que deu errado?*. Nada é enviado sem tocar em **Perguntar**.
+A IA também olha a memória sozinha: procura classes pelo nome, abre os objetos com os valores de agora, vê a ficha de um
+endereço e faz busca e refino (aparecem na aba Busca). Ela não edita nem congela: diz qual campo é e você decide. Cada
+ferramenta usada aparece embaixo da pergunta (🔧) e fica no Registro, junto com o começo da resposta.
 
 ## Motor do jogo
 

@@ -1482,7 +1482,8 @@ private val HELP = listOf(
         "flutuante e pergunta se quer reabrir. Reabrindo, ele se liga ao jogo e os salvos voltam sozinhos. O motivo da queda fica na aba Registro.",
     "Assistente (IA)" to "Em Ajustes → Assistente (IA), escolha Claude ou Gemini e coloque a chave (a do Gemini é grátis em aistudio.google.com). Depois, toque em ✨: na Busca, qual resultado é o certo e o próximo passo; na lista de classes, pergunte onde " +
         "está o valor (as classes citadas viram atalho para abrir); na ficha, o que cada campo faz; no Registro, o que deu errado. " +
-        "Só o que está na tela é enviado, e só quando você toca em Perguntar. Precisa de internet; no Claude cada pergunta é cobrada; no Gemini gratuito há limite por dia.",
+        "A IA também olha a memória sozinha (🔧): procura classes, abre objetos com os valores, busca e refina; ela não edita nada. " +
+        "Só o que está na tela e o que ela consulta é enviado, e só quando você toca em Perguntar. Precisa de internet; no Claude cada pergunta é cobrada; no Gemini gratuito há limite por dia.",
     "Reportar um problema" to "Na aba Registro, toque em Compartilhar relatório e envie o arquivo .txt. Ele tem tudo que é preciso para investigar.",
 )
 
