@@ -94,8 +94,13 @@ data class GameClass(val name: String, val fields: Int, val fieldNames: List<Str
  */
 internal fun classMatch(c: GameClass, words: List<String>): List<String>? {
     if (words.isEmpty()) return emptyList()
-    // por palavra do nome (camelCase, _ e .): "ring" acha Rings e m_ringCount, mas não String nem Recruiter
-    fun hit(name: String) = nameWords(name).any { w -> words.any { w.startsWith(it, ignoreCase = true) } }
+    // por palavra do nome (camelCase, _ e .): "ring" acha Rings e m_ringCount, mas não String nem Recruiter;
+    // "RunData" e "Cameras.CameraController" acham as palavras em sequência (antes davam 0 e a IA rodava em círculo)
+    val queries = words.flatMap { listOf(listOf(it.lowercase()), nameWords(it).map(String::lowercase)) }.filter { it.isNotEmpty() }.distinct()
+    fun hit(name: String): Boolean {
+        val ws = nameWords(name).map(String::lowercase)
+        return queries.any { q -> (0..ws.size - q.size).any { i -> q.indices.all { k -> if (k == q.lastIndex) ws[i + k].startsWith(q[k]) else ws[i + k] == q[k] } } }
+    }
     val fields = c.fieldNames.filter(::hit)
     return when {
         fields.isNotEmpty() -> fields.map { it.removePrefix("<").substringBefore(">k__BackingField") }
@@ -730,7 +735,7 @@ class Engine private constructor(private val app: Context) {
      * (o jogo carrega classes novas ao trocar de tela).
      */
     suspend fun listClasses(): List<GameClass> {
-        classCache?.takeIf { it.first == currentPid && System.currentTimeMillis() - it.second < 120_000 }?.let { return it.third }
+        classCache?.takeIf { it.first == currentPid && System.currentTimeMillis() - it.second < 600_000 }?.let { return it.third }
         return readClasses().also { classCache = Triple(currentPid, System.currentTimeMillis(), it) }
     }
 

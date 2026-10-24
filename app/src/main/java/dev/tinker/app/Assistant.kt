@@ -236,6 +236,12 @@ jogo abrir, use propor_receita com os salvos."""
         val before = contents.length()
         contents.put(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", prompt))))
         fun drop() { while (contents.length() > before) contents.remove(contents.length() - 1) }  // pergunta que falhou sai da conversa
+        // erro no meio do trabalho: guarda o que a IA já olhou (17 rodadas se perdiam num 503) e Continuar segue dali
+        fun fail(msg: String): String {
+            if (contents.length() <= before + 1) { drop(); return msg }
+            contents.put(JSONObject().put("role", "model").put("parts", JSONArray().put(JSONObject().put("text", "(fui interrompido por um erro do servidor; continuo daqui)"))))
+            return "$msg\n\nO que já fiz ficou guardado: toque em Continuar para seguir de onde parei."
+        }
         return try {
             repeat(rounds()) {
                 kotlin.coroutines.coroutineContext.ensureActive()
@@ -254,11 +260,16 @@ jogo abrir, use propor_receita com os salvos."""
                     body = body(false)
                     http("models/${Session.geminiModel.trim()}:generateContent", Session.geminiKey, body).let { code = it.first; reply = it.second }
                 }
-                // servidor cheio (503/500): é passageiro, tenta de novo duas vezes antes de mostrar erro
-                for (wait in listOf(3000L, 6000L)) {
+                // servidor cheio (503/500): é passageiro, espera cada vez mais antes de mostrar erro
+                for (wait in listOf(3000L, 6000L, 12_000L, 20_000L)) {
                     if (code != 503 && code != 500) break
                     kotlinx.coroutines.delay(wait)
                     http("models/${Session.geminiModel.trim()}:generateContent", Session.geminiKey, body).let { code = it.first; reply = it.second }
+                }
+                // ainda cheio: tenta este pedido num outro modelo da conta (o escolhido continua o mesmo)
+                if (code == 503 || code == 500) Session.geminiModels.firstOrNull { it != Session.geminiModel.trim() }?.let { m ->
+                    Diag.ai("Gemini: ${Session.geminiModel} cheio (código $code); tentando esta rodada com $m")
+                    http("models/$m:generateContent", Session.geminiKey, body).let { code = it.first; reply = it.second }
                 }
                 // modelo saiu de linha ou nome errado: escolhe sozinho o melhor da conta e tenta de novo
                 if (code == 404) geminiModels(Session.geminiKey).firstOrNull()?.let { m ->
@@ -271,25 +282,24 @@ jogo abrir, use propor_receita com os salvos."""
                 while (spare-- > 0 && keyProblem(code, reply) && nextGeminiKey("código $code")) {
                     http("models/${Session.geminiModel.trim()}:generateContent", Session.geminiKey, body).let { code = it.first; reply = it.second }
                 }
-                val j = runCatching { JSONObject(reply) }.getOrNull() ?: return "Gemini respondeu $code sem conteúdo.".also { drop(); Diag.ai("API Gemini: código $code sem JSON: ${reply.take(500)}") }
+                val j = runCatching { JSONObject(reply) }.getOrNull() ?: return fail("Gemini respondeu $code sem conteúdo.").also { Diag.ai("API Gemini: código $code sem JSON: ${reply.take(500)}") }
                 statRounds++
                 j.optJSONObject("usageMetadata")?.let { u -> statIn += u.optInt("promptTokenCount"); statOut += u.optInt("candidatesTokenCount") }
                 Diag.ai("API Gemini rodada ${it + 1} (${Session.geminiModel}): código $code, tokens ${j.optJSONObject("usageMetadata")?.let { u -> "entrada ${u.optInt("promptTokenCount")}, saída ${u.optInt("candidatesTokenCount")}" } ?: "?"}" +
                     (j.optJSONObject("error")?.let { e -> ", erro ${e.optString("status")}: ${e.optString("message").take(300)}" } ?: "") +
                     (j.optJSONArray("candidates")?.optJSONObject(0)?.optString("finishReason")?.let { f -> ", fim $f" } ?: ""))
                 j.optJSONObject("error")?.let { e ->
-                    drop()
-                    return when (code) {
+                    return fail(when (code) {
                         400, 401, 403 -> "Gemini recusou a chave ou o pedido: ${e.optString("message")}"
                         429 -> if ("quota" in e.optString("message").lowercase() || e.optString("status") == "RESOURCE_EXHAUSTED")
                             "A cota grátis do Gemini acabou em ${if (Session.geminiKeys.size > 1) "todas as ${Session.geminiKeys.size} chaves" else "a chave"} " +
                                 "(limite por dia ou por minuto). Espere (a diária volta à meia-noite do horário do Pacífico) ou adicione outra chave em Ajustes."
                         else "Limite do Gemini atingido (no gratuito há limite por minuto e por dia). Espere e tente de novo."
                         else -> "Gemini respondeu com erro $code: ${e.optString("message")}"
-                    }
+                    })
                 }
-                j.optJSONObject("promptFeedback")?.optString("blockReason")?.takeIf { it.isNotEmpty() }?.let { drop(); return "O Gemini não respondeu essa pergunta ($it)." }
-                val content = j.optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content") ?: return "Sem resposta.".also { drop() }
+                j.optJSONObject("promptFeedback")?.optString("blockReason")?.takeIf { it.isNotEmpty() }?.let { return fail("O Gemini não respondeu essa pergunta ($it).") }
+                val content = j.optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content") ?: return fail("Sem resposta.")
                 // a resposta volta inteira (com a assinatura do pensamento), senão o Gemini perde o fio
                 contents.put(content)
                 val parts = content.optJSONArray("parts") ?: JSONArray()
@@ -307,8 +317,7 @@ jogo abrir, use propor_receita com os salvos."""
             }
             "Parei depois de ${rounds()} consultas sem chegar a uma resposta. Tente uma pergunta mais específica."
         } catch (e: java.io.IOException) {
-            drop()
-            "Sem conexão com o Gemini: ${e.message}"
+            fail("Sem conexão com o Gemini: ${e.message}")
         }
     }
 

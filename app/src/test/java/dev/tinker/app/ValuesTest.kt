@@ -220,6 +220,12 @@ class ValuesTest {
         assertEquals(listOf("RingCount", "m_ringClip"), classMatch(GameClass("RunData", 3, listOf("<RingCount>k__BackingField", "m_ringClip", "m_titleString")), searchWords("ring")))
         assertEquals(null, classMatch(GameClass("AppInfo", 2, listOf("InfoString", "m_runnersRequired")), searchWords("ring")))  // String não é ring
         assertEquals(listOf("Player", "Data", "m", "ring", "Count", "UI"), nameWords("PlayerData.m_ringCount UI"))
+        // nome inteiro em camelCase ou com pacote: as palavras em sequência
+        assertEquals(emptyList<String>(), classMatch(GameClass("RunData", 3), searchWords("RunData")))
+        assertEquals(emptyList<String>(), classMatch(GameClass("SonicDash.Cameras.CameraController", 9), searchWords("CameraController")))
+        assertEquals(emptyList<String>(), classMatch(GameClass("SonicDash.UI.ResourceView", 9), searchWords("SonicDash.UI.ResourceView")))
+        assertEquals(null, classMatch(GameClass("DataRun", 3), searchWords("RunData")))  // fora de ordem não vale
+        assertEquals(listOf("FreeRedstarringsTotal"), classMatch(GameClass("Ev", 1, listOf("FreeRedstarringsTotal")), searchWords("RedStarRings")))
     }
 
     @Test
