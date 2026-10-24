@@ -44,6 +44,9 @@ No menu flutuante, segure **👁 Espiar** para ver o jogo através do painel.
 3. Faça o número mudar no jogo, digite o novo e toque em **Refinar**. Repita até sobrar 1 resultado.
 4. Toque no resultado para editar, ou marque e toque em **Congelar**.
 
+Em jogos Unity IL2CPP, com até 20 resultados cada um mostra o campo do jogo (`PlayerData.UpgradeStone`);
+**cópia temporária (Int32)** é o número que o jogo cria só para a tela — salve o campo de verdade.
+
 Dicas:
 - Número arredondado ou abreviado (1.2K)? Busque uma faixa: `1150~1250`.
 - Refinou errado e sobrou 0? **Desfazer**.

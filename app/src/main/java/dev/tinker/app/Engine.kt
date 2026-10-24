@@ -70,6 +70,12 @@ const val SIG_SIDE = 40L  // bytes de cada lado do valor na assinatura
 /** Distância máxima para dois salvos serem da mesma "ficha" do jogo (estrutura/objeto). */
 const val SAME_STRUCT = 4096L
 
+/** Números "embrulhados" do C#: o jogo cria para mostrar o valor e descarta; não são o dado de verdade. */
+val BOXED = setOf(
+    "System.Int32", "System.Int64", "System.Int16", "System.Byte", "System.SByte", "System.UInt32", "System.UInt64",
+    "System.UInt16", "System.Single", "System.Double", "System.Boolean", "System.String", "System.Decimal",
+)
+
 /** IL2CPP (Unity): classe de um objeto e os campos dele, lidos da memória do jogo. start = começo do objeto. */
 data class Il2Field(val offset: Int, val code: Int, val name: String)
 data class Il2Class(val name: String, val start: String, val fields: List<Il2Field>)
@@ -460,9 +466,22 @@ class Engine private constructor(private val app: Context) {
     /** Salvo novo dentro de um objeto IL2CPP: ganha o nome do campo (ex.: Player.hp) se ainda não tem nome. */
     private suspend fun nameFromIl2cpp(item: SavedItem) = call { d -> d.tagIl2(item) }
 
+    /** Nome do campo de um endereço ("PlayerData.UpgradeStone"), ou "cópia temporária (Int32)" quando é número solto do C#. */
+    suspend fun il2Names(addrs: List<String>): Map<String, String> = call { d ->
+        addrs.associateWith { a -> d.il2(a)?.let { c -> fieldLabel(c, a) }.orEmpty() }.filterValues { it.isNotEmpty() }
+    }
+
+    private fun fieldLabel(c: Il2Class, addr: String): String {
+        if (c.name in BOXED) return "cópia temporária (${c.name.substringAfterLast('.')})"
+        val off = addr.toLong(16) - c.start.toLong(16)
+        val f = c.fields.firstOrNull { it.offset.toLong() == off } ?: c.fields.lastOrNull { it.offset <= off && off < it.offset + 8 }
+        return "${c.name.substringAfterLast('.')}.${f?.name ?: "+0x" + off.toString(16)}"
+    }
+
     /** Marca o salvo com a classe e o offset IL2CPP (e o nome do campo, se ele não tem nome). */
     private fun Daemon.tagIl2(item: SavedItem) {
-        val c = il2(item.addr) ?: return
+        // número solto do C# (System.Int32...): é cópia que o jogo cria para mostrar na tela e joga fora; não volta pela classe
+        val c = il2(item.addr)?.takeIf { it.name !in BOXED } ?: return
         val off = item.addr.toLong(16) - c.start.toLong(16)
         val f = c.fields.firstOrNull { it.offset.toLong() == off } ?: c.fields.lastOrNull { it.offset <= off && off < it.offset + 8 } ?: return
         val name = "${c.name.substringAfterLast('.')}.${f.name}"

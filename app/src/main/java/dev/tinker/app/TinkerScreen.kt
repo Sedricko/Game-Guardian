@@ -335,6 +335,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
     var editingAll by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf(setOf<String>()) }
     var nearOpen by remember { mutableStateOf(false) }
+    var names by remember { mutableStateOf(mapOf<String, String>()) }
     val enabled = s.process != null && !s.busy
     // valores ao vivo, como no Cheat Engine: relê os resultados mostrados a cada segundo
     LaunchedEffect(Unit) {
@@ -434,6 +435,12 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                 }
             }
         }
+        // com poucos resultados, diz qual campo do jogo cada um é (IL2CPP): o dado de verdade x a cópia que aparece na tela
+        item {
+            LaunchedEffect(if (count <= 20) s.results.joinToString { it.addr } else "") {
+                names = if (count in 1..20) runCatching { engine.il2Names(s.results.map { it.addr }) }.getOrDefault(emptyMap()) else emptyMap()
+            }
+        }
         // normal colado num 🔒 com o mesmo número (até 32 bytes, a mesma estrutura do antitrapaça): é cópia ou isca; editar o 🔒
         val cipher = s.results.filter { it.type.startsWith("x") }.map { it.addr.toLong(16) to readable(it.value, it.type) }
         items(s.results, key = { it.addr + it.type }) { hit ->
@@ -445,7 +452,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
             ResultCard(
                 shown(hit.value, hit.type), "0x${hit.addr}" + if (copy) " · provável cópia: edite o 🔒" else "", "${TYPE_NAMES[hit.type]} · ${hit.region}",
                 onClick = { editing = if (open) null else key },
-                checked = key in selected, onCheck = { selected = if (it) selected + key else selected - key },
+                checked = key in selected, onCheck = { selected = if (it) selected + key else selected - key }, title = names[hit.addr].orEmpty(),
             ) {
                 if (open) {
                     InlineEditor(readable(hit.value, hit.type) ?: "", "Novo valor", onSave = { v -> editing = null; run { engine.write(hit.addr, hit.type, v) } }, onCancel = { editing = null }) {
@@ -1154,6 +1161,8 @@ private val HELP = listOf(
         "Marque dois salvos para ver a distância entre eles. Na aba Memória dá para ir a 7a0010+8.",
     "Busca por bytes (AOB)" to "Na aba Busca, abra Busca por bytes: digite pares hex com ?? como curinga (1F 20 ?? D5). Dados procura na memória " +
         "do jogo; Código procura nas instruções. Os lugares achados viram resultados normais.",
+    "Qual resultado salvar" to "Com até 20 resultados, em jogo Unity IL2CPP, cada um mostra o campo do jogo (ex.: PlayerData.UpgradeStone). " +
+        "\"Cópia temporária (Int32)\" é o número que o jogo cria só para mostrar na tela: editar não muda nada e some ao fechar. Salve o campo de verdade.",
     "Ficha do objeto" to "Num salvo, toque em Explorar ficha (ou na aba Memória, em Ficha do objeto): aparecem os campos em volta do valor, " +
         "com tipo e valor ao vivo; o que muda fica destacado. Em jogo Unity IL2CPP, com os nomes do próprio jogo (Player.hp); nos outros, " +
         "com o tipo adivinhado (inteiro, decimal, ponteiro, cifrado 🔒). Toque num campo para salvar ou editar; num ponteiro, para abrir o objeto. " +
