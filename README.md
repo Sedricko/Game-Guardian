@@ -99,6 +99,12 @@ lidos da memória do jogo; nos outros, o tipo é adivinhado (inteiro, decimal, p
 (já entra ligado pelo offset) ou editar; num ponteiro, para abrir o objeto para onde ele aponta. Salvos dentro de um objeto IL2CPP
 ganham o nome do campo sozinhos. Na lista de endereços da aba Memória, o que muda também fica destacado.
 
+## Assistente de IA (Claude)
+
+Em **Ajustes → Assistente (IA)**, coloque uma chave da API do Claude (console.anthropic.com; paga por uso). Os botões **✨**
+mandam o que está na tela e mostram a resposta: na lista de classes, *onde fica o ouro?* (as classes citadas viram atalho para
+abrir a ficha); na ficha, *o que cada campo faz?*; no Registro, *o que deu errado?*. Nada é enviado sem tocar em **Perguntar**.
+
 ## Motor do jogo
 
 Ao escolher o jogo, o Tinker reconhece o motor pelas bibliotecas do APK (Unity IL2CPP, Unity Mono, Unreal, Cocos, Godot,

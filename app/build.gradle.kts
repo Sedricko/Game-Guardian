@@ -10,8 +10,8 @@ android {
         applicationId = "dev.tinker.app"
         minSdk = 26
         targetSdk = 37
-        versionCode = 46
-        versionName = "2.1.3"
+        versionCode = 47
+        versionName = "2.2.0"
         ndk { abiFilters += "arm64-v8a" }
     }
     // chave fixa: sem ela cada build do CI assina diferente e o Android não deixa atualizar por cima
@@ -29,7 +29,7 @@ android {
             // APK menor: R8 tira código e recursos não usados
             isMinifyEnabled = true
             isShrinkResources = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.getByName("debug")
         }
     }
@@ -38,7 +38,11 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     // o daemon vai como lib*.so para ser extraído em nativeLibraryDir, onde o Android permite executar
-    packaging { jniLibs { useLegacyPackaging = true } }
+    packaging {
+        jniLibs { useLegacyPackaging = true }
+        // licenças repetidas nas bibliotecas do SDK do Claude (Jackson, OkHttp) quebram a montagem do APK
+        resources { excludes += setOf("META-INF/DEPENDENCIES", "META-INF/LICENSE*", "META-INF/NOTICE*", "META-INF/INDEX.LIST", "META-INF/*.md") }
+    }
     buildFeatures { compose = true }
 }
 
@@ -46,5 +50,6 @@ dependencies {
     implementation(platform("androidx.compose:compose-bom:2026.09.00"))
     implementation("androidx.compose.material3:material3")
     implementation("androidx.activity:activity-compose:1.13.0")
+    implementation("com.anthropic:anthropic-java:2.34.0")  // assistente de IA (Claude)
     testImplementation("junit:junit:4.13.2")
 }

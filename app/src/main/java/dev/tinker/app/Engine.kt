@@ -139,6 +139,7 @@ object Session {
     val saved = mutableStateListOf<SavedItem>()
     val recipes = mutableStateListOf<Recipe>()
     var engine by mutableStateOf<GameEngine?>(null)
+    var aiKey by mutableStateOf("")  // chave da API do Claude para o assistente; vazia = assistente desligado
     val classes = mutableStateListOf<String>()  // classes IL2CPP abertas por nome neste jogo (atalhos)
     val history = mutableStateListOf<Recent>()  // últimas buscas, para repetir com um toque
     var pointerInfo by mutableStateOf("")
@@ -172,7 +173,8 @@ class Engine private constructor(private val app: Context) {
     fun saveSettings() {
         prefs.edit().putBoolean("autoPause", Session.autoPause).putBoolean("findEncrypted", Session.findEncrypted)
             .putBoolean("autoPointers", Session.autoPointers).putBoolean("gameLibsOnly", Session.gameLibsOnly)
-            .putBoolean("autoOverlay", Session.autoOverlay).putBoolean("ownKeypad", Session.ownKeypad).putFloat("alpha", Session.alpha).putInt("panelSize", Session.panelSize).apply()
+            .putBoolean("autoOverlay", Session.autoOverlay).putBoolean("ownKeypad", Session.ownKeypad).putFloat("alpha", Session.alpha).putInt("panelSize", Session.panelSize)
+            .putString("aiKey", Session.aiKey).apply()
     }
 
     /** Pede a permissão de sobreposição sozinho só na primeira vez; recusou, o app abre normal nas próximas. */
@@ -185,6 +187,7 @@ class Engine private constructor(private val app: Context) {
         Session.gameLibsOnly = prefs.getBoolean("gameLibsOnly", true)
         Session.autoOverlay = prefs.getBoolean("autoOverlay", true)
         Session.ownKeypad = prefs.getBoolean("ownKeypad", true)
+        Session.aiKey = prefs.getString("aiKey", "").orEmpty()
         Session.alpha = prefs.getFloat("alpha", Session.alpha)
         Session.panelSize = prefs.getInt("panelSize", Session.panelSize).coerceIn(0, PANEL_SIZES.lastIndex)
         loadSaved()
@@ -596,6 +599,29 @@ class Engine private constructor(private val app: Context) {
         }.groupBy { it.name }.map { (_, same) -> same.maxBy { it.fields } }
             .sortedWith(compareBy<GameClass> { c -> LIBS.any { c.name.startsWith(it) } }.thenBy { it.name.substringAfterLast('.').lowercase() })
     }
+
+    // Assistente de IA
+
+    /** Pergunta ao assistente com o contexto da tela; o registro guarda só a pergunta (o contexto pode ser grande). */
+    suspend fun askAi(context: String, question: String): String = withContext(Dispatchers.IO) {
+        Diag.add("Assistente: ${question.take(200)} (${context.length / 1024} KB de contexto)")
+        Assistant.ask(Session.aiKey, context, question)
+    }
+
+    private fun gameLine() = "Jogo: ${Session.process?.let { "${it.label} (${it.pkg})" } ?: "nenhum"} · motor ${Session.engine ?: "?"}"
+
+    /** Classes do próprio jogo (sem as de bibliotecas como Unity e System), para a IA apontar onde está o valor. */
+    fun classesContext(all: List<GameClass>): String {
+        val game = all.filterNot { c -> LIBS.any { c.name.startsWith(it) } }
+        return gameLine() + "\nClasses do jogo (${game.size} de ${all.size}; as de bibliotecas ficaram de fora), com o número de campos:\n" +
+            game.joinToString("\n") { "${it.name} (${it.fields})" }
+    }
+
+    /** Ficha aberta: classe e cada campo com o valor de agora. */
+    fun fichaContext(c: Il2Class?, rows: List<FichaRow>): String =
+        gameLine() + "\nFicha ${c?.name ?: "(sem nome IL2CPP)"}:\n" + rows.joinToString("\n") { "+${it.off.toString(16)} ${it.label} = ${it.value}" }
+
+    suspend fun reportContext(): String = gameLine() + "\n" + report().readText()
 
     /** Objetos de uma classe IL2CPP pelo nome (PlayerData, ou Namespace.PlayerData); lê a memória toda, leva alguns segundos. */
     suspend fun findObjects(cls: String): List<String> = call { d ->

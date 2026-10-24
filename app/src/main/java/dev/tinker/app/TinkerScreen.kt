@@ -79,6 +79,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -1056,6 +1057,12 @@ private fun ClassOpener(engine: Engine) {
     }, enabled = s.process != null) { Text((if (listing) "▾ " else "▸ ") + "Ver todas as classes do jogo") }
     if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
     info?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    val names = remember(all) { all?.map { it.name }?.toSet() ?: emptySet() }
+    AiBox(
+        engine, "Perguntar à IA onde está o valor",
+        listOf("Onde fica o ouro ou a moeda?", "Quais classes guardam vida, gemas e recursos?", "Onde ficam os itens do inventário?"),
+        context = { engine.classesContext(all ?: engine.listClasses().also { all = it }) }, names = names, onOpen = { open(it) },
+    )
     val shownClasses = all?.takeIf { listing }?.filter { cls.isBlank() || it.name.contains(cls, ignoreCase = true) }
     if (shownClasses != null) {
         Column(Modifier.fillMaxWidth().heightIn(max = 320.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -1136,6 +1143,10 @@ private fun FichaBody(engine: Engine, center: String, run: (suspend () -> String
             else -> "Em volta de 0x$center · tipos adivinhados (o jogo não é IL2CPP, ou o valor não está num objeto)"
         },
         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    if (looked) AiBox(
+        engine, "Perguntar à IA sobre esta ficha", listOf("O que cada campo faz?", "Quais campos vale editar, e com que valor?"),
+        context = { engine.fichaContext(il2, rows) },
     )
     if (looked && c == null) {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1374,6 +1385,20 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                 }
             }
         }
+        item {
+            Panel {
+                Text("Assistente (IA)", style = MaterialTheme.typography.titleSmall)
+                Text("O botão ✨ na Ficha, na lista de classes e no Registro manda o que está na tela para o Claude e mostra a resposta: " +
+                    "onde está o valor, o que cada campo faz, o que deu errado. Precisa de internet e de uma chave da API (console.anthropic.com), " +
+                    "que é paga por uso. Nada é enviado sem você tocar em Perguntar.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedTextField(
+                    s.aiKey, { s.aiKey = it.trim(); engine.saveSettings() }, label = { Text("Chave da API (sk-ant-…)") }, singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(),
+                )
+                if (s.aiKey.isNotBlank()) TextButton(onClick = { s.aiKey = ""; engine.saveSettings() }) { Text("Apagar chave") }
+            }
+        }
         item { HelpPanel() }
     }
 }
@@ -1434,6 +1459,9 @@ private val HELP = listOf(
         "Sem nenhum caminho? Aumente os níveis ou a distância, ou desligue \"Ponteiros só nas libs do jogo\" em Ajustes.",
     "O jogo fechou" to "Quando o jogo fecha sozinho (queda ou fechado pelo Android), o Tinker percebe em alguns segundos, abre o menu " +
         "flutuante e pergunta se quer reabrir. Reabrindo, ele se liga ao jogo e os salvos voltam sozinhos. O motivo da queda fica na aba Registro.",
+    "Assistente (IA)" to "Coloque a chave da API do Claude em Ajustes → Assistente (IA). Depois, toque em ✨: na lista de classes, pergunte onde " +
+        "está o valor (as classes citadas viram atalho para abrir); na ficha, o que cada campo faz; no Registro, o que deu errado. " +
+        "Só o que está na tela é enviado, e só quando você toca em Perguntar. Precisa de internet; cada pergunta é cobrada na sua conta da API.",
     "Reportar um problema" to "Na aba Registro, toque em Compartilhar relatório e envie o arquivo .txt. Ele tem tudo que é preciso para investigar.",
 )
 
@@ -1515,6 +1543,11 @@ private fun LogTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, onE
                 TextButton(onClick = { confirmClear = false }) { Text("Cancelar") }
             } else OutlinedButton(onClick = { confirmClear = true }) { Text("Limpar registro") }
         }
+        AiBox(
+            engine, "Analisar o registro com IA",
+            listOf("O que aconteceu? Tem algum problema?", "Por que a busca não achou o valor?", "Que melhoria o Tinker precisa com base nisso?"),
+            context = { engine.reportContext() },
+        )
         if (working) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
         info?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp)) }
         LazyColumn(Modifier.padding(top = 8.dp), reverseLayout = true) {
