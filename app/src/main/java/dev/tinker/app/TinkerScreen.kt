@@ -415,12 +415,14 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                 }
             }
         }
-        // mesmo número normal e cifrado: o normal costuma ser cópia (ou isca do antitrapaça); editar o 🔒
-        val cipher = s.results.filter { it.type.startsWith("x") }.mapNotNull { readable(it.value, it.type) }.toSet()
+        // normal colado num 🔒 com o mesmo número (até 32 bytes, a mesma estrutura do antitrapaça): é cópia ou isca; editar o 🔒
+        val cipher = s.results.filter { it.type.startsWith("x") }.map { it.addr.toLong(16) to readable(it.value, it.type) }
         items(s.results, key = { it.addr + it.type }) { hit ->
             val key = hit.addr + hit.type
             val open = editing == key
-            val copy = !hit.type.startsWith("x") && readable(hit.value, hit.type) in cipher
+            val copy = !hit.type.startsWith("x") && readable(hit.value, hit.type).let { v ->
+                cipher.any { (a, cv) -> cv == v && kotlin.math.abs(a - hit.addr.toLong(16)) <= 32 }
+            }
             ResultCard(
                 shown(hit.value, hit.type), "0x${hit.addr}" + if (copy) " · provável cópia: edite o 🔒" else "", "${TYPE_NAMES[hit.type]} · ${hit.region}",
                 onClick = { editing = if (open) null else key },
@@ -505,7 +507,7 @@ private fun PointerPanel(engine: Engine, item: SavedItem, run: (suspend () -> St
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(0.6f))
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilledTonalButton(onClick = { run { engine.scanPointers(item, maxOff.toIntOrNull() ?: 4096, levels.toIntOrNull() ?: 4) } }, enabled = !s.busy && s.process != null) {
+            FilledTonalButton(onClick = { run { engine.scanPointers(item, maxOff.toIntOrNull() ?: 4096, levels.toIntOrNull() ?: 4) } }, enabled = !s.busy && s.process != null && !engine.stale(item)) {
                 Text(if (item.chains.isEmpty()) "Buscar ponteiros" else "Buscar de novo")
             }
         }

@@ -141,8 +141,9 @@ class Engine private constructor(private val app: Context) {
         }
     }
 
-    private suspend fun <T> call(work: (Daemon) -> T): T = withContext(Dispatchers.IO) {
-        val d = daemon ?: try {
+    private suspend fun <T> call(start: Boolean = true, work: (Daemon) -> T): T = withContext(Dispatchers.IO) {
+        // laços de fundo nunca abrem um su novo: o usuário pode ter acabado de tocar em Sair
+        val d = daemon ?: if (!start) throw IOException("daemon parado") else try {
             Daemon(app.applicationInfo.nativeLibraryDir + "/libtinkerd.so") { Diag.add("[daemon stderr] $it") }.also {
                 daemon = it
                 Diag.add("Daemon iniciado com root: ${runCatching { it.call("info").status }.getOrElse { "info indisponível (${it.message})" }}")
@@ -191,8 +192,10 @@ class Engine private constructor(private val app: Context) {
         val json = JSONObject(c.inputStream.bufferedReader().use { it.readText() })
         val latest = json.getString("tag_name").removePrefix("v")
         val mine = app.packageManager.getPackageInfo(app.packageName, 0).versionName.orEmpty()
-        val apk = json.optJSONArray("assets")?.optJSONObject(0)?.optString("browser_download_url").orEmpty().ifEmpty { json.getString("html_url") }
-        if (newer(latest, mine)) {
+        val assets = json.optJSONArray("assets")
+        val apk = (0 until (assets?.length() ?: 0)).map { assets!!.getJSONObject(it).optString("browser_download_url") }
+            .firstOrNull { it.endsWith(".apk") } ?: json.getString("html_url")
+        if (mine.isNotEmpty() && newer(latest, mine)) {
             Session.update = latest to apk
             Diag.add("Versão nova disponível: $latest (instalada: $mine)")
         }
@@ -236,7 +239,7 @@ class Engine private constructor(private val app: Context) {
     suspend fun followGame(startDaemon: Boolean): String? {
         if (daemon == null && !startDaemon) return null
         val pkg = Session.process?.pkg ?: runCatching { lastGameFile.readText().trim() }.getOrNull()?.takeIf { it.isNotEmpty() } ?: return null
-        val pid = call { d ->
+        val pid = call(start = startDaemon) { d ->
             d.send("ps", quiet = true).lines.firstNotNullOfOrNull { l -> l.substringBefore(' ').toIntOrNull()?.takeIf { l.substringAfter(' ') == pkg } }
         } ?: return null
         if (pid == Session.process?.pid) return null
@@ -363,6 +366,8 @@ class Engine private constructor(private val app: Context) {
 
     /** Procura caminhos de ponteiro até o salvo, como o "Pointer scan" do Cheat Engine; ficam guardados nele. */
     suspend fun scanPointers(item: SavedItem, maxOff: Int = 4096, levels: Int = 4): String = call { d ->
+        // endereço de outra vez do jogo: buscaria lixo e jogaria fora os caminhos de reserva bons
+        if (stale(Session.saved.firstOrNull { it.id == item.id } ?: item)) return@call "Esse salvo é de outra vez do jogo: ache o valor de novo antes de buscar ponteiros."
         val r = d.frozenGame { d.send("pointers ${item.addr} $maxOff $levels ${if (Session.gameLibsOnly) 1 else 0}") }
         val limited = r.status.split(" ").getOrNull(1) == "1"
         val chains = r.lines.take(MAX_CHAINS)
@@ -382,12 +387,12 @@ class Engine private constructor(private val app: Context) {
         val wanted = parseValues(values)
         val before = item.chains.size
         val kept = d.matching(item.chains, item.type) { matchesAny(it, item.type, wanted) }
-        replace(item) { it.copy(chains = kept.map { it.first }) }
+        if (kept.isNotEmpty()) replace(item) { it.copy(chains = kept.map { k -> k.first }) }  // valor errado não apaga as reservas
         Diag.add("Ponteiros de ${label(item)} filtrados pelo valor $values: ${kept.size} de $before")
         val one = kept.map { it.second }.distinct().size == 1
         if (kept.isNotEmpty() && one) d.usePointer(item, kept.first().first)
         Session.pointerInfo = when {
-            kept.isEmpty() -> "Nenhum caminho chega nesse valor. Confira o número, ou busque ponteiros de novo com mais níveis."
+            kept.isEmpty() -> "Nenhum caminho chega nesse valor (as reservas foram mantidas). Confira o número ou espere o jogo carregar."
             one -> "Pronto: ${label(item)} agora segue o ponteiro e volta sozinho quando o jogo reabrir."
             else -> "${kept.size} de $before chegam nesse valor. Mude o valor no jogo e filtre de novo."
         }
@@ -404,7 +409,7 @@ class Engine private constructor(private val app: Context) {
     fun setPointer(item: SavedItem, chain: String) {
         Diag.add("Salvo ${label(item)} ${if (chain.isEmpty()) "sem ponteiro" else "agora segue o ponteiro $chain"}")
         replace(item) { it.copy(pointer = chain, anchor = "", offset = 0, verified = true) }
-        if (chain.isNotEmpty()) linkNear(item.copy(pointer = chain))
+        if (chain.isNotEmpty()) linkNear(item.copy(pointer = chain, anchor = "", offset = 0))
     }
 
     private fun Daemon.usePointer(item: SavedItem, chain: String) {
@@ -445,7 +450,9 @@ class Engine private constructor(private val app: Context) {
             (anchor.addr.toLong(16) + item.offset).toString(16)
         } else {
             // ponteiro ainda não confirmado: na vez do jogo em que foi achado, o endereço achado é o certo
-            if (item.pointer.isEmpty() || (!item.verified && item.pid == currentPid)) return item
+            // ponteiro não confirmado nunca é seguido aqui: na vez do jogo em que foi achado o endereço achado é o certo,
+            // e numa vez nova só confirmPointer (que confere o último valor) pode mudar o salvo de lugar
+            if (item.pointer.isEmpty() || !item.verified) return item
             runCatching { send("resolve ${item.pointer}", quiet = true).status }.getOrNull() ?: return item
         }
         return moveTo(item, a, if (item.anchor.isNotEmpty()) "Offset" else "Ponteiro")
@@ -453,7 +460,7 @@ class Engine private constructor(private val app: Context) {
 
     /** Põe o salvo em addr neste processo; outro salvo do mesmo tipo já ali: não duplica. */
     private fun moveTo(item: SavedItem, addr: String, how: String): SavedItem {
-        if (addr != item.addr && Session.saved.any { it.id != item.id && it.addr == addr && it.type == item.type }) return item
+        if (addr != item.addr && Session.saved.any { it.id != item.id && it.addr == addr && it.type == item.type && !stale(it) }) return item
         if (addr == item.addr && item.pid == currentPid) return item
         if (addr != item.addr) Diag.add("$how ${label(item)}: 0x${item.addr} → 0x$addr")
         val moved = item.copy(addr = addr, pid = currentPid)
@@ -497,7 +504,7 @@ class Engine private constructor(private val app: Context) {
         if (pid == 0 || daemon == null || System.currentTimeMillis() - attachedAt > 5 * 60_000) return
         if (Session.saved.none { stale(it) && (it.pointer.isNotEmpty() || it.anchor.isNotEmpty() || it.chains.isNotEmpty() || sigUseful(it.sig)) }) return
         retries++
-        val msg = call { d -> d.restoreAll(pid, signature = retries % 10 == 0, retry = true) }
+        val msg = call(start = false) { d -> d.restoreAll(pid, signature = retries % 10 == 0, retry = true) }
         if (msg.isNotEmpty()) Session.restoreInfo = msg
     }
 
@@ -525,10 +532,12 @@ class Engine private constructor(private val app: Context) {
 
     /** Na mesma vez do jogo: tira os caminhos que não chegam mais no salvo; o escolhido passa a ser o melhor que sobrou. */
     private fun Daemon.pruneChains(item: SavedItem) {
-        val kept = item.chains.filter { c -> runCatching { send("resolve $c", quiet = true).status }.getOrNull() == item.addr }
+        // sai só quem chega em OUTRO endereço; quem falhou agora (troca de cena) fica para a próxima
+        val kept = item.chains.filter { c -> runCatching { send("resolve $c", quiet = true).status }.getOrNull().let { it == null || it == item.addr } }
         if (kept.size == item.chains.size) return
-        val pick = if (item.verified && item.pointer.isNotEmpty()) item.pointer else kept.firstOrNull().orEmpty()
-        replace(item) { it.copy(chains = kept, pointer = pick) }
+        // ponteiro tirado pelo usuário continua tirado; confirmado ou ainda certo continua; senão o melhor que sobrou
+        val pick = if (item.pointer.isEmpty() || item.pointer in kept) item.pointer else kept.firstOrNull().orEmpty()
+        replace(item) { it.copy(chains = kept, pointer = pick, verified = if (pick != item.pointer) false else it.verified) }
         Diag.add("Ponteiros de ${label(item)}: ${item.chains.size - kept.size} pararam de chegar nele e saíram; sobraram ${kept.size}" +
             if (pick != item.pointer) " (escolhido agora: ${pick.ifEmpty { "nenhum" }})" else "")
     }
@@ -549,8 +558,9 @@ class Engine private constructor(private val app: Context) {
     /** Assinatura: procura os bytes em volta; vale se sobrar um lugar só (com o último valor, ou o único achado). */
     private fun Daemon.fromSignature(item: SavedItem, pid: Int): String? {
         if (!sigUseful(item.sig)) return null
-        val places = runCatching { send("aobfind ${item.sig}", quiet = true).lines }.getOrNull()
-            ?.map { (it.toLong(16) + item.sigOff).toString(16) } ?: return null
+        val r = runCatching { send("aobfind ${item.sig}", quiet = true) }.getOrNull() ?: return null
+        if (r.status.toLongOrNull() != r.lines.size.toLong()) return null  // mais de 50 lugares: a assinatura não identifica
+        val places = r.lines.map { (it.toLong(16) + item.sigOff).toString(16) }
         val wanted = telling(item)
         val same = if (wanted == null) emptyList() else places.filter { a ->
             matchesAny(runCatching { send("read $a ${item.type}", quiet = true).status }.getOrDefault("?"), item.type, wanted)
@@ -769,8 +779,12 @@ class Engine private constructor(private val app: Context) {
         val added = mutableListOf<SavedItem>()
         hits.forEach { hit ->
             val i = Session.saved.indexOfFirst { it.addr == hit.addr && it.type == hit.type }
-            if (i < 0) SavedItem(hit.addr, hit.type, hit.region, hit.value, frozen, pid = currentPid).also { Session.saved.add(it); added += it }
-            else if (frozen) Session.saved[i] = Session.saved[i].copy(frozen = true)
+            when {
+                i < 0 -> SavedItem(hit.addr, hit.type, hit.region, hit.value, frozen, pid = currentPid).also { Session.saved.add(it); added += it }
+                // o salvo antigo está de novo nesse endereço: passa a valer nesta vez do jogo
+                stale(Session.saved[i]) -> Session.saved[i] = Session.saved[i].copy(pid = currentPid, value = hit.value, frozen = frozen || Session.saved[i].frozen)
+                frozen -> Session.saved[i] = Session.saved[i].copy(frozen = true)
+            }
         }
         // mesma ficha: os salvos perto do primeiro (deste processo) passam a segui-lo pelo offset
         added.forEach { new ->
@@ -782,9 +796,16 @@ class Engine private constructor(private val app: Context) {
         }
         // ponteiros já preparados para quando o jogo reabrir (pausa o jogo por alguns segundos)
         if (Session.autoPointers && added.size in 1..3) scope.launch {
-            added.mapNotNull { a -> Session.saved.firstOrNull { it.id == a.id && it.anchor.isEmpty() } }.forEach { item ->
-                Session.pointerInfo = "Preparando ponteiros de ${label(item)}…"
-                runCatching { scanPointers(item) }.onFailure { Session.pointerInfo = "Ponteiros de ${label(item)}: ${it.message}" }
+            // espera a busca em andamento: as duas pausam/continuam o jogo e se atrapalhariam
+            while (Session.busy) delay(300)
+            Session.busy = true
+            try {
+                added.mapNotNull { a -> Session.saved.firstOrNull { it.id == a.id && it.anchor.isEmpty() } }.forEach { item ->
+                    Session.pointerInfo = "Preparando ponteiros de ${label(item)}…"
+                    runCatching { scanPointers(item) }.onFailure { Session.pointerInfo = "Ponteiros de ${label(item)}: ${it.message}" }
+                }
+            } finally {
+                Session.busy = false
             }
         }
         Diag.add("${if (frozen) "Congelados" else "Salvos"} ${hits.size} endereços")
@@ -811,7 +832,9 @@ class Engine private constructor(private val app: Context) {
         val live = items.filterNot(::stale)
         if (live.isEmpty()) return "Esses salvos são de outra vez do jogo: busque o valor de novo (ou use ponteiro) antes de editar."
         val msg = writeMany(live.map { it.addr to it.type }, value)
-        live.forEach { item -> replace(item) { it.copy(value = value) } }
+        // o congelamento reescreve o valor guardado: tem que ser o número já normalizado ("20.000" → 20000), nunca faixa
+        val v = normalizeNumbers(value)
+        if ('~' !in v && ';' !in v) live.forEach { item -> replace(item) { it.copy(value = v) } }
         return msg + if (live.size < items.size) " ${items.size - live.size} de outra vez do jogo ficaram de fora." else ""
     }
 
@@ -835,8 +858,9 @@ class Engine private constructor(private val app: Context) {
             ?: throw IllegalArgumentException("Isso não parece uma lista do Tinker (JSON).")
         var added = 0
         for (i in 0 until a.length()) {
-            val item = a.getJSONObject(i).toSaved()
-            if (Session.saved.none { it.addr == item.addr && it.type == item.type }) { Session.saved.add(item); added++ }
+            // pid 0 (lista de fora): endereço de vez desconhecida, não pode sair congelando
+            val item = a.getJSONObject(i).toSaved().let { if (it.pid == 0) it.copy(frozen = false) else it }
+            if (Session.saved.none { it.id == item.id || (it.addr == item.addr && it.type == item.type) }) { Session.saved.add(item); added++ }
         }
         storeSaved()
         val game = root?.optString("jogo").orEmpty()
@@ -867,6 +891,8 @@ class Engine private constructor(private val app: Context) {
                 return@forEach
             }
             val v = runCatching { d.send("read ${item.addr} ${item.type}", quiet = true).status }.getOrDefault("?")
+            // "?" = não leu (o jogo fechou): guarda o último valor bom, que serve para reconhecer o salvo quando o jogo reabrir
+            if (v == "?") return@forEach
             if (v != item.value) replace(item) { it.copy(value = v) }
             if (check && ((v != item.value && refreshTick % 5 == 0) || refreshTick % 20 == 0)) d.pruneChains(item.copy(value = v))
         }
@@ -886,10 +912,11 @@ class Engine private constructor(private val app: Context) {
     private suspend fun freezeLoop() {
         while (true) {
             delay(200)
-            val frozen = Session.saved.filter { it.frozen }
+            // cópia: a tela adiciona e remove salvos enquanto isto roda; qualquer erro fica no registro, nunca derruba o app
+            val frozen = runCatching { Session.saved.toList().filter { it.frozen } }.getOrDefault(emptyList())
             val d = daemon
             if (frozen.isEmpty() || d == null || !d.isAttached) continue
-            for (old in frozen) {
+            for (old in frozen) try {
                 val item = d.resolve(old)
                 if (stale(item)) continue  // escrever no endereço velho pode derrubar o jogo
                 val key = item.addr + item.type
@@ -900,6 +927,8 @@ class Engine private constructor(private val app: Context) {
                     if (e.message == "o jogo fechou") { gameClosed(d); break }
                     if (freezeFailing.add(key)) Diag.add("AVISO: congelamento falhou em 0x${item.addr} (${TYPE_NAMES[item.type]} = ${item.value}): ${e.message}")
                 }
+            } catch (e: Exception) {
+                Diag.add("AVISO: erro no congelamento: ${e.message}")
             }
         }
     }
