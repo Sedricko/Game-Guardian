@@ -10,9 +10,19 @@ android {
         applicationId = "dev.tinker.app"
         minSdk = 26
         targetSdk = 37
-        versionCode = 3
-        versionName = "0.3"
+        versionCode = 4
+        versionName = "0.4"
         ndk { abiFilters += "arm64-v8a" }
+    }
+    // chave fixa: sem ela cada build do CI assina diferente e o Android não deixa atualizar por cima
+    // shortcut: chave de teste no repositório, trocar por uma em GitHub Secrets antes de publicar
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("tinker-dev.keystore")
+            storePassword = "android"
+            keyAlias = "tinker"
+            keyPassword = "android"
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
