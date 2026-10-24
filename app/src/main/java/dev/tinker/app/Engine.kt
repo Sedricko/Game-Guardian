@@ -621,6 +621,24 @@ class Engine private constructor(private val app: Context) {
     fun fichaContext(c: Il2Class?, rows: List<FichaRow>): String =
         gameLine() + "\nFicha ${c?.name ?: "(sem nome IL2CPP)"}:\n" + rows.joinToString("\n") { "+${it.off.toString(16)} ${it.label} = ${it.value}" }
 
+    /** Busca em andamento: passos (comando e resposta do registro), resultados mostrados e salvos. */
+    fun searchContext(names: Map<String, String>): String = buildString {
+        val s = Session
+        appendLine(gameLine())
+        appendLine("Tipos: ${if (s.types.isEmpty()) "Auto" else s.types.joinToString()} · valor digitado: ${s.value.ifBlank { "(vazio)" }} · cifrados: ${if (s.findEncrypted) "sim" else "não"}")
+        appendLine("Agora: ${s.status} · restantes: ${s.count ?: "nenhuma busca"}")
+        appendLine("Passos da busca (registro, comando e resposta):")
+        val log = Diag.lines.toList()
+        log.indices.filter { i -> listOf("> search", "> refine", "> compare", "> snapshot", "> undo", "> aob").any { it in log[i] } }.takeLast(30).forEach { i ->
+            appendLine(log[i])
+            log.getOrNull(i + 1)?.takeIf { "< " in it }?.let(::appendLine)
+        }
+        appendLine("Resultados mostrados (${s.results.size}): endereço tipo região valor [campo IL2CPP]")
+        s.results.take(100).forEach { appendLine("0x${it.addr} ${it.type} ${it.region} ${it.value}" + (names[it.addr]?.let { n -> " [$n]" } ?: "")) }
+        appendLine("Salvos (${s.saved.size}):")
+        s.saved.forEach { appendLine(savedLine(it)) }
+    }
+
     suspend fun reportContext(): String = gameLine() + "\n" + report().readText()
 
     /** Objetos de uma classe IL2CPP pelo nome (PlayerData, ou Namespace.PlayerData); lê a memória toda, leva alguns segundos. */

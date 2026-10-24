@@ -102,7 +102,7 @@ ganham o nome do campo sozinhos. Na lista de endereços da aba Memória, o que m
 ## Assistente de IA (Claude)
 
 Em **Ajustes → Assistente (IA)**, coloque uma chave da API do Claude (console.anthropic.com; paga por uso). Os botões **✨**
-mandam o que está na tela e mostram a resposta: na lista de classes, *onde fica o ouro?* (as classes citadas viram atalho para
+mandam o que está na tela e mostram a resposta: na Busca, *qual desses é o valor certo?* e *qual o próximo passo?*; na lista de classes, *onde fica o ouro?* (as classes citadas viram atalho para
 abrir a ficha); na ficha, *o que cada campo faz?*; no Registro, *o que deu errado?*. Nada é enviado sem tocar em **Perguntar**.
 
 ## Motor do jogo
