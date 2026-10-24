@@ -1053,7 +1053,7 @@ private fun ClassOpener(engine: Engine) {
         }
     }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        OutlinedTextField(cls, { cls = it.trim() }, label = { Text("Classe (ex.: PlayerData)") }, singleLine = true, modifier = Modifier.weight(1f))
+        OutlinedTextField(cls, { cls = it }, label = { Text("Classe ou campo (ex.: PlayerData, gold)") }, singleLine = true, modifier = Modifier.weight(1f))
         Button(onClick = { open(cls) }, enabled = !loading && s.process != null && cls.isNotBlank(), contentPadding = PaddingValues(horizontal = 12.dp)) { Text("Abrir") }
         if (cls.isNotBlank()) TextButton(onClick = { copy(cls) }, contentPadding = PaddingValues(0.dp), modifier = Modifier.size(40.dp)) { Text("⧉", fontSize = 18.sp) }
     }
@@ -1082,29 +1082,24 @@ private fun ClassOpener(engine: Engine) {
     val names = remember(all) { all?.map { it.name }?.toSet() ?: emptySet() }
     AiBox(
         engine, "Perguntar à IA onde está o valor",
-        listOf("Onde fica o ouro ou a moeda?", "Quais classes guardam vida, gemas e recursos?", "Onde ficam os itens do inventário?"),
-        context = { engine.classesContext(all ?: engine.listClasses().also { all = it }) }, names = names, onOpen = { open(it) },
+        listOf("Ache o ouro e as gemas (com os valores de agora)", "Onde fica a vida do jogador?", "Onde ficam os itens do inventário?"),
+        context = { engine.classesContext(all ?: engine.listClasses().also { all = it }) }, names = names, onOpen = { open(it) }, key = "classes",
     )
-    val shownClasses = all?.takeIf { listing }?.filter { cls.isBlank() || it.name.contains(cls, ignoreCase = true) }
+    // classes que a IA recomendou: no topo, um toque abre
+    if (s.aiClasses.isNotEmpty()) {
+        Text("✨ Sugeridas pela IA", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+        s.aiClasses.toList().forEach { gc -> ClassRow(gc, emptyList(), onOpen = { listing = false; open(gc.name) }, onCopy = { copy(gc.name) }) }
+        TextButton(onClick = { s.aiClasses.clear() }) { Text("Limpar sugestões") }
+    }
+    // filtro: nome da classe ou de um campo (gold acha PlayerData pelo campo Gold)
+    val words = searchWords(cls)
+    val shownClasses = all?.takeIf { listing }?.mapNotNull { gc -> classMatch(gc, words)?.let { gc to it } }
+        ?.sortedBy { (gc, f) -> if (words.isNotEmpty() && f.isEmpty() && gc.name.substringAfterLast('.').contains(cls, ignoreCase = true)) 0 else 1 }
     if (shownClasses != null) {
         Column(Modifier.fillMaxWidth().heightIn(max = 320.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            shownClasses.take(200).forEach { gc ->
-                Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceContainerLow)
-                        .clickable { listing = false; open(gc.name) }.padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(gc.name.substringAfterLast('.'), style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        if ('.' in gc.name) Text(gc.name.substringBeforeLast('.'), style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                    Text("${gc.fields} campos", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                    TextButton(onClick = { copy(gc.name) }, contentPadding = PaddingValues(0.dp), modifier = Modifier.size(36.dp)) { Text("⧉", fontSize = 16.sp) }
-                }
-            }
-            if (shownClasses.size > 200) Text("…e mais ${shownClasses.size - 200}: digite parte do nome para filtrar.", style = MaterialTheme.typography.bodySmall)
-            if (shownClasses.isEmpty()) Text("Nenhuma classe com \"$cls\".", style = MaterialTheme.typography.bodySmall)
+            shownClasses.take(300).forEach { (gc, fields) -> ClassRow(gc, fields, onOpen = { listing = false; open(gc.name) }, onCopy = { copy(gc.name) }) }
+            if (shownClasses.size > 300) Text("…e mais ${shownClasses.size - 300}: digite mais do nome (da classe ou do campo).", style = MaterialTheme.typography.bodySmall)
+            if (shownClasses.isEmpty()) Text("Nenhuma classe ou campo com \"$cls\".", style = MaterialTheme.typography.bodySmall)
         }
     }
     if (objs.isNotEmpty()) {
@@ -1113,6 +1108,26 @@ private fun ClassOpener(engine: Engine) {
                 FilterChip(selected = false, onClick = { s.view = (o.toLong(16) + (s.engine?.header ?: 0x10L)).toString(16) to "i32" }, label = { Text("#${i + 1} 0x$o", maxLines = 1) })
             }
         }
+    }
+}
+
+/** Uma classe da lista: nome, namespace, campos que bateram com o filtro; toque abre, ⧉ copia o nome. */
+@Composable
+private fun ClassRow(gc: GameClass, matched: List<String>, onOpen: () -> Unit, onCopy: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .clickable(onClick = onOpen).padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(gc.name.substringAfterLast('.'), style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if ('.' in gc.name) Text(gc.name.substringBeforeLast('.'), style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (matched.isNotEmpty()) Text("campos: " + matched.take(6).joinToString(), style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.tertiary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        Text("${gc.fields} campos", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+        TextButton(onClick = onCopy, contentPadding = PaddingValues(0.dp), modifier = Modifier.size(36.dp)) { Text("⧉", fontSize = 16.sp) }
     }
 }
 

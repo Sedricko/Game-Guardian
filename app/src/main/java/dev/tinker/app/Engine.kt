@@ -83,7 +83,23 @@ data class Il2Field(val offset: Int, val code: Int, val name: String)
 data class Il2Class(val name: String, val start: String, val fields: List<Il2Field>)
 
 /** Classe IL2CPP do jogo (para a lista): nome completo e quantos campos tem. */
-data class GameClass(val name: String, val fields: Int)
+data class GameClass(val name: String, val fields: Int, val fieldNames: List<String> = emptyList())
+
+/**
+ * A classe bate com alguma das palavras? null: não; vazio: pelo nome da classe; senão os campos que bateram
+ * (gold acha PlayerData pelo campo <Gold>k__BackingField).
+ */
+internal fun classMatch(c: GameClass, words: List<String>): List<String>? {
+    if (words.isEmpty()) return emptyList()
+    val fields = c.fieldNames.filter { f -> words.any { f.contains(it, ignoreCase = true) } }
+    return when {
+        fields.isNotEmpty() -> fields.map { it.removePrefix("<").substringBefore(">k__BackingField") }
+        words.any { c.name.contains(it, ignoreCase = true) } -> emptyList()
+        else -> null
+    }
+}
+
+internal fun searchWords(text: String) = text.split(Regex("""[\s,;]+""")).map { it.trim() }.filter { it.length >= 2 }
 
 /** Item de uma lista do jogo (List<T>): referência a outro objeto (abre a ficha dele) ou um número. */
 data class ListItem(val index: Int, val addr: String, val label: String, val value: String, val isRef: Boolean)
@@ -169,6 +185,7 @@ object Session {
     val recipes = mutableStateListOf<Recipe>()
     val aiProposals = mutableStateListOf<AiProposal>()
     val aiUndo = mutableStateListOf<AiUndo>()
+    val aiClasses = mutableStateListOf<GameClass>()  // classes que a IA recomendou: aparecem no topo da lista de classes
     var aiAsk by mutableStateOf<Pair<String, String>?>(null)  // pedido automático: (onde, pergunta) — a caixa ✨ daquela tela pergunta sozinha
     var engine by mutableStateOf<GameEngine?>(null)
     var aiKey by mutableStateOf("")  // chave da API do Claude para o assistente; vazia = assistente desligado
@@ -639,10 +656,21 @@ class Engine private constructor(private val app: Context) {
      * Todas as classes do jogo com campos, as do próprio jogo primeiro (as de bibliotecas — System, Unity, anúncios… — no fim);
      * genéricas e geradas pelo compilador (`, <) ficam de fora. Sem digitar nome: é só escolher.
      */
-    suspend fun listClasses(): List<GameClass> = call { d ->
+    private var classCache: Triple<Int, Long, List<GameClass>>? = null
+
+    /**
+     * Classes do jogo (leva alguns segundos): a tela e a IA usam a mesma lista, guardada por 2 minutos no mesmo processo
+     * (o jogo carrega classes novas ao trocar de tela).
+     */
+    suspend fun listClasses(): List<GameClass> {
+        classCache?.takeIf { it.first == currentPid && System.currentTimeMillis() - it.second < 120_000 }?.let { return it.third }
+        return readClasses().also { classCache = Triple(currentPid, System.currentTimeMillis(), it) }
+    }
+
+    private suspend fun readClasses(): List<GameClass> = call { d ->
         d.send("il2classes").lines.mapNotNull { l ->
             val f = l.removePrefix("class ").split(" ")
-            if (f.size < 3 || '`' in f[0] || '<' in f[0] || !CLASS_NAME.matches(f[0])) null else GameClass(f[0], f[2].toIntOrNull() ?: 0)
+            if (f.size < 3 || '`' in f[0] || '<' in f[0] || !CLASS_NAME.matches(f[0])) null else GameClass(f[0], f[2].toIntOrNull() ?: 0, f.getOrNull(3)?.split(',')?.filter { it.isNotEmpty() }.orEmpty())
         }.groupBy { it.name }.map { (_, same) -> same.maxBy { it.fields } }
             .sortedWith(compareBy<GameClass> { c -> LIBS.any { c.name.startsWith(it) } }.thenBy { it.name.substringAfterLast('.').lowercase() })
     }
@@ -680,10 +708,6 @@ class Engine private constructor(private val app: Context) {
         Session.recipes.forEach { r -> appendLine("${r.name}${if (r.auto) " (ao abrir)" else ""}: " + r.steps.joinToString { "${it.label} = ${it.value} (${it.how})" }) }
     }
 
-    private var classCache: Pair<Int, List<GameClass>>? = null
-
-    private suspend fun gameClasses(): List<GameClass> =
-        classCache?.takeIf { it.first == currentPid }?.second ?: listClasses().also { classCache = currentPid to it }
 
     /** Busca/refino feitos pela IA aparecem na aba Busca, como se fossem seus. */
     private suspend fun resultsText(status: String): String {
@@ -707,20 +731,52 @@ class Engine private constructor(private val app: Context) {
 
     /** O que a IA pode fazer sozinha: só olhar e buscar; editar e congelar ficam com você. */
     private fun aiTools(): List<AiTool> = listOf(
-        AiTool("procurar_classes", "Procura classes IL2CPP do jogo cujo nome contém alguma das palavras (ex.: gold coin money). Devolve até 80, com o número de campos.",
-            mapOf("palavras" to "palavras separadas por espaço, em inglês como no código do jogo"), listOf("palavras")) { a ->
-            val words = a.optString("palavras").split(Regex("""[\s,;]+""")).filter { it.length >= 2 }
-            val all = gameClasses()
-            val hit = all.filter { c -> words.any { c.name.contains(it, ignoreCase = true) } }
-            "${hit.size} de ${all.size} classes" + hit.take(80).joinToString("") { "\n${it.name} (${it.fields} campos)" }
+        AiTool("procurar_classes", "Procura classes do jogo pelo nome da classe E pelo nome dos campos (ex.: gold acha PlayerData que tem o campo Gold). " +
+            "Devolve até 80 (as do próprio jogo primeiro), com os campos que bateram.",
+            mapOf("palavras" to "palavras separadas por espaço, em inglês como no código do jogo (gold coin gem hp health)"), listOf("palavras")) { a ->
+            val words = searchWords(a.optString("palavras"))
+            val all = listClasses()
+            val hit = all.mapNotNull { c -> classMatch(c, words)?.let { c to it } }
+                .sortedBy { (c, f) -> (if (LIBS.any { c.name.startsWith(it) }) 2 else 0) + (if (f.isEmpty()) 1 else 0) }
+            "${hit.size} de ${all.size} classes" + hit.take(80).joinToString("") { (c, f) ->
+                "\n${c.name} (${c.fields} campos)" + if (f.isEmpty()) "" else ": " + f.take(8).joinToString()
+            }
         },
-        AiTool("abrir_classe", "Acha os objetos vivos de uma classe (ex.: PlayerData) e mostra cada campo com o valor de agora (até 3 objetos).",
-            mapOf("classe" to "nome da classe, com ou sem namespace"), listOf("classe")) { a ->
+        AiTool("abrir_classe", "Acha os objetos vivos de uma classe (ex.: PlayerData) e mostra os campos com o valor de agora. Com valor: procura, entre " +
+            "todos os objetos (até 100), os campos que têm esse valor agora (ex.: o ouro que a pessoa vê) — use isso quando há muitos objetos.",
+            mapOf("classe" to "nome da classe, com ou sem namespace", "valor" to "opcional: valor que a pessoa vê no jogo", "objeto" to "opcional: número do objeto (1, 2, …) para abrir um só"),
+            listOf("classe")) { a ->
             val objs = findObjects(a.optString("classe"))
-            if (objs.isEmpty()) "Nenhum objeto ${a.optString("classe")} agora (a classe pode não estar carregada nesta tela do jogo)."
-            else "${objs.size} objetos" + objs.take(3).mapIndexed { i, o ->
-                "\n--- objeto #${i + 1} (0x$o)\n" + objectText((o.toLong(16) + (Session.engine?.header ?: 0x10L)).toString(16))
-            }.joinToString("")
+            val head = Session.engine?.header ?: 0x10L
+            val want = normalizeNumbers(a.optString("valor")).toDoubleOrNull()
+            val pick = a.optString("objeto").toIntOrNull()
+            when {
+                objs.isEmpty() -> "Nenhum objeto ${a.optString("classe")} agora (a classe pode não estar carregada nesta tela do jogo)."
+                want != null -> {
+                    // cada objeto: os campos com o valor procurado (o ouro de verdade costuma estar num objeto só)
+                    val found = objs.take(100).mapIndexedNotNull { i, o ->
+                        val text = objectText((o.toLong(16) + head).toString(16))
+                        val lines = text.lines().drop(1).filter { l ->
+                            l.substringAfter(" = ", "").substringBefore(" (0x").trim().toDoubleOrNull()?.let { kotlin.math.abs(it - want) < 0.01 } == true
+                        }
+                        if (lines.isEmpty()) null else "--- objeto #${i + 1} (0x$o)\n" + lines.joinToString("\n")
+                    }
+                    "${objs.size} objetos; ${found.size} com um campo = ${a.optString("valor")}" + if (found.isEmpty()) "" else "\n" + found.take(15).joinToString("\n")
+                }
+                pick != null -> objs.getOrNull(pick - 1)?.let { o -> "objeto #$pick de ${objs.size} (0x$o)\n" + objectText((o.toLong(16) + head).toString(16)) }
+                    ?: "Só há ${objs.size} objetos."
+                else -> "${objs.size} objetos" + (if (objs.size > 3) " (mostrando 3; use valor para achar o certo, ou objeto para abrir outro)" else "") +
+                    objs.take(3).mapIndexed { i, o -> "\n--- objeto #${i + 1} (0x$o)\n" + objectText((o.toLong(16) + head).toString(16)) }.joinToString("")
+            }
+        },
+        AiTool("mostrar_classes", "Mostra na tela da pessoa, no topo da lista de classes, as classes que você recomenda (ela toca para abrir). " +
+            "Use sempre que recomendar classes.",
+            mapOf("classes" to "nomes completos das classes, separados por vírgula, a melhor primeiro"), listOf("classes")) { a ->
+            val known = listClasses().associateBy { it.name }
+            val picked = a.optString("classes").split(',').map { it.trim() }
+                .mapNotNull { n -> known[n] ?: known.values.firstOrNull { it.name.substringAfterLast('.') == n } }.distinct().take(15)
+            withContext(Dispatchers.Main) { Session.aiClasses.clear(); Session.aiClasses.addAll(picked) }
+            if (picked.isEmpty()) "Nenhuma dessas classes existe; use os nomes que procurar_classes devolveu." else "Mostradas: ${picked.joinToString { it.name }}."
         },
         AiTool("ver_endereco", "Mostra a ficha em volta de um endereço (de um resultado da busca): classe e campos com valores.",
             mapOf("endereco" to "endereço em hexadecimal, ex.: 7197b90978"), listOf("endereco")) { a ->
@@ -842,7 +898,7 @@ class Engine private constructor(private val app: Context) {
         // com a ferramenta procurar_classes a IA acha o resto; mandar milhares de nomes a cada rodada estoura o limite do plano grátis
         val shown = game.sortedByDescending { it.fields }.take(400)
         return gameLine() + "\nO jogo tem ${all.size} classes, ${game.size} do próprio jogo. As ${shown.size} do jogo com mais campos " +
-            "(use procurar_classes para as outras):\n" + shown.joinToString("\n") { "${it.name} (${it.fields})" }
+            "(use procurar_classes para as outras; ela procura também nos nomes dos campos):\n" + shown.joinToString("\n") { "${it.name} (${it.fields})" }
     }
 
     /** Ficha aberta: classe e cada campo com o valor de agora. */

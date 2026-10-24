@@ -1198,7 +1198,20 @@ static void cmd_il2classes(void) {
     for (size_t ci = 0; ci < cs.n; ci++) {
         for (size_t j = 0; j < ps.out[ci].n; j++)
             if (shown < 20000 && read_klass(ps.out[ci].h[j].addr, &k)) {
-                printf("class %s%s%s %" PRIx64 " %d\n", k.ns, k.ns[0] ? "." : "", k.name, ps.out[ci].h[j].addr, k.nfields);
+                // nomes dos campos (até 64, linha até ~1 KB): o filtro e a IA acham "gold" mesmo quando a classe se chama PlayerData
+                char names[1100] = "", nm[64];
+                size_t len = 0;
+                int fis = 3 * psize + 8;
+                uint64_t fname;
+                for (int f = 0; f < k.nfields && f < 64; f++) {
+                    if (read_ptr(k.fields + (uint64_t)f * fis, &fname) || !ident(fname, nm, sizeof nm) || !nm[0]) continue;
+                    size_t l = strlen(nm);
+                    if (len + l + 2 >= sizeof names) break;
+                    if (len) names[len++] = ',';
+                    memcpy(names + len, nm, l + 1);
+                    len += l;
+                }
+                printf("class %s%s%s %" PRIx64 " %d %s\n", k.ns, k.ns[0] ? "." : "", k.name, ps.out[ci].h[j].addr, k.nfields, names);
                 shown++;
             }
         free(ps.out[ci].h);

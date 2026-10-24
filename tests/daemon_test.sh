@@ -144,7 +144,7 @@ grep -qx "obj $oaddr" <<<"$objs" && [ "$(grep -c '^obj ' <<<"$objs")" = 2 ] && g
     || { echo "FALHOU: il2objs"; exit 1; }
 
 cl=$(printf '%s\n' "attach $pid" "il2classes" | "$out/tinkerd")
-grep -qE "^class Game.Player [0-9a-f]+ 3$" <<<"$cl" || { echo "FALHOU: il2classes"; echo "$cl" | head; exit 1; }
+grep -qE "^class Game.Player [0-9a-f]+ 3 hp,gold,instances$" <<<"$cl" || { echo "FALHOU: il2classes"; echo "$cl" | head; exit 1; }
 
 # Busca em grupo: hp (99.5) e gold (4321) do mesmo objeto, a 4 bytes; distância curta demais não acha; um valor só vira busca normal
 grp=$(printf '%s\n' "attach $pid" "group i32,f32 4321;99.5 16" "list 10" "group i32,f32 4321;99.5 2" "group i32 4321 16" "group i32 4321;1 0" | "$out/tinkerd")

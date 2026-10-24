@@ -54,6 +54,10 @@ Você não edita nada direto: quando tiver certeza do campo, use propor_edicao c
 Aplicar para a pessoa) e explique na resposta qual classe e campo é. Se não tiver certeza, diga o que falta para confirmar.
 Quando precisar que o valor mude no jogo (para refinar ou comparar), peça para a pessoa fazer isso e tocar em Continuar: a conversa
 segue de onde parou. Sem saber o número (barra de vida), use busca_sem_valor e depois comparar.
+Para achar um recurso pelo nome: procurar_classes procura também nos campos (gold acha a classe que tem o campo Gold). Não pare
+na lista de nomes: abra as classes candidatas e mostre o campo com o valor de agora (ex.: PlayerData.Gold = 550). Se a classe tem
+muitos objetos, use abrir_classe com o valor que a pessoa vê (ou pergunte o valor) para achar o objeto certo. Sempre que recomendar
+classes, chame mostrar_classes para elas aparecerem no topo da lista da pessoa.
 Use ver_salvos para saber o que já foi achado e se os ponteiros voltaram. Quando descobrir algo que vale para a próxima vez
 (classe e campo de um recurso, tipo do valor, se é cifrado), use anotar. Para deixar várias edições prontas para toda vez que o
 jogo abrir, use propor_receita com os salvos."""

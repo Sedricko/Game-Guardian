@@ -187,4 +187,15 @@ class ValuesTest {
         assertEquals(listOf(gold, gem), matchSaved("todos", all))  // cópia de tela nunca entra
         assertEquals(emptyList<SavedItem>(), matchSaved("vida", all))
     }
+
+    @Test
+    fun classFilterFindsFieldNames() {
+        val pd = GameClass("Game.PlayerData", 3, listOf("<Gold>k__BackingField", "gems", "level"))
+        val ui = GameClass("Game.UI.GoldLabel", 1, listOf("text"))
+        assertEquals(listOf("Gold"), classMatch(pd, searchWords("gold")))   // pelo campo, sem o k__BackingField
+        assertEquals(emptyList<String>(), classMatch(ui, searchWords("gold")))  // pelo nome da classe
+        assertEquals(listOf("gems"), classMatch(pd, searchWords("gem, hp")))
+        assertEquals(null, classMatch(ui, searchWords("gem")))
+        assertEquals(emptyList<String>(), classMatch(ui, searchWords("")))   // sem filtro: tudo aparece
+    }
 }

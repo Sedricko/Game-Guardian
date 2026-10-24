@@ -122,7 +122,8 @@ Classes e fichas por nome funcionam no IL2CPP de 32 e 64 bits; nos outros motore
 ## Abrir objeto pelo nome e receitas
 
 **Memória → Ficha do objeto**: toque em **Ver todas as classes do jogo** e escolha uma (as do próprio jogo vêm primeiro;
-digite parte do nome para filtrar), ou digite a classe (`PlayerData`) e toque em **Abrir** — aparecem todos os campos com o valor
+o filtro procura no nome da classe **e no dos campos**: `gold` acha `PlayerData` pelo campo `Gold`, e mostra o campo que bateu;
+as classes que a IA recomendar aparecem no topo, em **✨ Sugeridas pela IA**), ou digite a classe (`PlayerData`) e toque em **Abrir** — aparecem todos os campos com o valor
 de agora (`Gem = 1000`, `UpgradeStone = …`); toque num campo para **Editar**, **Salvar** ou **Congelar**. **Filtrar campo**
 acha rápido (`gem`). Campos que são listas (`OwnedWeapons`) abrem a lista, com a ficha de cada item.
 

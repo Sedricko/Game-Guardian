@@ -51,7 +51,7 @@ fun AiBox(
     val chat = remember { AiChat() }
     fun ask(q: String, fresh: Boolean) {
         if (loading || q.isBlank() || !Assistant.ready()) return
-        if (fresh) { chat.reset(); turns = emptyList() }
+        if (fresh) { chat.reset(); turns = emptyList(); s.aiClasses.clear() }
         question = ""
         loading = true
         steps = emptyList()
