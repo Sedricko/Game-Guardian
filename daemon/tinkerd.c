@@ -198,14 +198,17 @@ static void scan_region(uint64_t s, uint64_t e, int region, void *ctx) {
 
 static void cmd_search(const char *tname, const char *value) {
     scan_t sc = {.ntypes = 0};
-    if (!strcmp(tname, "auto")) {
-        // como o "Auto" do GG: o mesmo número em Dword, Float, Qword e Double
-        int all[] = {T_I32, T_F32, T_I64, T_F64};
-        for (int i = 0; i < 4; i++) if (parse_value(all[i], value, &sc.v[all[i]])) sc.types[sc.ntypes++] = all[i];
-    } else {
-        int t = find_type(tname);
-        if (t < 0) { printf("err tipo inválido: %s\n", tname); return; }
-        if (parse_value(t, value, &sc.v[t])) sc.types[sc.ntypes++] = t;
+    // vários tipos separados por vírgula (ex.: f32,f64); "auto" = Dword, Float, Qword e Double, como no GG
+    char list[64], *save = NULL;
+    snprintf(list, sizeof list, "%s", strcmp(tname, "auto") ? tname : "i32,f32,i64,f64");
+    for (char *tok = strtok_r(list, ",", &save); tok; tok = strtok_r(NULL, ",", &save)) {
+        int t = find_type(tok);
+        if (t < 0) { printf("err tipo inválido: %s\n", tok); return; }
+        if (!parse_value(t, value, &sc.v[t])) continue;  // ex.: 1.5 não entra como Dword
+        // menores primeiro: no mesmo endereço ganha o tipo menor, que não invade bytes vizinhos
+        int k = sc.ntypes++;
+        while (k > 0 && TYPES[sc.types[k - 1]].size > TYPES[t].size) { sc.types[k] = sc.types[k - 1]; k--; }
+        sc.types[k] = t;
     }
     if (!sc.ntypes) { printf("err valor inválido: %s\n", value); return; }
     sc.step = 8;

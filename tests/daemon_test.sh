@@ -19,7 +19,7 @@ write $iaddr i32 987654321
 refine 987654321
 list 10
 read $iaddr i32
-search auto 3.5
+search f64,f32 3.5
 list 1000
 writeall 7.25
 refine 7.25

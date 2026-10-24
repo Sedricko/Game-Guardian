@@ -264,11 +264,21 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
         item {
             Panel {
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TYPES.forEachIndexed { i, (_, label) -> FilterChip(selected = s.type == i, onClick = { s.type = i }, label = { Text(label) }) }
+                    // Auto ou qualquer combinação de tipos (ex.: só Float + Double)
+                    TYPES.forEach { (code, label) ->
+                        val on = if (code == "auto") s.types.isEmpty() else code in s.types
+                        FilterChip(selected = on, onClick = {
+                            s.types = when {
+                                code == "auto" -> emptySet()
+                                on -> s.types - code
+                                else -> s.types + code
+                            }
+                        }, label = { Text(label) })
+                    }
                 }
                 ValueField(s.value, "Valor (ex.: 100)", { s.value = it })
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { run { engine.search(s.type, s.value) } }, enabled = enabled && s.value.isNotBlank(), modifier = Modifier.weight(1f)) {
+                    Button(onClick = { run { engine.search(s.types, s.value) } }, enabled = enabled && s.value.isNotBlank(), modifier = Modifier.weight(1f)) {
                         Text("Nova busca")
                     }
                     FilledTonalButton(

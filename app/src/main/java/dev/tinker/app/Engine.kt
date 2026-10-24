@@ -42,7 +42,7 @@ data class SavedItem(val addr: String, val type: String, val region: String, val
 /** Estado da tela; fica fora da Activity para a janela flutuante e a Activity verem o mesmo. */
 object Session {
     var process by mutableStateOf<GameProcess?>(null)
-    var type by mutableIntStateOf(0)
+    var types by mutableStateOf(setOf<String>())  // vazio = Auto
     var value by mutableStateOf("")
     var status by mutableStateOf("Escolha o jogo para começar.")
     var count by mutableStateOf<Long?>(null)
@@ -141,8 +141,10 @@ class Engine private constructor(private val app: Context) {
         "Pronto. Digite um valor que você vê no jogo e toque em Nova busca."
     }
 
-    suspend fun search(type: Int, value: String): String = call { d ->
-        "${d.send("search ${TYPES[type].first} ${value.arg()}").status} encontrados. Mude o valor no jogo e refine."
+    /** types vazio = Auto. */
+    suspend fun search(types: Set<String>, value: String): String = call { d ->
+        val list = TYPES.map { it.first }.filter { it in types }.joinToString(",").ifEmpty { "auto" }
+        "${d.send("search $list ${value.arg()}").status} encontrados. Mude o valor no jogo e refine."
     }
 
     suspend fun refine(value: String): String = call { d -> "${d.send("refine ${value.arg()}").status} restantes." }
