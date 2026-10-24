@@ -704,6 +704,10 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
                         TextButton(onClick = { s.view = item.addr to plain(item.type); s.tab = TAB_MEMORY; editing = null }) { Text("Ver próximos") }
                     }
                     NameEditor(item.name) { engine.rename(item, it) }
+                    historyText(item, System.currentTimeMillis()).takeIf { it.isNotEmpty() }?.let {
+                        Text("Histórico: $it", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                     Text("Ler como outro tipo:", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     TypeChips(item.type) { t -> engine.changeType(item, t); editing = null }
                     if (item.anchor.isNotEmpty()) {
@@ -1026,6 +1030,8 @@ private val HELP = listOf(
     "Ponteiros" to "Como no Cheat Engine, mas sozinho: ao salvar, o Tinker já busca os ponteiros e aprende a assinatura (bytes em volta). " +
         "Ao reabrir o jogo e escolher ele no Tinker, cada salvo volta sozinho (ponteiro → caminhos guardados → assinatura); os da mesma ficha " +
         "vêm junto pelo offset. Sobrou dúvida entre vários caminhos? Abra o salvo, digite o valor que o jogo mostra e toque em Filtrar pelo valor. " +
+        "Cada salvo guarda o histórico do valor (últimas mudanças e a faixa): ao reabrir, um caminho que chega num valor fora " +
+        "da faixa é descartado, e um que chega dentro dela vale mesmo se o valor mudou. " +
         "Salvo com ⚠ é de outra vez do jogo e não é lido nem escrito até voltar; se estava congelado, volta congelado. " +
         "Com o Tinker aberto, quando o jogo reabre ele é escolhido de novo sozinho; enquanto o jogo carrega, o Tinker tenta de novo por 2 minutos " +
         "(e o botão ↻ nos Salvos procura na hora). " +

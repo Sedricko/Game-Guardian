@@ -55,6 +55,8 @@ data class SavedItem(
     val pid: Int = 0, val chains: List<String> = emptyList(), val sig: String = "", val sigOff: Int = 0,
     // verified=false: ponteiro escolhido sozinho, ainda não confirmado reabrindo o jogo; não é seguido na mesma vez do jogo
     val verified: Boolean = true,
+    // history: últimas mudanças "segundos:valor"; seenMin/seenMax: a faixa que o valor já teve (NaN = ainda não sabe)
+    val history: List<String> = emptyList(), val seenMin: Double = Double.NaN, val seenMax: Double = Double.NaN,
 )
 
 const val MAX_CHAINS = 200
@@ -590,14 +592,24 @@ class Engine private constructor(private val app: Context) {
     /** Ponteiro em uso ao reabrir: segue; se ainda não estava confirmado, só vale se chegar no último valor (aí fica confirmado). */
     private fun Daemon.confirmPointer(item: SavedItem, pid: Int, why: MutableList<String>): String? {
         if (item.verified) return "ponteiro".takeIf { resolve(item).pid == pid }.also { if (it == null) why += "ponteiro confirmado não resolve agora" }
-        val wanted = telling(item) ?: return null.also { why += "último valor não serve para conferir" }
+        val wanted = telling(item)
         val a = runCatching { send("resolve ${item.pointer}", quiet = true).status }.getOrNull() ?: return null.also { why += "ponteiro escolhido não resolve agora" }
         val v = runCatching { send("read $a ${item.type}", quiet = true).status }.getOrDefault("?")
-        if (!matchesAny(v, item.type, wanted)) return null.also { why += "ponteiro escolhido chega em 0x$a com valor $v" }
-        if (moveTo(item, a, "Ponteiro").pid != pid) return null
-        replace(item) { it.copy(verified = true) }
-        Diag.add("Ponteiro de ${label(item)} confirmado ao reabrir o jogo: ${item.pointer}")
-        return "ponteiro confirmado"
+        if (wanted != null && matchesAny(v, item.type, wanted)) {
+            if (moveTo(item, a, "Ponteiro").pid != pid) return null
+            replace(item) { it.copy(verified = true) }
+            Diag.add("Ponteiro de ${label(item)} confirmado ao reabrir o jogo: ${item.pointer}")
+            return "ponteiro confirmado"
+        }
+        // o valor mudou (você jogou, ou o jogo carregou outro save), mas cabe no histórico: segue o escolhido, ainda a confirmar
+        if (!item.seenMin.isNaN() && v != "?" && v !in setOf("0", "-1") && plausible(item, v)) {
+            if (moveTo(item, a, "Ponteiro").pid != pid) return null
+            replace(item) { recordValue(it, v, System.currentTimeMillis()) }
+            Diag.add("Ponteiro de ${label(item)} seguido pelo histórico: chega em 0x$a com $v (faixa ${item.seenMin}–${item.seenMax})")
+            return "ponteiro, valor dentro do histórico"
+        }
+        why += "ponteiro escolhido chega em 0x$a com valor $v" + if (item.seenMin.isNaN()) "" else " (fora da faixa ${item.seenMin}–${item.seenMax})"
+        return null
     }
 
     /** Na mesma vez do jogo: tira os caminhos que não chegam mais no salvo; o escolhido passa a ser o melhor que sobrou. */
@@ -636,14 +648,16 @@ class Engine private constructor(private val app: Context) {
         val bases = best.map { it.first.substringBefore(' ') }.distinct().size
         // o ponteiro escolhido concorda com outro caminho: dois caminhos independentes chegando no mesmo lugar já bastam
         val withChosen = item.pointer.isNotEmpty() && best.any { it.first == item.pointer } && best.size >= 2 && best.size > second
-        if ((best.size >= 3 && bases >= 2 && best.size >= 2 * second) || withChosen) {
+        val there = best.firstOrNull()?.let { runCatching { send("read ${it.second} ${item.type}", quiet = true).status }.getOrNull() }
+        if (there != null && !plausible(item, there)) why += "consenso chega em valor $there, fora do histórico"
+        else if ((best.size >= 3 && bases >= 2 && best.size >= 2 * second) || withChosen) {
             val moved = moveTo(item, best.first().second, "Consenso")
             if (moved.pid == pid) {
                 // ainda não confirmado: o próximo descarte (enquanto você joga) e a próxima abertura conferem;
                 // o valor guardado passa a ser o de agora (o do jogo fechado não serve mais para conferir)
                 val now = runCatching { send("read ${moved.addr} ${item.type}", quiet = true).status }.getOrNull()
                 val pick = if (withChosen) item.pointer else best.first().first
-                replace(item) { it.copy(pointer = pick, verified = false, value = now ?: it.value) }
+                replace(item) { it.copy(pointer = pick, verified = false).let { c -> if (now != null) recordValue(c, now, System.currentTimeMillis()) else c } }
                 Diag.add("${label(item)} achado por consenso: ${best.size} caminhos de $bases bases chegam em 0x${moved.addr} (valor mudou com o jogo fechado)")
                 return "${best.size} caminhos concordam"
             }
@@ -663,7 +677,10 @@ class Engine private constructor(private val app: Context) {
         val same = if (wanted == null) emptyList() else places.filter { a ->
             matchesAny(runCatching { send("read $a ${item.type}", quiet = true).status }.getOrDefault("?"), item.type, wanted)
         }
-        val addr = same.singleOrNull() ?: places.singleOrNull() ?: return null.also { why += "assinatura em ${places.size} lugares (${same.size} com o último valor)" }
+        // nenhum com o último valor: fica o único que cabe no histórico
+        val fits = if (same.isNotEmpty()) same else places.filter { a -> plausible(item, runCatching { send("read $a ${item.type}", quiet = true).status }.getOrDefault("?")) }
+        val addr = same.singleOrNull() ?: fits.singleOrNull() ?: places.singleOrNull()
+            ?: return null.also { why += "assinatura em ${places.size} lugares (${same.size} com o último valor, ${fits.size} dentro do histórico)" }
         return "assinatura".takeIf { moveTo(item, addr, "Assinatura").pid == pid }
     }
 
@@ -811,6 +828,7 @@ class Engine private constructor(private val app: Context) {
         if (it.pointer.isNotEmpty()) append(" · ponteiro ${it.pointer}${if (it.verified) "" else " (a confirmar)"}")
         if (it.anchor.isNotEmpty()) append(" · segue ${Session.saved.firstOrNull { a -> a.id == it.anchor }?.let(::label) ?: "?"} ${offsetText(it.offset)}")
         append(" · reservas ${it.chains.size} · assinatura ${if (sigUseful(it.sig)) "pronta" else "aprendendo"}")
+        historyText(it, System.currentTimeMillis()).takeIf { h -> h.isNotEmpty() }?.let { h -> append(" · histórico $h") }
     }
 
     /** Valores vizinhos de addr (24 antes, 24 depois), lidos como type; shift anda em blocos de 48. */
@@ -878,7 +896,8 @@ class Engine private constructor(private val app: Context) {
         hits.forEach { hit ->
             val i = Session.saved.indexOfFirst { it.addr == hit.addr && it.type == hit.type }
             when {
-                i < 0 -> SavedItem(hit.addr, hit.type, hit.region, hit.value, frozen, pid = currentPid).also { Session.saved.add(it); added += it }
+                i < 0 -> recordValue(SavedItem(hit.addr, hit.type, hit.region, hit.value, frozen, pid = currentPid), hit.value, System.currentTimeMillis())
+                    .also { Session.saved.add(it); added += it }
                 // o salvo antigo está de novo nesse endereço: passa a valer nesta vez do jogo
                 stale(Session.saved[i]) -> Session.saved[i] = Session.saved[i].copy(pid = currentPid, value = hit.value, frozen = frozen || Session.saved[i].frozen)
                 frozen -> Session.saved[i] = Session.saved[i].copy(frozen = true)
@@ -932,7 +951,7 @@ class Engine private constructor(private val app: Context) {
         val msg = writeMany(live.map { it.addr to it.type }, value)
         // o congelamento reescreve o valor guardado: tem que ser o número já normalizado ("20.000" → 20000), nunca faixa
         val v = normalizeNumbers(value)
-        if ('~' !in v && ';' !in v) live.forEach { item -> replace(item) { it.copy(value = v) } }
+        if ('~' !in v && ';' !in v) live.forEach { item -> replace(item) { recordValue(it, v, System.currentTimeMillis()) } }
         return msg + if (live.size < items.size) " ${items.size - live.size} de outra vez do jogo ficaram de fora." else ""
     }
 
@@ -991,7 +1010,7 @@ class Engine private constructor(private val app: Context) {
             val v = runCatching { d.send("read ${item.addr} ${item.type}", quiet = true).status }.getOrDefault("?")
             // "?" = não leu (o jogo fechou): guarda o último valor bom, que serve para reconhecer o salvo quando o jogo reabrir
             if (v == "?") return@forEach
-            if (v != item.value) replace(item) { it.copy(value = v) }
+            if (v != item.value) replace(item) { recordValue(it, v, now) }
             if (check && ((v != item.value && refreshTick % 5 == 0) || refreshTick % 20 == 0)) d.pruneChains(item.copy(value = v))
         }
         refreshTick++
@@ -1081,6 +1100,7 @@ internal fun normalizeNumbers(input: String): String =
 private fun SavedItem.toJson() = JSONObject().put("addr", addr).put("type", type).put("region", region).put("value", value).put("name", name).put("frozen", frozen)
     .put("pointer", pointer).put("id", id).put("anchor", anchor).put("offset", offset).put("pid", pid)
     .put("chains", JSONArray(chains)).put("sig", sig).put("sigOff", sigOff).put("verified", verified)
+    .put("history", JSONArray(history)).apply { if (!seenMin.isNaN()) put("seenMin", seenMin).put("seenMax", seenMax) }  // JSON não aceita NaN
 
 private val AOB = Regex("""([0-9a-f]{2}|\?\?){1,192}""")
 
@@ -1121,6 +1141,43 @@ internal fun sigUseful(sig: String): Boolean {
     return fixed.size >= 12 && fixed.count { it != "00" } >= 4
 }
 
+/** Guarda o valor novo no salvo e no histórico (últimas 20 mudanças) e alarga a faixa que ele já teve. */
+internal fun recordValue(item: SavedItem, v: String, nowMs: Long): SavedItem {
+    val x = readable(v, item.type)?.toDoubleOrNull()?.takeIf { it.isFinite() } ?: return item.copy(value = v)
+    val hist = if (item.history.lastOrNull()?.substringAfter(':') == v) item.history else (item.history + "${nowMs / 1000}:$v").takeLast(20)
+    return item.copy(
+        value = v, history = hist,
+        seenMin = if (item.seenMin.isNaN()) x else minOf(item.seenMin, x),
+        seenMax = if (item.seenMax.isNaN()) x else maxOf(item.seenMax, x),
+    )
+}
+
+/**
+ * O valor cabe no que o salvo já teve? Folga larga (o jogo pode ter evoluído com ele fechado), mas descarta o
+ * absurdo: um caminho errado costuma cair em 0, em lixo ou em números de outra ordem de grandeza.
+ */
+internal fun plausible(item: SavedItem, v: String): Boolean {
+    if (item.seenMin.isNaN()) return true  // sem histórico (salvo antigo): não dá para descartar
+    val x = readable(v, item.type)?.toDoubleOrNull()?.takeIf { it.isFinite() } ?: return false
+    val margin = maxOf(item.seenMax - item.seenMin, kotlin.math.abs(item.seenMax) * 0.5, 10.0)
+    return x >= item.seenMin - margin && x <= item.seenMax + margin
+}
+
+/** "1070 → 1200 → 1331 (há 2 min) · faixa 980–1331" para o salvo aberto e o relatório. */
+fun historyText(item: SavedItem, nowMs: Long): String {
+    if (item.history.isEmpty()) return ""
+    val last = item.history.last().substringBefore(':').toLongOrNull()
+    val age = last?.let { (nowMs / 1000 - it).coerceAtLeast(0) }
+    val ago = when {
+        age == null -> ""
+        age < 60 -> " (há ${age}s)"
+        age < 3600 -> " (há ${age / 60} min)"
+        else -> " (há ${age / 3600} h)"
+    }
+    val range = if (item.seenMin.isNaN()) "" else " · faixa ${readable(item.seenMin.toString(), "f64")}–${readable(item.seenMax.toString(), "f64")}"
+    return item.history.takeLast(6).joinToString(" → ") { it.substringAfter(':') } + ago + range
+}
+
 fun offsetText(o: Long) = (if (o < 0) "-0x" else "+0x") + kotlin.math.abs(o).toString(16).uppercase()
 
 /** "7a0010", "7a0010+8", "0x7a0010-0x20": endereço com offset (hex) para a aba Memória; null se não for válido. */
@@ -1152,6 +1209,8 @@ private fun JSONObject.toSaved(): SavedItem {
     return base.copy(
         id = optString("id", "").ifEmpty { base.id }, anchor = optString("anchor", ""), offset = optLong("offset", 0),
         pid = optInt("pid", 0), chains = chains, sig = sig, sigOff = optInt("sigOff", 0).coerceIn(0, 191), verified = optBoolean("verified", true),
+        history = optJSONArray("history")?.let { a -> List(a.length()) { a.getString(it) } }.orEmpty().takeLast(20),
+        seenMin = optDouble("seenMin", Double.NaN), seenMax = optDouble("seenMax", Double.NaN),
     )
 }
 

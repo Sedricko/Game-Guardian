@@ -111,4 +111,21 @@ class ValuesTest {
         assertFalse(newer("1.4.1", "1.4.1"))
         assertFalse(newer("1.4.0", "1.4.1"))
     }
+
+    @Test
+    fun historicoEFaixa() {
+        var item = SavedItem("10", "i32", "A", "1070")
+        assertTrue(plausible(item, "999999"))  // sem histórico não descarta
+        item = recordValue(item, "1070", 1_000)
+        item = recordValue(item, "1200", 61_000)
+        item = recordValue(item, "1200", 62_000)  // repetido não entra de novo
+        item = recordValue(item, "1331", 121_000)
+        assertEquals(listOf("1:1070", "61:1200", "121:1331"), item.history)
+        assertEquals(1070.0, item.seenMin, 0.0)
+        assertEquals(1331.0, item.seenMax, 0.0)
+        assertTrue(plausible(item, "1500"))
+        assertFalse(plausible(item, "4000000"))
+        assertFalse(plausible(item, "?"))
+        assertEquals("1070 → 1200 → 1331 (há 9s) · faixa 1070–1331", historyText(item, 130_000))
+    }
 }
