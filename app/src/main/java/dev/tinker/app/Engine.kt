@@ -636,7 +636,7 @@ class Engine private constructor(private val app: Context) {
             Session.results = hits
             Session.status = status
         }
-        val names = if (count in 1..20) runCatching { il2Names(hits.map { it.addr }) }.getOrDefault(emptyMap()) else emptyMap()
+        val names = if ((count ?: 0L) in 1L..20L) runCatching { il2Names(hits.map { it.addr }) }.getOrDefault(emptyMap()) else emptyMap()
         return "$status\nResultados: ${count ?: 0}" + hits.take(30).joinToString("") { "\n0x${it.addr} ${it.type} ${it.region} = ${it.value}" + (names[it.addr]?.let { n -> " [$n]" } ?: "") }
     }
 
