@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 out=$(mktemp -d); tpid=
-trap 'kill $tpid 2>/dev/null; rm -rf "$out"' EXIT
+trap 'kill $tpid 2>/dev/null || true; rm -rf "$out"' EXIT
 cc -O2 -Wall -Werror -o "$out/tinkerd" daemon/tinkerd.c -lm
 cc -O2 -o "$out/target" tests/target.c
 "$out/target" > "$out/info" & tpid=$!
