@@ -60,6 +60,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -449,7 +450,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                 if (open) {
                     InlineEditor(readable(hit.value, hit.type) ?: "", "Novo valor", onSave = { v -> editing = null; run { engine.write(hit.addr, hit.type, v) } }, onCancel = { editing = null }) {
                         TextButton(onClick = { engine.addSaved(listOf(hit)); editing = null }) { Text("Salvar na lista") }
-                        TextButton(onClick = { s.view = hit.addr to plain(hit.type); s.tab = TAB_MEMORY; editing = null }) { Text("Ver próximos") }
+                        TextButton(onClick = { s.view = hit.addr to plain(hit.type); s.fichaMode = false; s.tab = TAB_MEMORY; editing = null }) { Text("Ver próximos") }
                     }
                 }
             }
@@ -508,7 +509,19 @@ private fun PointerPanel(engine: Engine, item: SavedItem, run: (suspend () -> St
         Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text("Ponteiro (endereço que não muda ao reiniciar)", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+        // fechado por padrão: o salvo aberto fica curto; o resumo diz o essencial
+        var expanded by remember { mutableStateOf(false) }
+        Text(
+            (if (expanded) "▾ " else "▸ ") + "Ponteiro e restauração · " + when {
+                item.pointer.isNotEmpty() && item.verified -> "🔗 confirmado"
+                item.pointer.isNotEmpty() -> "🔗 a confirmar"
+                item.anchor.isNotEmpty() -> "segue outro salvo"
+                else -> "sem ponteiro"
+            } + " · ${item.chains.size} reservas · assinatura ${if (sigUseful(item.sig)) "pronta" else "aprendendo"}",
+            style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
+        )
+        if (!expanded) return@Column
         if (item.pointer.isNotEmpty()) {
             Text(pointerText(item.pointer), fontFamily = FontFamily.Monospace, fontSize = 13.sp)
             Text(
@@ -712,7 +725,8 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
                 if (open) {
                     InlineEditor(readable(item.value, item.type) ?: "", "Novo valor", onSave = { v -> editing = null; run { engine.setSaved(listOf(item), v) } }, onCancel = { editing = null }) {
                         TextButton(onClick = { engine.removeSaved(listOf(item)); editing = null }) { Text("Remover") }
-                        TextButton(onClick = { s.view = item.addr to plain(item.type); s.tab = TAB_MEMORY; editing = null }) { Text("Ver próximos") }
+                        TextButton(onClick = { s.view = item.addr to plain(item.type); s.fichaMode = false; s.tab = TAB_MEMORY; editing = null }) { Text("Ver próximos") }
+                        TextButton(onClick = { s.view = item.addr to plain(item.type); s.fichaMode = true; s.tab = TAB_MEMORY; editing = null }) { Text("Explorar ficha") }
                     }
                     NameEditor(item.name) { engine.rename(item, it) }
                     historyText(item, System.currentTimeMillis()).takeIf { it.isNotEmpty() }?.let {
@@ -760,14 +774,34 @@ private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
     var editing by remember { mutableStateOf<String?>(null) }
     var goTo by remember(center) { mutableStateOf(if (center == "0") "" else center) }
     var error by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(center, type, shift) {
-        if (center == "0") return@LaunchedEffect
+    // o que mudou desde a leitura anterior fica destacado por 3 s: ajuda a ver o que reage ao que você faz no jogo
+    val changed = remember(center, type) { mutableStateMapOf<String, Long>() }
+    val last = remember(center, type) { HashMap<String, String>() }
+    LaunchedEffect(center, type, shift, s.fichaMode) {
+        if (center == "0" || s.fichaMode) return@LaunchedEffect
         while (true) {
-            runCatching { rows = engine.nearby(center, type, shift); error = null }.onFailure { error = it.message }
+            runCatching {
+                val new = engine.nearby(center, type, shift)
+                val now = System.currentTimeMillis()
+                new.forEach { r ->
+                    val before = last.put(r.addr, r.value)
+                    if (before != null && before != r.value) changed[r.addr] = now
+                }
+                rows = new
+                error = null
+            }.onFailure { error = it.message }
             delay(1000)
         }
     }
     Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
+            FilterChip(selected = !s.fichaMode, onClick = { s.fichaMode = false }, label = { Text("Endereços") })
+            FilterChip(selected = s.fichaMode, onClick = { s.fichaMode = true }, label = { Text("Ficha do objeto") })
+        }
+        if (s.fichaMode && center != "0") {
+            FichaView(engine, center, run)
+            return@Column
+        }
         if (center == "0") {
             Text(
                 if (s.process == null) "Escolha o jogo primeiro." else "Digite um endereço ou use \"Ver próximos\" num resultado da Busca ou dos Salvos.",
@@ -796,9 +830,14 @@ private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
         LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             items(rows, key = { it.addr }) { row ->
                 val here = row.addr.toLong(16) == center.toLong(16) / TYPE_SIZES.getValue(type) * TYPE_SIZES.getValue(type)
+                val hot = (changed[row.addr] ?: 0L) > System.currentTimeMillis() - 3000
                 Column(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
-                        .background(if (here) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLow)
+                        .background(when {
+                            here -> MaterialTheme.colorScheme.primaryContainer
+                            hot -> MaterialTheme.colorScheme.tertiaryContainer
+                            else -> MaterialTheme.colorScheme.surfaceContainerLow
+                        })
                         .clickable { editing = if (editing == row.addr) null else row.addr }.padding(horizontal = 12.dp, vertical = 6.dp),
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -815,6 +854,99 @@ private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
                         InlineEditor(readable(row.value, type) ?: "", "Novo valor (${TYPE_NAMES[type]})", onSave = { v -> editing = null; run { engine.write(row.addr, type, v) } }, onCancel = { editing = null }) {
                             TextButton(onClick = { engine.addSaved(listOf(row.copy(region = "?"))); editing = null }) { Text("Salvar na lista") }
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Ficha do objeto, como o "Dissect data structure" do Cheat Engine: os campos em volta do valor com tipo e valor ao vivo.
+ * Em jogo Unity IL2CPP, com os nomes que o próprio jogo usa (Player.hp); nos outros, com o tipo adivinhado.
+ */
+@Composable
+private fun FichaView(engine: Engine, center: String, run: (suspend () -> String) -> Unit) {
+    val s = Session
+    var il2 by remember(center) { mutableStateOf<Il2Class?>(null) }
+    var looked by remember(center) { mutableStateOf(false) }
+    var page by remember(center) { mutableIntStateOf(0) }
+    var rows by remember(center) { mutableStateOf(listOf<FichaRow>()) }
+    var open by remember(center) { mutableStateOf<String?>(null) }
+    var error by remember(center) { mutableStateOf<String?>(null) }
+    val changed = remember(center) { mutableStateMapOf<String, Long>() }
+    val last = remember(center) { HashMap<String, String>() }
+    LaunchedEffect(center) {
+        il2 = runCatching { engine.il2cpp(center) }.getOrNull()
+        looked = true
+    }
+    LaunchedEffect(center, looked, page) {
+        if (!looked) return@LaunchedEffect
+        while (true) {
+            val c = il2
+            val start = c?.start?.toLong(16) ?: (center.toLong(16) - 0x40 + page * 0x80L).coerceAtLeast(0)
+            val bytes = if (c != null) ((c.fields.maxOfOrNull { it.offset } ?: 0) + 8).coerceIn(16, 0x400) else 0x80
+            runCatching { engine.ficha(start.toString(16), bytes, c) }.onSuccess { new ->
+                val now = System.currentTimeMillis()
+                new.forEach { r ->
+                    val before = last.put(r.addr, r.value)
+                    if (before != null && before != r.value) changed[r.addr] = now
+                }
+                rows = new
+                error = null
+            }.onFailure { error = it.message }
+            delay(1000)
+        }
+    }
+    val c = il2
+    Text(
+        when {
+            !looked -> "Lendo o objeto…"
+            c != null -> "${c.name} em 0x${c.start} · ${c.fields.size} campos (nomes do próprio jogo, IL2CPP)"
+            else -> "Em volta de 0x$center · tipos adivinhados (o jogo não é IL2CPP, ou o valor não está num objeto)"
+        },
+        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    if (looked && c == null) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { page-- }) { Text("▲ Antes") }
+            OutlinedButton(onClick = { page++ }) { Text("▼ Depois") }
+        }
+    }
+    error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        items(rows, key = { it.addr + it.label }) { r ->
+            val a = r.addr.toLong(16)
+            val here = center.toLong(16) in a until a + (if (r.type.isEmpty() || r.type == "xi32" || r.type == "i64" || r.type == "f64") 8 else 4)
+            val hot = (changed[r.addr] ?: 0L) > System.currentTimeMillis() - 3000
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                    .background(when {
+                        here -> MaterialTheme.colorScheme.primaryContainer
+                        hot -> MaterialTheme.colorScheme.tertiaryContainer
+                        else -> MaterialTheme.colorScheme.surfaceContainerLow
+                    })
+                    .clickable { open = if (open == r.addr) null else r.addr }.padding(horizontal = 12.dp, vertical = 6.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(offsetText(r.off), Modifier.width(64.dp), fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                    Text(r.label, Modifier.weight(1f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(r.value, fontFamily = FontFamily.Monospace, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                if (open == r.addr) {
+                    Text("0x${r.addr}", fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (r.type.isNotEmpty()) {
+                            // entra nos Salvos já ligado pelo offset aos outros da mesma ficha, com nome do campo quando é IL2CPP
+                            FilledTonalButton(onClick = { engine.addSaved(listOf(Hit(r.addr, r.type, "?", r.value))); s.status = "Salvo: ${r.label}"; open = null }) { Text("Salvar") }
+                        }
+                        if (r.value.startsWith("0x")) {
+                            // ponteiro: abre a ficha do objeto para onde ele aponta
+                            OutlinedButton(onClick = { s.view = r.value.removePrefix("0x") to "i32"; open = null }) { Text("Abrir o objeto") }
+                        }
+                    }
+                    if (r.type.isNotEmpty()) {
+                        InlineEditor(r.value, "Novo valor (${TYPE_NAMES[r.type]})", onSave = { v -> open = null; run { engine.write(r.addr, r.type, v) } }, onCancel = { open = null })
                     }
                 }
             }
@@ -912,58 +1044,42 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
         if (s.process != null) runCatching { s.regions = engine.regions() }.onFailure { onError(it.message ?: "Erro") }
     }
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        item { HelpPanel() }
+        // organizado por assunto; a Ajuda fica no fim
         item {
             Panel {
-                Text("Busca", style = MaterialTheme.typography.titleSmall)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Abrir o menu flutuante ao iniciar", style = MaterialTheme.typography.bodyMedium)
-                        Text("Como o GameGuardian: abrir o Tinker já deixa a bolinha sobre o jogo.",
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Switch(checked = s.autoOverlay, onCheckedChange = { s.autoOverlay = it; engine.saveSettings() })
+                Text("Menu flutuante", style = MaterialTheme.typography.titleSmall)
+                Toggle("Abrir o menu flutuante ao iniciar", "Como o GameGuardian: abrir o Tinker já deixa a bolinha sobre o jogo.", s.autoOverlay) {
+                    s.autoOverlay = it; engine.saveSettings()
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Pausar o jogo durante a busca e o refino", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                    Switch(checked = s.autoPause, onCheckedChange = { s.autoPause = it; engine.saveSettings() })
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Procurar valores cifrados (🔒)", style = MaterialTheme.typography.bodyMedium)
-                        Text("Acha moedas e vida protegidas com chave (comum em jogos Unity). Deixa a busca um pouco mais lenta.",
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Switch(checked = s.findEncrypted, onCheckedChange = { s.findEncrypted = it; engine.saveSettings() })
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Preparar ponteiros ao salvar", style = MaterialTheme.typography.bodyMedium)
-                        Text("Para o salvo voltar sozinho quando o jogo reabrir. Pausa o jogo alguns segundos depois de salvar.",
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Switch(checked = s.autoPointers, onCheckedChange = { s.autoPointers = it; engine.saveSettings() })
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Ponteiros só nas libs do jogo", style = MaterialTheme.typography.bodyMedium)
-                        Text("Base em libil2cpp, libunity e outras do jogo; as do sistema costumam dar caminhos que quebram.",
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Switch(checked = s.gameLibsOnly, onCheckedChange = { s.gameLibsOnly = it; engine.saveSettings() })
-                }
-            }
-        }
-        if (overlay) {
-            item {
-                Panel {
-                    Text("Painel flutuante", style = MaterialTheme.typography.titleSmall)
+                if (overlay) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Tamanho: ${PANEL_SIZES[s.panelSize].second}", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                        Text("Tamanho do painel: ${PANEL_SIZES[s.panelSize].second}", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                         OutlinedButton(onClick = onResize) { Text("Trocar") }
                     }
                     Text("Transparência", style = MaterialTheme.typography.bodyMedium)
                     Slider(value = s.alpha, onValueChange = { s.alpha = it }, onValueChangeFinished = engine::saveSettings, valueRange = 0.35f..1f)
+                }
+            }
+        }
+        item {
+            Panel {
+                Text("Busca", style = MaterialTheme.typography.titleSmall)
+                Toggle("Pausar o jogo durante a busca e o refino", "O valor não muda no meio da busca.", s.autoPause) { s.autoPause = it; engine.saveSettings() }
+                Toggle("Procurar valores cifrados (🔒)", "Acha moedas e vida protegidas com chave (comum em jogos Unity). Deixa a busca um pouco mais lenta.", s.findEncrypted) {
+                    s.findEncrypted = it; engine.saveSettings()
+                }
+            }
+        }
+        item {
+            Panel {
+                Text("Ponteiros e restauração", style = MaterialTheme.typography.titleSmall)
+                Text("Ao reabrir o jogo, os salvos voltam sozinhos pelo ponteiro, pelo consenso dos caminhos, pelo histórico do valor e pela assinatura.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Toggle("Preparar ponteiros ao salvar", "Para o salvo voltar sozinho quando o jogo reabrir. Pausa o jogo alguns segundos depois de salvar.", s.autoPointers) {
+                    s.autoPointers = it; engine.saveSettings()
+                }
+                Toggle("Ponteiros só nas libs do jogo", "Base em libil2cpp, libunity e outras do jogo; as do sistema costumam dar caminhos que quebram.", s.gameLibsOnly) {
+                    s.gameLibsOnly = it; engine.saveSettings()
                 }
             }
         }
@@ -1004,6 +1120,7 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                 }
             }
         }
+        item { HelpPanel() }
     }
 }
 
@@ -1037,6 +1154,10 @@ private val HELP = listOf(
         "Marque dois salvos para ver a distância entre eles. Na aba Memória dá para ir a 7a0010+8.",
     "Busca por bytes (AOB)" to "Na aba Busca, abra Busca por bytes: digite pares hex com ?? como curinga (1F 20 ?? D5). Dados procura na memória " +
         "do jogo; Código procura nas instruções. Os lugares achados viram resultados normais.",
+    "Ficha do objeto" to "Num salvo, toque em Explorar ficha (ou na aba Memória, em Ficha do objeto): aparecem os campos em volta do valor, " +
+        "com tipo e valor ao vivo; o que muda fica destacado. Em jogo Unity IL2CPP, com os nomes do próprio jogo (Player.hp); nos outros, " +
+        "com o tipo adivinhado (inteiro, decimal, ponteiro, cifrado 🔒). Toque num campo para salvar ou editar; num ponteiro, para abrir o objeto. " +
+        "Salvos dentro de um objeto IL2CPP ganham o nome do campo sozinhos.",
     "Endereços mudaram" to "Quando o jogo reinicia, os endereços mudam. Para um salvo continuar valendo, use um ponteiro (abaixo).",
     "Ponteiros" to "Como no Cheat Engine, mas sozinho: ao salvar, o Tinker já busca os ponteiros e aprende a assinatura (bytes em volta). " +
         "Ao reabrir o jogo e escolher ele no Tinker, cada salvo volta sozinho (ponteiro → caminhos guardados → assinatura); os da mesma ficha " +
@@ -1051,6 +1172,18 @@ private val HELP = listOf(
         "flutuante e pergunta se quer reabrir. Reabrindo, ele se liga ao jogo e os salvos voltam sozinhos. O motivo da queda fica na aba Registro.",
     "Reportar um problema" to "Na aba Registro, toque em Compartilhar relatório e envie o arquivo .txt. Ele tem tudo que é preciso para investigar.",
 )
+
+/** Linha de ajuste: título, explicação curta e o interruptor. */
+@Composable
+private fun Toggle(title: String, detail: String, on: Boolean, onChange: (Boolean) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyMedium)
+            Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Switch(checked = on, onCheckedChange = onChange)
+    }
+}
 
 @Composable
 private fun HelpPanel() {

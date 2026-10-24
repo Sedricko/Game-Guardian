@@ -30,9 +30,9 @@ Cada versão instala por cima da anterior, sem perder os salvos.
 |---|---|
 | **Busca** | Achar um valor: tipo (Auto, Dword, Float…), **Nova busca**, **Refinar**, **Desfazer**, histórico das últimas buscas. Valor desconhecido: **Começar sem valor** e depois **Aumentou / Diminuiu / Mudou / Não mudou**. Marque resultados para salvar, congelar, editar ou **Buscar perto**. Os valores atualizam ao vivo. |
 | **Salvos** | Endereços guardados, por jogo: nome, valor ao vivo, congelar, editar vários, ler como outro tipo, **ponteiros**, exportar/importar (.json). |
-| **Memória** | Valores em volta de um endereço, em qualquer tipo; **Buscar perto** e **Ir para endereço**. |
+| **Memória** | **Endereços**: valores em volta de um endereço, em qualquer tipo (o que muda fica destacado), **Buscar perto**, **Ir para endereço**. **Ficha do objeto**: os campos com nome (IL2CPP) ou tipo adivinhado. |
 | **Registro** | Tudo o que o Tinker fez, falhas do Android e logcat do jogo. **Compartilhar relatório** gera um .txt completo. |
-| **Ajustes** | Ajuda, pausa automática, tamanho e transparência do painel, fechar jogo, regiões de memória (Jh, Ch, Ca, Cd, Cb, A…). |
+| **Ajustes** | Por assunto: menu flutuante, busca, ponteiros e restauração, jogo, regiões de memória (Jh, Ch, Ca, Cd, Cb, A…) e, no fim, a Ajuda. |
 
 No menu flutuante, segure **👁 Espiar** para ver o jogo através do painel.
 **Barra rápida**: uma barra pequena sobre o jogo com valor, **Refinar** e **↑ ↓ = ≠**, para refinar sem abrir o painel; **▢** abre o painel completo.
@@ -82,6 +82,14 @@ Salvo com **⚠ de outra vez do jogo** não é lido nem escrito até voltar (esc
 o que estava congelado volta congelado.
 Marque dois salvos para ver a distância entre eles; na aba Memória dá para ir a `7a0010+8`.
 Em **Ajustes**: "Preparar ponteiros ao salvar" e "Ponteiros só nas libs do jogo". Jogos 32 bits são reconhecidos sozinhos.
+
+## Ficha do objeto (como o "Dissect data structure" do Cheat Engine)
+
+Num salvo, **Explorar ficha** (ou aba **Memória → Ficha do objeto**) mostra os campos em volta do valor, com tipo e valor ao vivo;
+o que muda fica destacado por 3 s. Em jogos **Unity IL2CPP** os campos vêm com os nomes do próprio jogo (`Player.hp`, `Weapon.damage`),
+lidos da memória do jogo; nos outros, o tipo é adivinhado (inteiro, decimal, ponteiro, cifrado 🔒). Toque num campo para salvar
+(já entra ligado pelo offset) ou editar; num ponteiro, para abrir o objeto para onde ele aponta. Salvos dentro de um objeto IL2CPP
+ganham o nome do campo sozinhos. Na lista de endereços da aba Memória, o que muda também fica destacado.
 
 ## Busca por bytes (AOB)
 

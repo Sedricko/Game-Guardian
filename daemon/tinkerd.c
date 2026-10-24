@@ -842,6 +842,74 @@ static void cmd_pointers(const char *addr, const char *maxoffs, const char *leve
     printf("ok %zu %d\n", nfound < MAXSHOW ? nfound : MAXSHOW, limited || nfound >= MAXFOUND);
 }
 
+// IL2CPP (Unity): nomes de classe e campos lidos da memória do próprio jogo, sem o global-metadata.dat (que muda
+// a cada versão e costuma vir cifrado). Todo objeto começa com o ponteiro da classe; a classe tem o nome em +2p,
+// o namespace em +3p e um vetor de FieldInfo {nome, tipo, classe dona, offset, token}. Igual do Unity 2018 em diante.
+static int ident(uint64_t a, char *out, size_t max) {
+    if (a < 0x10000) return 0;
+    memset(out, 0, max);
+    size_t got = max - 1;
+    if (read_mem(a, out, got)) { got = 16; if (read_mem(a, out, got)) return 0; }  // string perto do fim da página
+    size_t n = strnlen(out, got);
+    if (n == got) return 0;  // sem fim: não é um nome
+    for (size_t i = 0; i < n; i++) if (out[i] < 0x20 || out[i] > 0x7e) return 0;
+    return 1;
+}
+
+typedef struct { uint64_t fields; int nfields; char name[64], ns[64]; } klass_t;
+
+static int read_klass(uint64_t k, klass_t *out) {
+    uint64_t pn, pns, f, parent, fname;
+    char tmp[64];
+    int fis = 3 * psize + 8;
+    if (k < 0x10000 || read_ptr(k + 2 * psize, &pn) || read_ptr(k + 3 * psize, &pns)) return 0;
+    if (!ident(pn, out->name, sizeof out->name) || !out->name[0] || !ident(pns, out->ns, sizeof out->ns)) return 0;
+    // o campo "fields" muda de lugar entre versões: acha o ponteiro cujo FieldInfo diz que a dona é esta classe
+    for (int off = 4 * psize; off < 0x200; off += psize) {
+        if (read_ptr(k + off, &f) || f < 0x10000 || read_ptr(f + 2 * psize, &parent) || parent != k) continue;
+        if (read_ptr(f, &fname) || !ident(fname, tmp, sizeof tmp) || !tmp[0]) continue;
+        int n = 0;
+        while (n < 1024 && !read_ptr(f + (uint64_t)n * fis + 2 * psize, &parent) && parent == k) n++;
+        out->fields = f;
+        out->nfields = n;
+        return 1;
+    }
+    return 0;
+}
+
+static void cmd_il2cpp(const char *addr) {
+    psize = ptr_size();
+    uint64_t a = strtoull(addr, NULL, 16), base = a & ~(uint64_t)(psize - 1), kp;
+    int fis = 3 * psize + 8;
+    klass_t k;
+    for (uint64_t back = 0; back <= 0x1000 && back <= base; back += psize) {
+        uint64_t s = base - back;
+        if (read_ptr(s, &kp) || kp < 0x10000 || !read_klass(kp, &k)) continue;
+        // a classe precisa ter um campo no endereço pedido; senão é outro objeto antes dele
+        int hit = 0;
+        for (int i = 0; i < k.nfields && !hit; i++) {
+            int32_t off;
+            if (read_mem(k.fields + (uint64_t)i * fis + 3 * psize, &off, 4)) continue;
+            hit = off >= 0 && (uint64_t)off <= a - s && a - s < (uint64_t)off + 8;
+        }
+        if (!hit) continue;
+        printf("class %s%s%s %" PRIx64 "\n", k.ns, k.ns[0] ? "." : "", k.name, s);
+        for (int i = 0; i < k.nfields; i++) {
+            uint64_t f = k.fields + (uint64_t)i * fis, pn, pt;
+            int32_t off;
+            uint32_t bits = 0;
+            char nm[64];
+            if (read_ptr(f, &pn) || !ident(pn, nm, sizeof nm) || read_mem(f + 3 * psize, &off, 4)) continue;
+            if (!read_ptr(f + psize, &pt) && pt >= 0x10000 && read_mem(pt + psize, &bits, 4)) bits = 0;
+            if (bits & 0x10) continue;  // estático: fica fora do objeto
+            printf("field %x %02x %s\n", (unsigned)off, (bits >> 16) & 0xff, nm);
+        }
+        puts("ok");
+        return;
+    }
+    puts("err não achei a classe IL2CPP (o jogo não é Unity IL2CPP, ou o valor não está dentro de um objeto)");
+}
+
 // "libjogo.so+1a2b30 18 40": base da lib + 1a2b30, lê o ponteiro, soma 18, lê, soma 40 = endereço do valor.
 static void cmd_resolve(char *chain) {
     char *save = NULL, *tok = strtok_r(chain, " \n", &save);
@@ -1033,6 +1101,7 @@ int main(void) {
         else if (!strcmp(cmd, "pointers")) cmd_pointers(a1, a2, a3, a4[0] == '1');
         else if (!strcmp(cmd, "aob")) cmd_aob(a1, a2, 1);
         else if (!strcmp(cmd, "aobfind")) cmd_aob(a1, "data", 0);
+        else if (!strcmp(cmd, "il2cpp")) cmd_il2cpp(a1);
         else if (!strcmp(cmd, "resolve")) cmd_resolve(strstr(line, "resolve") + 7);
         else if (!strcmp(cmd, "list")) cmd_list(strtoul(a1, NULL, 10));
         else if (!strcmp(cmd, "read")) cmd_read(a1, a2);

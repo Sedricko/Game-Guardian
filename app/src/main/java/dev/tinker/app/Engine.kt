@@ -67,6 +67,13 @@ const val SIG_SIDE = 40L  // bytes de cada lado do valor na assinatura
 
 /** Distância máxima para dois salvos serem da mesma "ficha" do jogo (estrutura/objeto). */
 const val SAME_STRUCT = 4096L
+
+/** IL2CPP (Unity): classe de um objeto e os campos dele, lidos da memória do jogo. start = começo do objeto. */
+data class Il2Field(val offset: Int, val code: Int, val name: String)
+data class Il2Class(val name: String, val start: String, val fields: List<Il2Field>)
+
+/** Uma linha da ficha: um campo (ou 4 bytes) em volta do valor, com o tipo provável e o valor lido do jeito certo. */
+data class FichaRow(val addr: String, val off: Long, val type: String, val label: String, val value: String)
 data class Recent(val types: Set<String>, val value: String)
 
 /** Estado da tela; fica fora da Activity para a janela flutuante e a Activity verem o mesmo. */
@@ -92,6 +99,7 @@ object Session {
     var gameGoneByUser = false  // fechado pelo botão do Tinker: mostra "Reabrir", mas não abre o painel sozinho  // o jogo fechou sozinho (não pelo Tinker): pergunta se reabre  // versão nova na página de releases: nome e link do APK  // a bolinha abre a barra rápida em vez do painel  // a busca também procura valores cifrados (🔒)
     var canUndo by mutableStateOf(false)  // há um refino para desfazer  // pausa o jogo durante busca/refino, para o valor não mudar no meio
     var view by mutableStateOf<Pair<String, String>?>(null)
+    var fichaMode by mutableStateOf(false)  // aba Memória: lista de endereços (false) ou ficha do objeto (true)
     var tab by mutableIntStateOf(0)  // índice em TABS  // visualizador de memória: endereço e tipo  // segurando o "olho": painel quase invisível
     val saved = mutableStateListOf<SavedItem>()
     val history = mutableStateListOf<Recent>()  // últimas buscas, para repetir com um toque
@@ -316,6 +324,7 @@ class Engine private constructor(private val app: Context) {
         attachedAt = System.currentTimeMillis()
         retries = 0
         gaveUp = false
+        lastSeen.clear()
         d.send("attach ${p.pid}")
         Session.process = p
         Session.paused = false
@@ -415,6 +424,45 @@ class Engine private constructor(private val app: Context) {
             val (t, v) = l.split('\t', limit = 2).takeIf { it.size == 2 } ?: return@mapNotNull null
             Recent(t.split(',').filter { it in TYPE_SIZES }.toSet(), v)
         }.let(Session.history::addAll)
+    }
+
+    // Ficha e IL2CPP
+
+    /** Classe IL2CPP do objeto que contém addr (null: o jogo não é IL2CPP ou o valor não está num objeto). */
+    suspend fun il2cpp(addr: String): Il2Class? = call { d -> d.il2(addr) }
+
+    private fun Daemon.il2(addr: String): Il2Class? {
+        val r = runCatching { send("il2cpp $addr", quiet = true) }.getOrNull() ?: return null
+        val head = r.lines.firstOrNull { it.startsWith("class ") }?.removePrefix("class ")?.split(" ") ?: return null
+        val fields = r.lines.filter { it.startsWith("field ") }.mapNotNull { l ->
+            val f = l.removePrefix("field ").split(" ", limit = 3)
+            Il2Field(f[0].toIntOrNull(16) ?: return@mapNotNull null, f[1].toIntOrNull(16) ?: 0, f.getOrElse(2) { "?" })
+        }.sortedBy { it.offset }
+        return Il2Class(head[0], head.getOrElse(1) { addr }, fields)
+    }
+
+    /** Lê a ficha: `bytes` a partir de start, numa leitura só; os tipos vêm do IL2CPP quando há, senão são adivinhados. */
+    suspend fun ficha(start: String, bytes: Int, il2: Il2Class?): List<FichaRow> = call { d ->
+        val s0 = start.toLong(16) / 8 * 8
+        val words = (bytes + 7) / 8
+        val raw = ByteArray(words * 8)
+        d.send("dump ${s0.toString(16)} i64 $words", quiet = true).lines.forEachIndexed { i, l ->
+            val v = l.substringAfter(' ').toLongOrNull() ?: 0L
+            for (k in 0 until 8) raw[i * 8 + k] = (v shr (8 * k)).toByte()
+        }
+        val base = il2?.start?.toLong(16) ?: s0
+        fichaRows(s0, raw, base, il2)
+    }
+
+    /** Salvo novo dentro de um objeto IL2CPP: ganha o nome do campo (ex.: Player.hp) se ainda não tem nome. */
+    private suspend fun nameFromIl2cpp(item: SavedItem) {
+        if (item.name.isNotEmpty()) return
+        val c = runCatching { il2cpp(item.addr) }.getOrNull() ?: return
+        val off = item.addr.toLong(16) - c.start.toLong(16)
+        val f = c.fields.firstOrNull { it.offset.toLong() == off } ?: c.fields.lastOrNull { it.offset <= off && off < it.offset + 8 } ?: return
+        val name = "${c.name.substringAfterLast('.')}.${f.name}"
+        Diag.add("Salvo 0x${item.addr} é o campo $name (IL2CPP)")
+        replace(item) { if (it.name.isEmpty()) it.copy(name = name) else it }
     }
 
     // Ponteiros, offsets e assinatura: como um salvo volta a valer depois de reiniciar o jogo
@@ -580,6 +628,7 @@ class Engine private constructor(private val app: Context) {
         if (late && retries % 10 != 0) return  // devagar: a cada 30 s, assinatura a cada 2 min
         val msg = call(start = false) { d -> d.restoreAll(pid, signature = retries % (if (late) 40 else 5) == 0, retry = true) }
         if (msg.isNotEmpty()) Session.restoreInfo = msg
+        else if (!late && Session.saved.any(::stale)) Session.restoreInfo = "Esperando o jogo carregar para trazer os salvos de volta… (${retries * 3} s)"
     }
 
     /** Botão ↻ nos Salvos: procura agora os que estão de outra vez do jogo (com assinatura) e diz por que não voltaram. */
@@ -588,6 +637,11 @@ class Engine private constructor(private val app: Context) {
     }
 
     private var gaveUp = false
+
+    // endereço achado na última tentativa, por salvo: um achado sem conferir o valor só vale se repetir
+    private val lastSeen = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    private fun steady(key: String, addr: String): Boolean = (lastSeen.put(key, addr) == addr)
 
     private var attachedAt = 0L
     private var retries = 0
@@ -612,7 +666,8 @@ class Engine private constructor(private val app: Context) {
             return "ponteiro confirmado"
         }
         // o valor mudou (você jogou, ou o jogo carregou outro save), mas cabe no histórico: segue o escolhido, ainda a confirmar
-        if (!item.seenMin.isNaN() && v != "?" && v !in setOf("0", "-1") && plausible(item, v)) {
+        // (quando o mesmo endereço repete em duas tentativas: com o jogo carregando, o caminho ainda muda de lugar)
+        if (!item.seenMin.isNaN() && v != "?" && v !in setOf("0", "-1") && plausible(item, v) && steady("h" + item.id, a)) {
             if (moveTo(item, a, "Ponteiro").pid != pid) return null
             replace(item) { it.copy(value = v, trusted = false) }
             Diag.add("Ponteiro de ${label(item)} seguido pelo histórico: chega em 0x$a com $v (faixa ${item.seenMin}–${item.seenMax})")
@@ -662,6 +717,10 @@ class Engine private constructor(private val app: Context) {
         if (there != null && !plausible(item, there)) why += "consenso chega em valor $there, fora do histórico"
         // último valor era bom e agora lê 0: o jogo ainda está carregando; tenta de novo depois
         else if (there == "0" && telling(item) != null) why += "consenso chega em valor 0 (jogo carregando?)"
+        else if (((best.size >= 3 && bases >= 2 && best.size >= 2 * second) || withChosen) && !steady(item.id, best.first().second)) {
+            // jogo carregando: os caminhos ainda mudam de lugar entre uma tentativa e outra; espera repetir
+            why += "consenso em 0x${best.first().second}, esperando confirmar na próxima tentativa"
+        }
         else if ((best.size >= 3 && bases >= 2 && best.size >= 2 * second) || withChosen) {
             val moved = moveTo(item, best.first().second, "Consenso")
             if (moved.pid == pid) {
@@ -925,6 +984,10 @@ class Engine private constructor(private val app: Context) {
                 it.id != cur.id && it.pid == cur.pid && it.anchor.isEmpty() && kotlin.math.abs(it.addr.toLong(16) - cur.addr.toLong(16)) <= SAME_STRUCT
             }?.let(::linkNear)
         }
+        // nome do campo pelo IL2CPP (leitura rápida, não pausa o jogo)
+        if (added.size in 1..20) scope.launch {
+            added.forEach { a -> Session.saved.firstOrNull { it.id == a.id }?.let { runCatching { nameFromIl2cpp(it) } } }
+        }
         // ponteiros já preparados para quando o jogo reabrir (pausa o jogo por alguns segundos)
         if (Session.autoPointers && added.size in 1..3) scope.launch {
             // espera a busca em andamento: as duas pausam/continuam o jogo e se atrapalhariam
@@ -1153,6 +1216,70 @@ internal fun mergeSig(old: String, new: String) = old.chunked(2).zip(new.chunked
 internal fun sigUseful(sig: String): Boolean {
     val fixed = sig.chunked(2).filter { it != "??" }
     return fixed.size >= 12 && fixed.count { it != "00" } >= 4
+}
+
+/** Nome curto do tipo de um campo IL2CPP (Il2CppTypeEnum). */
+fun il2TypeName(code: Int) = when (code) {
+    0x02 -> "bool"; 0x03 -> "char"; 0x04 -> "sbyte"; 0x05 -> "byte"; 0x06 -> "short"; 0x07 -> "ushort"
+    0x08 -> "int"; 0x09 -> "uint"; 0x0a -> "long"; 0x0b -> "ulong"; 0x0c -> "float"; 0x0d -> "double"
+    0x0e -> "string"; 0x11 -> "struct"; 0x12 -> "classe"; 0x14, 0x1d -> "array"; 0x15 -> "genérico"; 0x1c -> "object"
+    else -> "tipo $code"
+}
+
+/** Tipo do Tinker para ler um campo IL2CPP; null = não é número (string, classe, struct). */
+fun il2Tinker(code: Int) = when (code) {
+    0x08, 0x09 -> "i32"; 0x0c -> "f32"; 0x0d -> "f64"; 0x0a, 0x0b -> "i64"; 0x06, 0x07 -> "i16"; 0x02, 0x04, 0x05 -> "i8"
+    else -> null
+}
+
+/**
+ * Linhas da ficha a partir dos bytes lidos. Com IL2CPP, um campo por linha com nome e tipo do jogo.
+ * Sem, de 4 em 4 bytes com o tipo adivinhado: ponteiro (8 bytes), decimal que parece número de jogo, cifrado (chave + valor) ou inteiro.
+ */
+internal fun fichaRows(start: Long, raw: ByteArray, base: Long, il2: Il2Class?): List<FichaRow> {
+    fun u32(i: Int) = (0 until 4).fold(0L) { acc, k -> acc or ((raw[i + k].toLong() and 0xff) shl (8 * k)) }
+    fun u64(i: Int) = u32(i) or (u32(i + 4) shl 32)
+    fun at(i: Int) = (start + i).toString(16)
+    val rows = mutableListOf<FichaRow>()
+    if (il2 != null) {
+        il2.fields.forEach { f ->
+            val i = (base + f.offset - start).toInt()
+            val t = il2Tinker(f.code)
+            if (i < 0 || i + 8 > raw.size) return@forEach
+            val v = when (t) {
+                "f32" -> java.lang.Float.intBitsToFloat(u32(i).toInt()).toString()
+                "f64" -> java.lang.Double.longBitsToDouble(u64(i)).toString()
+                "i64" -> u64(i).toString()
+                "i16" -> u32(i).toInt().toShort().toString()
+                "i8" -> raw[i].toString()
+                "i32" -> u32(i).toInt().toString()
+                else -> "0x" + (u64(i) and 0x00ffffffffffffffL).toString(16)
+            }
+            rows += FichaRow(at(i), f.offset.toLong(), t ?: "", "${f.name} · ${il2TypeName(f.code)}", readable(v, t ?: "i64") ?: "NaN")
+        }
+        return rows
+    }
+    var i = 0
+    while (i + 4 <= raw.size) {
+        val x = u32(i).toInt()
+        val q = if (i % 8 == 0 && i + 8 <= raw.size) u64(i) and 0x00ffffffffffffffL else 0
+        val f = java.lang.Float.intBitsToFloat(x)
+        val off = start + i - base
+        // decimal de jogo: finito, nem minúsculo nem gigante, e não é um inteiro pequeno lido como float
+        val floaty = f.isFinite() && kotlin.math.abs(f) in 1e-3f..1e9f && (x and 0x7fffffff) > 0x00800000
+        // cifrado (chave grande aqui, valor ^ chave logo depois dando um número pequeno); a chave às vezes parece decimal
+        val y = if (i + 8 <= raw.size) u32(i + 4).toInt() else 0
+        val cipher = i + 8 <= raw.size && (x and 0x7fffffff) >= 0x10000 && x != y && kotlin.math.abs(x xor y) < 1_000_000
+        when {
+            q in 0x10000000L until 0x10000000000L -> { rows += FichaRow(at(i), off, "", "ponteiro", "0x" + q.toString(16)); i += 8; continue }
+            x == 0 -> rows += FichaRow(at(i), off, "i32", "zero", "0")
+            cipher && !floaty -> { rows += FichaRow(at(i), off, "xi32", "cifrado 🔒", (x xor y).toString()); i += 8; continue }
+            floaty -> rows += FichaRow(at(i), off, "f32", if (cipher) "decimal (ou 🔒 ${x xor y})" else "decimal", readable(f.toString(), "f32") ?: "")
+            else -> rows += FichaRow(at(i), off, "i32", "inteiro", x.toString())
+        }
+        i += 4
+    }
+    return rows
 }
 
 /** Guarda o valor novo no salvo e no histórico (últimas 20 mudanças) e alarga a faixa que ele já teve. */

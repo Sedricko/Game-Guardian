@@ -128,4 +128,23 @@ class ValuesTest {
         assertFalse(plausible(item, "?"))
         assertEquals("1070 → 1200 → 1331 (há 9s) · faixa 1070–1331", historyText(item, 130_000))
     }
+
+    @Test
+    fun fichaAdivinhaOsTipos() {
+        fun le(v: Long, n: Int) = ByteArray(n) { (v shr (8 * it)).toByte() }
+        val raw = le(0xb400007a12345678uL.toLong(), 8) +                       // ponteiro (com a marca do arm64)
+            le(1331, 4) + le(java.lang.Float.floatToIntBits(99.5f).toLong(), 4) +  // inteiro e decimal
+            le(0x5A3C9D21, 4) + le((777777 xor 0x5A3C9D21).toLong(), 4) +        // cifrado
+            le(0, 4) + le(0, 4)
+        val rows = fichaRows(0x1000, raw, 0x1000, null)
+        assertEquals(listOf("ponteiro", "inteiro", "decimal", "cifrado 🔒", "zero", "zero"), rows.map { it.label })
+        assertEquals(listOf("0x7a12345678", "1331", "99.5", "777777", "0", "0"), rows.map { it.value })
+        assertEquals(listOf(0L, 8L, 12L, 16L, 24L, 28L), rows.map { it.off })
+        assertEquals("1010", rows[3].addr)
+        // com IL2CPP: nome e tipo do jogo, offset contado do começo do objeto
+        val il2 = Il2Class("Game.Player", "ff8", listOf(Il2Field(0x10, 0x08, "gold"), Il2Field(0x14, 0x0c, "hp"), Il2Field(0x18, 0x0e, "nome")))
+        val named = fichaRows(0x1000, raw, 0xff8, il2)
+        assertEquals(listOf("gold · int", "hp · float", "nome · string"), named.map { it.label })
+        assertEquals(listOf("1331", "99.5"), named.take(2).map { it.value })
+    }
 }

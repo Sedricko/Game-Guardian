@@ -8,7 +8,7 @@ cc -O2 -Wall -Werror -pthread -o "$out/tinkerd" daemon/tinkerd.c -lm
 cc -O2 -o "$out/target" tests/target.c
 "$out/target" > "$out/info" & tpid=$!
 for _ in $(seq 50); do [ -s "$out/info" ] && break; sleep 0.1; done
-read -r pid iaddr faddr paddr xaddr < "$out/info"
+read -r pid iaddr faddr paddr xaddr oaddr < "$out/info"
 
 got=$("$out/tinkerd" <<CMDS
 search i32 1
@@ -132,6 +132,12 @@ mapfile -t ab < <(grep -E '^(ok|err)' <<<"$aob")
     || { echo "FALHOU: aob"; exit 1; }
 code=$(printf '%s\n' "attach $pid" "aob 4889e5 code" | "$out/tinkerd" | tail -1)
 [[ "$code" =~ ^ok\ [1-9] ]] || { echo "FALHOU: aob no código ($code)"; exit 1; }
+
+# IL2CPP: do endereço do gold acha o objeto, a classe Game.Player e os campos (sem o estático)
+il=$(printf '%s\n' "attach $pid" "il2cpp $(printf '%x' $((0x$oaddr + 0x14)))" "il2cpp $iaddr" | "$out/tinkerd")
+echo "$il"
+grep -qx "class Game.Player $oaddr" <<<"$il" && grep -qx "field 10 0c hp" <<<"$il" && grep -qx "field 14 08 gold" <<<"$il" \
+    && ! grep -q instances <<<"$il" && grep -q "^err não achei a classe IL2CPP" <<<"$il" || { echo "FALHOU: il2cpp"; exit 1; }
 
 # Daemon saindo com o jogo pausado (app caiu no meio da busca): o jogo tem que voltar a rodar
 printf '%s\n' "attach $pid" "pause" | "$out/tinkerd" >/dev/null
