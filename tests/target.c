@@ -35,7 +35,8 @@ int main(void) {
     x[0] = 0x5A3C9D21;
     x[1] = 777777 ^ 0x5A3C9D21;
     // objeto IL2CPP: Game.Player { float hp em +0x10; int gold em +0x14 } e um campo estático que não aparece
-    player = (struct klass){0, 0, names + 1, names + 8, {0}, player_fields};
+    // image: qualquer ponteiro válido; pad[1] = bits do byval_arg com o tipo "classe" (0x12)
+    player = (struct klass){player_fields, 0, names + 1, names + 8, {0, (void *)(uintptr_t)(0x12u << 16)}, player_fields};
     player_fields[0] = (struct fi){"hp", &t_r4, &player, 0x10, 0};
     player_fields[1] = (struct fi){"gold", &t_i4, &player, 0x14, 0};
     player_fields[2] = (struct fi){"instances", &t_static, &player, 0, 0};

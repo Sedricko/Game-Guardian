@@ -143,6 +143,9 @@ echo "$objs"
 grep -qx "obj $oaddr" <<<"$objs" && [ "$(grep -c '^obj ' <<<"$objs")" = 2 ] && grep -q "^err classe não encontrada (o jogo" <<<"$objs" && grep -q "^err classe não encontrada (o nome existe" <<<"$objs" \
     || { echo "FALHOU: il2objs"; exit 1; }
 
+cl=$(printf '%s\n' "attach $pid" "il2classes" | "$out/tinkerd")
+grep -qE "^class Game.Player [0-9a-f]+ 3$" <<<"$cl" || { echo "FALHOU: il2classes"; echo "$cl" | head; exit 1; }
+
 # Valor que não cabe no tipo não é escrito cortado (10000000000 num Dword virava 1410065408)
 big2=$(printf '%s\n' "attach $pid" "write $iaddr i32 10000000000" "write $iaddr i32 4294967295" "write $iaddr i8 300" "read $iaddr i32" "write $iaddr i32 987654000" | "$out/tinkerd")
 echo "$big2"

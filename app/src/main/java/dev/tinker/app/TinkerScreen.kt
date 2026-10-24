@@ -19,6 +19,7 @@ import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -32,6 +33,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -996,6 +998,8 @@ private fun ClassOpener(engine: Engine) {
     var loading by remember { mutableStateOf(false) }
     var info by remember { mutableStateOf<String?>(null) }
     var objs by remember { mutableStateOf(listOf<String>()) }
+    var all by remember(s.process) { mutableStateOf<List<GameClass>?>(null) }
+    var listing by remember { mutableStateOf(false) }
     fun open(name: String) {
         if (loading || name.isBlank()) return
         cls = name
@@ -1026,8 +1030,42 @@ private fun ClassOpener(engine: Engine) {
             shortcuts.forEach { c -> AssistChip(onClick = { open(c) }, label = { Text(c.substringAfterLast('.'), maxLines = 1) }) }
         }
     }
+    // sem digitar: lista todas as classes do jogo; o campo acima vira filtro
+    TextButton(onClick = {
+        listing = !listing
+        if (listing && all == null && !loading) {
+            loading = true
+            info = "Listando as classes do jogo…"
+            scope.launch {
+                runCatching { engine.listClasses() }.onSuccess { all = it; info = "${it.size} classes com campos (as do jogo primeiro). Digite acima para filtrar." }
+                    .onFailure { info = it.message; listing = false }
+                loading = false
+            }
+        }
+    }, enabled = s.process != null) { Text((if (listing) "▾ " else "▸ ") + "Ver todas as classes do jogo") }
     if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
     info?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    val shownClasses = all?.takeIf { listing }?.filter { cls.isBlank() || it.name.contains(cls, ignoreCase = true) }
+    if (shownClasses != null) {
+        Column(Modifier.fillMaxWidth().heightIn(max = 320.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            shownClasses.take(200).forEach { gc ->
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceContainerLow)
+                        .clickable { listing = false; open(gc.name) }.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(gc.name.substringAfterLast('.'), style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if ('.' in gc.name) Text(gc.name.substringBeforeLast('.'), style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    Text("${gc.fields} campos", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                }
+            }
+            if (shownClasses.size > 200) Text("…e mais ${shownClasses.size - 200}: digite parte do nome para filtrar.", style = MaterialTheme.typography.bodySmall)
+            if (shownClasses.isEmpty()) Text("Nenhuma classe com \"$cls\".", style = MaterialTheme.typography.bodySmall)
+        }
+    }
     if (objs.isNotEmpty()) {
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             objs.take(30).forEachIndexed { i, o ->
@@ -1364,7 +1402,8 @@ private val HELP = listOf(
     "Receitas" to "Nos Salvos, marque campos que têm nome do jogo (os salvos pela ficha) e toque em Criar receita. A receita guarda cada " +
         "campo pelo nome da classe, não pelo endereço: Aplicar escreve todos os valores de uma vez (e congela os ❄), em qualquer vez que o " +
         "jogo abrir. Ligue \"ao abrir\" para aplicar sozinha quando o jogo carregar. Copiar manda a receita como texto; Colar lista recebe.",
-    "Abrir objeto pelo nome" to "Memória → Ficha do objeto: digite a classe (ex.: PlayerData) e toque em Abrir: aparecem todos os campos com " +
+    "Abrir objeto pelo nome" to "Memória → Ficha do objeto: toque em Ver todas as classes do jogo e escolha uma (as do jogo vêm primeiro; " +
+        "digite parte do nome para filtrar), ou digite a classe (ex.: PlayerData) e toque em Abrir: aparecem todos os campos com " +
         "o valor de agora (Gem = 1000…); toque num campo para Editar, Salvar ou Congelar. Filtrar campo acha rápido (gem). " +
         "Campos de lista (OwnedWeapons) abrem a lista com cada item.",
     "Ficha do objeto" to "Num salvo, toque em Explorar ficha (ou na aba Memória, em Ficha do objeto): aparecem os campos em volta do valor, " +

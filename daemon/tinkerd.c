@@ -1098,6 +1098,55 @@ static void cmd_il2objs(const char *full) {
     printf("ok %zu\n", shown);
 }
 
+// Todas as classes IL2CPP do jogo (com campos): procura na memória estruturas de classe — imagem, nome e namespace
+// (os dois no metadata, perto um do outro) e um vetor de campos cuja dona é ela. Lista "class ns.Nome endereço nCampos".
+static void klass_chunk(size_t ci, unsigned char *buf, void *ctx) {
+    pscan_t *ps = ctx;
+    const chunk_t *c = &ps->cs.c[ci];
+    if (psize != 8 || read_mem(c->addr, buf, c->len)) return;
+    klass_t k;
+    for (size_t i = 0; i + 48 <= c->len; i += 8) {
+        uint64_t img, nm, ns;
+        memcpy(&img, buf + i, 8);
+        memcpy(&nm, buf + i + 16, 8);
+        memcpy(&ns, buf + i + 24, 8);
+        img &= TAGMASK; nm &= TAGMASK; ns &= TAGMASK;
+        // filtro barato antes de ler a classe inteira: três ponteiros, nome e namespace perto um do outro
+        // até 48 bits: Android arm64 usa 39, mas o teste no PC (x86-64) usa endereços 0x55...
+        if (img < 0x10000000 || img >= 0x1000000000000ULL || nm < 0x10000000 || nm >= 0x1000000000000ULL || ns < 0x10000000) continue;
+        if ((nm > ns ? nm - ns : ns - nm) > 0x4000000) continue;
+        // logo depois vem o próprio tipo da classe (byval_arg: dado + bits); o código do tipo é classe, struct ou genérico
+        uint32_t bits;
+        memcpy(&bits, buf + i + 40, 4);
+        unsigned code = (bits >> 16) & 0xff;
+        if (code != 0x11 && code != 0x12 && code != 0x15) continue;
+        if (read_klass(c->addr + i, &k) && k.nfields > 0) hpush(&ps->out[ci], (hit_t){c->addr + i, (uint64_t)k.nfields, 0, c->region});
+    }
+}
+
+static void cmd_il2classes(void) {
+    psize = ptr_size();
+    if (psize != 8) { puts("err lista de classes só em jogo 64 bits por enquanto"); return; }
+    chunks_t cs = {.want = ~((1u << R_V) | (1u << 7))};
+    if (each_region(add_chunks, &cs)) { puts("err não leu o mapa de memória"); return; }
+    pscan_t ps = {NULL, 0, 0, 0, 0, cs, calloc(cs.n ? cs.n : 1, sizeof(hits_t))};
+    if (!ps.out) { puts("err sem memória"); exit(1); }
+    parallel(cs.n, klass_chunk, &ps);
+    size_t shown = 0;
+    klass_t k;
+    for (size_t ci = 0; ci < cs.n; ci++) {
+        for (size_t j = 0; j < ps.out[ci].n; j++)
+            if (shown < 20000 && read_klass(ps.out[ci].h[j].addr, &k)) {
+                printf("class %s%s%s %" PRIx64 " %d\n", k.ns, k.ns[0] ? "." : "", k.name, ps.out[ci].h[j].addr, k.nfields);
+                shown++;
+            }
+        free(ps.out[ci].h);
+    }
+    free(ps.out);
+    free(cs.c);
+    printf("ok %zu\n", shown);
+}
+
 // Roda um logcat (como root vê todos os apps) e repassa cada linha com "| ".
 static void run_logcat(const char *args) {
     char cmd[256], line[1026];
@@ -1199,6 +1248,7 @@ int main(void) {
         else if (!strcmp(cmd, "aobfind")) cmd_aob(a1, "data", 0);
         else if (!strcmp(cmd, "il2cpp")) cmd_il2cpp(a1);
         else if (!strcmp(cmd, "il2objs")) cmd_il2objs(a1);
+        else if (!strcmp(cmd, "il2classes")) cmd_il2classes();
         else if (!strcmp(cmd, "resolve")) cmd_resolve(strstr(line, "resolve") + 7);
         else if (!strcmp(cmd, "list")) cmd_list(strtoul(a1, NULL, 10));
         else if (!strcmp(cmd, "read")) cmd_read(a1, a2);

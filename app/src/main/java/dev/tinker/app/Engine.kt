@@ -82,6 +82,9 @@ val BOXED = setOf(
 data class Il2Field(val offset: Int, val code: Int, val name: String)
 data class Il2Class(val name: String, val start: String, val fields: List<Il2Field>)
 
+/** Classe IL2CPP do jogo (para a lista): nome completo e quantos campos tem. */
+data class GameClass(val name: String, val fields: Int)
+
 /** Item de uma lista do jogo (List<T>): referência a outro objeto (abre a ficha dele) ou um número. */
 data class ListItem(val index: Int, val addr: String, val label: String, val value: String, val isRef: Boolean)
 
@@ -536,6 +539,18 @@ class Engine private constructor(private val app: Context) {
         replace(item) { it.copy(trusted = same.singleOrNull() == addr) }
         Diag.add("${label(item)} achado pela classe IL2CPP $cls em 0x$addr")
         return "classe $cls"
+    }
+
+    /**
+     * Todas as classes do jogo com campos, as do próprio jogo primeiro (as de bibliotecas — System, Unity, anúncios… — no fim);
+     * genéricas e geradas pelo compilador (`, <) ficam de fora. Sem digitar nome: é só escolher.
+     */
+    suspend fun listClasses(): List<GameClass> = call { d ->
+        d.send("il2classes").lines.mapNotNull { l ->
+            val f = l.removePrefix("class ").split(" ")
+            if (f.size < 3 || '`' in f[0] || '<' in f[0] || !CLASS_NAME.matches(f[0])) null else GameClass(f[0], f[2].toIntOrNull() ?: 0)
+        }.groupBy { it.name }.map { (_, same) -> same.maxBy { it.fields } }
+            .sortedWith(compareBy<GameClass> { c -> LIBS.any { c.name.startsWith(it) } }.thenBy { it.name.substringAfterLast('.').lowercase() })
     }
 
     /** Objetos de uma classe IL2CPP pelo nome (PlayerData, ou Namespace.PlayerData); lê a memória toda, leva alguns segundos. */
@@ -1398,6 +1413,13 @@ private fun SavedItem.toJson() = JSONObject().put("addr", addr).put("type", type
     .put("pointer", pointer).put("id", id).put("anchor", anchor).put("offset", offset).put("pid", pid)
     .put("chains", JSONArray(chains)).put("sig", sig).put("sigOff", sigOff).put("verified", verified)
     .put("trusted", trusted).put("il2", il2).put("temp", temp).put("history", JSONArray(history)).apply { if (!seenMin.isNaN()) put("seenMin", seenMin).put("seenMax", seenMax) }  // JSON não aceita NaN
+
+/** Namespaces de bibliotecas: vão para o fim da lista de classes (o que interessa é o código do próprio jogo). */
+private val LIBS = listOf(
+    "System", "Unity", "Mono", "TMPro", "Google", "Firebase", "Newtonsoft", "Microsoft", "AppsFlyer", "Facebook", "Spine", "DG.",
+    "Cinemachine", "Sirenix", "Coffee", "I2.", "Zenject", "Internal", "JetBrains", "Bolt", "Photon", "Steamworks", "GooglePlayGames",
+    "AOT", "Il2Cpp", "Applovin", "AppLovin", "IronSource", "com.", "Com.", "Xsolla", "Lofelt", "Sentry", "PlayFab", "Amazon", "Mediation",
+)
 
 private val CLASS_NAME = Regex("""[A-Za-z0-9_.`<>]{1,120}""")  // vai para o daemon
 
