@@ -282,6 +282,19 @@ jogo abrir, use propor_receita com os salvos."""
                 while (spare-- > 0 && keyProblem(code, reply) && nextGeminiKey("código $code")) {
                     http("models/${Session.geminiModel.trim()}:generateContent", Session.geminiKey, body).let { code = it.first; reply = it.second }
                 }
+                // todas as chaves no limite por minuto, ou servidor cheio: espera e segue sozinho, sem precisar de Continuar
+                var waits = 0
+                while (waits++ < 5) {
+                    val secs = geminiWait(code, reply) ?: break
+                    onStep("⏳ Gemini ${if (code == 429) "no limite em todas as chaves" else "cheio"}: espero $secs s e continuo sozinho")
+                    Diag.ai("Gemini: código $code, esperando $secs s para continuar (vez $waits de 5)")
+                    kotlinx.coroutines.delay(secs * 1000L)
+                    http("models/${Session.geminiModel.trim()}:generateContent", Session.geminiKey, body).let { code = it.first; reply = it.second }
+                    var left = Session.geminiKeys.size - 1
+                    while (left-- > 0 && keyProblem(code, reply) && nextGeminiKey("código $code")) {
+                        http("models/${Session.geminiModel.trim()}:generateContent", Session.geminiKey, body).let { code = it.first; reply = it.second }
+                    }
+                }
                 val j = runCatching { JSONObject(reply) }.getOrNull() ?: return fail("Gemini respondeu $code sem conteúdo.").also { Diag.ai("API Gemini: código $code sem JSON: ${reply.take(500)}") }
                 statRounds++
                 j.optJSONObject("usageMetadata")?.let { u -> statIn += u.optInt("promptTokenCount"); statOut += u.optInt("candidatesTokenCount") }
@@ -383,4 +396,14 @@ internal fun rankGemini(names: List<String>): List<String> {
     return names.filter { n -> n.startsWith("gemini-") && skip.none { it in n } }.distinct()
         // primeiro o tipo (Flash antes de Pro e de Lite), depois estável antes de preview: um Flash preview acerta mais que um Lite
         .sortedWith(compareBy<String>(::tier, { n -> listOf("preview", "exp").any { it in n } }, { -version(it) }, { it.length }))
+}
+
+/**
+ * Quantos segundos esperar antes de refazer um pedido ao Gemini sozinho; null: não adianta esperar.
+ * Limite por minuto (429) volta logo: usa o retryDelay que o Gemini manda, ou 60 s. Cota do dia não volta hoje.
+ */
+internal fun geminiWait(code: Int, reply: String): Int? = when {
+    code == 503 || code == 500 -> 30
+    code != 429 || "perday" in reply.lowercase() -> null
+    else -> (Regex(""""retryDelay"\s*:\s*"(\d+)""").find(reply)?.groupValues?.get(1)?.toIntOrNull() ?: 60).coerceIn(5, 90)
 }

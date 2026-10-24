@@ -235,4 +235,13 @@ class ValuesTest {
         assertEquals("09/10 só nova\n", mergeLines("", "09/10 só nova"))
         assertEquals("", mergeLines("", ""))
     }
+
+    @Test
+    fun geminiWaitsOnlyWhenItComesBack() {
+        assertEquals(37, geminiWait(429, """{"error":{"details":[{"retryDelay": "37s"}]}}"""))
+        assertEquals(60, geminiWait(429, """{"error":{"message":"rate limit"}}"""))
+        assertEquals(null, geminiWait(429, """{"error":{"message":"GenerateRequestsPerDayPerProjectPerModel"}}"""))  // cota do dia
+        assertEquals(30, geminiWait(503, ""))
+        assertEquals(null, geminiWait(400, ""))
+    }
 }
