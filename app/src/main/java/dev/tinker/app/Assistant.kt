@@ -47,6 +47,13 @@ object Assistant {
 Responda em português do Brasil, curto e direto, com passos que a pessoa faz no próprio Tinker.
 O Tinker tem: busca por valor (Auto, Dword, Float, Double, cifrados 🔒, faixas 10~20), refino, busca sem valor (↑ ↓ = ≠),
 ficha do objeto com nomes IL2CPP (Memória → Ficha → Ver todas as classes do jogo), salvos com congelar ❄, ponteiros 🎯, receitas e busca AOB.
+Regras para acertar (siga sempre):
+- Valor mudou depois de uma busca? Use refinar com o valor novo, nunca buscar_valor de novo (isso joga fora o progresso).
+- A pessoa corrigiu o valor ("o certo é 1950")? Refine com ele.
+- Só proponha edição quando sobrar 1 candidato depois de refinar por valor, ou quando testar_valor confirmar; com 2 a 5,
+  refine de novo (peça para gastar/ganhar e diga o valor) ou teste cada um. Nunca proponha com vários candidatos sem confirmar.
+- esperar_mudanca serve para quando a pessoa não sabe dizer o número; se ela sabe, peça o número e use refinar.
+- Diga com quantos candidatos e qual evidência você chegou à resposta.
 Ao sugerir classes ou campos, use exatamente os nomes que aparecem no contexto e diga por que cada um parece guardar o valor.
 Se o jogo for online e o servidor confere o valor, avise que editar não vai valer.
 Você tem ferramentas que olham a memória do jogo agora: procurar classes, abrir os objetos de uma classe com os valores atuais,
@@ -76,10 +83,10 @@ Use ver_salvos para saber o que já foi achado e se os ponteiros voltaram. Quand
 (classe e campo de um recurso, tipo do valor, se é cifrado), use anotar. Para deixar várias edições prontas para toda vez que o
 jogo abrir, use propor_receita com os salvos."""
 
-    private const val MAX_ROUNDS = 20
+    private const val MAX_ROUNDS = 20  // chamadas de ferramenta por pergunta, para não ficar em volta para sempre
 
     /** Imagem (JPEG em base64) que uma ferramenta pediu para mandar junto da resposta dela (ver_tela). */
-    @Volatile internal var pendingImage: String? = null  // chamadas de ferramenta por pergunta, para não ficar em volta para sempre
+    @Volatile internal var pendingImage: String? = null
 
     /** O provedor escolhido tem chave? */
     fun ready() = if (Session.aiProvider == "gemini") Session.geminiKey.isNotBlank() else Session.aiKey.isNotBlank()
@@ -199,6 +206,12 @@ jogo abrir, use propor_receita com os salvos."""
                     .apply { if (tools.isNotEmpty()) put("tools", JSONArray().put(JSONObject().put("functionDeclarations", decls))) }
                     .toString()
                 var (code, reply) = http("models/${Session.geminiModel.trim()}:generateContent", key, body)
+                // servidor cheio (503/500): é passageiro, tenta de novo duas vezes antes de mostrar erro
+                for (wait in listOf(3000L, 6000L)) {
+                    if (code != 503 && code != 500) break
+                    kotlinx.coroutines.delay(wait)
+                    http("models/${Session.geminiModel.trim()}:generateContent", key, body).let { code = it.first; reply = it.second }
+                }
                 // modelo saiu de linha ou nome errado: escolhe sozinho o melhor da conta e tenta de novo
                 if (code == 404) geminiModels(key).firstOrNull()?.let { m ->
                     Diag.add("Gemini: modelo ${Session.geminiModel} não existe mais, usando $m")
@@ -283,5 +296,6 @@ internal fun rankGemini(names: List<String>): List<String> {
         else -> 3
     }
     return names.filter { n -> n.startsWith("gemini-") && skip.none { it in n } }.distinct()
-        .sortedWith(compareBy<String>({ n -> listOf("preview", "exp").any { it in n } }, ::tier, { -version(it) }, { it.length }))
+        // primeiro o tipo (Flash antes de Pro e de Lite), depois estável antes de preview: um Flash preview acerta mais que um Lite
+        .sortedWith(compareBy<String>(::tier, { n -> listOf("preview", "exp").any { it in n } }, { -version(it) }, { it.length }))
 }

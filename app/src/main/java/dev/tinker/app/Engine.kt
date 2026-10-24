@@ -936,8 +936,14 @@ class Engine private constructor(private val app: Context) {
             val secs = (a.optString("segundos").toIntOrNull() ?: 45).coerceIn(5, 90)
             val op = compareOp(a.optString("como").ifBlank { "mudou" }, "") ?: "changed"
             aiBusy {
-                val (count0, first) = list()
+                val (count0, _) = list()
                 if ((count0 ?: 0L) == 0L) return@aiBusy "Não há resultados para vigiar: busque primeiro."
+                // primeiro tira o que muda sozinho (cronômetro, contador, animação): senão qualquer um deles "mudou" antes de a
+                // pessoa mexer, e o refino ficava com lixo (no Police Chief sobraram 4 endereços errados em 2 segundos)
+                delay(2500)
+                val calm = compare("same")
+                val (count1, first) = list()
+                if ((count1 ?: 0L) == 0L) return@aiBusy "Todos os resultados mudavam sozinhos: nenhum é o valor que fica parado até você mexer. Busque de novo."
                 val before = first.associate { it.addr + it.type to it.value }
                 val end = System.currentTimeMillis() + secs * 1000L
                 var changed = false
@@ -945,8 +951,12 @@ class Engine private constructor(private val app: Context) {
                     delay(1500)
                     changed = list().second.any { h -> before[h.addr + h.type]?.let { it != h.value } == true }
                 }
-                if (!changed) "Nada mudou em $secs s nos resultados vigiados (os ${before.size} primeiros). Peça para a pessoa mexer no valor e chame de novo."
-                else { delay(800); resultsText(compare(op)) }  // espera o jogo terminar de atualizar antes de comparar
+                if (!changed) "Tirei os que mudam sozinhos ($calm). Nada mudou em $secs s nos ${before.size} vigiados. Peça para a pessoa mexer no valor e chame de novo."
+                else {
+                    delay(800)  // espera o jogo terminar de atualizar antes de comparar
+                    "Tirei os que mudam sozinhos ($calm). " + resultsText(compare(op)) +
+                        "\nSe a pessoa disser o valor novo, use refinar com ele para confirmar (o refino por valor é o mais certeiro)."
+                }
             }
         },
         AiTool("testar_valor", "Confirma se um resultado é o valor verdadeiro: escreve um valor de teste, espera 2 s e lê de novo, e depois volta o " +
@@ -998,7 +1008,8 @@ class Engine private constructor(private val app: Context) {
         Session.geminiModels = ms
         if (ms.isEmpty()) return@withContext "Não consegui ver os modelos: confira a chave e a internet."
         val before = Session.geminiModel
-        if (before !in ms) Session.geminiModel = ms.first()
+        // lite é o mais fraco: quem caiu nele sozinho volta para o melhor da lista
+        if (before !in ms || ("-lite" in before && "-lite" !in ms.first())) Session.geminiModel = ms.first()
         saveSettings()
         Diag.add("Gemini: ${ms.size} modelos na chave; usando ${Session.geminiModel}")
         if (before != Session.geminiModel) "Chave ok: ${ms.size} modelos. Escolhido ${Session.geminiModel}." else "Chave ok: ${ms.size} modelos. Mantido ${Session.geminiModel}."

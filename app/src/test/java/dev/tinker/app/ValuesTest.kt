@@ -163,7 +163,7 @@ class ValuesTest {
     fun geminiBestModelFirst() {
         val got = rankGemini(listOf("gemini-2.0-flash", "gemini-3.0-pro", "gemini-3.0-flash-preview", "gemini-2.5-flash", "gemini-2.5-flash-lite",
             "gemini-2.5-flash-image", "text-embedding-004", "gemini-2.5-pro"))
-        assertEquals(listOf("gemini-2.5-flash", "gemini-2.0-flash", "gemini-3.0-pro", "gemini-2.5-pro", "gemini-2.5-flash-lite", "gemini-3.0-flash-preview"), got)
+        assertEquals(listOf("gemini-2.5-flash", "gemini-2.0-flash", "gemini-3.0-flash-preview", "gemini-3.0-pro", "gemini-2.5-pro", "gemini-2.5-flash-lite"), got)
     }
 
     @Test
