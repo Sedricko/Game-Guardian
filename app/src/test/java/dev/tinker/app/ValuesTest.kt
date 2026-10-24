@@ -214,4 +214,11 @@ class ValuesTest {
         assertEquals("101.5", testValue(100.0, "f32"))
         assertEquals("2.25", testValue(0.75, "xf32"))
     }
+
+    @Test
+    fun classFilterByWholeWords() {
+        assertEquals(listOf("RingCount", "m_ringClip"), classMatch(GameClass("RunData", 3, listOf("<RingCount>k__BackingField", "m_ringClip", "m_titleString")), searchWords("ring")))
+        assertEquals(null, classMatch(GameClass("AppInfo", 2, listOf("InfoString", "m_runnersRequired")), searchWords("ring")))  // String não é ring
+        assertEquals(listOf("Player", "Data", "m", "ring", "Count", "UI"), nameWords("PlayerData.m_ringCount UI"))
+    }
 }

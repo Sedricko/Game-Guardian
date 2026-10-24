@@ -54,6 +54,9 @@ Regras para acertar (siga sempre):
   refine de novo (peça para gastar/ganhar e diga o valor) ou teste cada um. Nunca proponha com vários candidatos sem confirmar.
 - esperar_mudanca serve para quando a pessoa não sabe dizer o número; se ela sabe, peça o número e use refinar.
 - Diga com quantos candidatos e qual evidência você chegou à resposta.
+- Não busque números pequenos e comuns (0 a 100, como 10) sozinhos: dão dezenas de milhares de resultados. Prefira o nome da
+  classe/campo, busca em grupo com outros valores da tela, ou peça um número maior.
+- Seja econômico: cada ferramenta que você chama reenvia a conversa inteira; procure com 1 a 3 palavras certeiras.
 Ao sugerir classes ou campos, use exatamente os nomes que aparecem no contexto e diga por que cada um parece guardar o valor.
 Se o jogo for online e o servidor confere o valor, avise que editar não vai valer.
 Você tem ferramentas que olham a memória do jogo agora: procurar classes, abrir os objetos de uma classe com os valores atuais,
@@ -87,6 +90,8 @@ um jeito seguro de mudar o valor, pare e diga à pessoa o que fazer.
 Use ver_salvos para saber o que já foi achado e se os ponteiros voltaram. Quando descobrir algo que vale para a próxima vez
 (classe e campo de um recurso, tipo do valor, se é cifrado), use anotar. Para deixar várias edições prontas para toda vez que o
 jogo abrir, use propor_receita com os salvos."""
+
+    @Volatile private var lowThinking = true
 
     private const val MAX_ROUNDS = 20  // chamadas de ferramenta por pergunta, para não ficar em volta para sempre
 
@@ -219,12 +224,21 @@ jogo abrir, use propor_receita com os salvos."""
         return try {
             repeat(rounds()) {
                 kotlin.coroutines.coroutineContext.ensureActive()
-                val body = JSONObject()
+                fun body(think: Boolean) = JSONObject()
                     .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", SYSTEM))))
                     .put("contents", contents)
                     .apply { if (tools.isNotEmpty()) put("tools", JSONArray().put(JSONObject().put("functionDeclarations", decls))) }
+                    // pensar pouco a cada passo: com o padrão, cada rodada levava até 90 s (8 min numa pergunta)
+                    .apply { if (think) put("generationConfig", JSONObject().put("thinkingConfig", JSONObject().put("thinkingLevel", "low"))) }
                     .toString()
+                var body = body(lowThinking)
                 var (code, reply) = http("models/${Session.geminiModel.trim()}:generateContent", key, body)
+                // modelo que não conhece o nível de pensamento (2.x): manda sem e lembra
+                if (code == 400 && "think" in reply.lowercase()) {
+                    lowThinking = false
+                    body = body(false)
+                    http("models/${Session.geminiModel.trim()}:generateContent", key, body).let { code = it.first; reply = it.second }
+                }
                 // servidor cheio (503/500): é passageiro, tenta de novo duas vezes antes de mostrar erro
                 for (wait in listOf(3000L, 6000L)) {
                     if (code != 503 && code != 500) break
@@ -245,7 +259,10 @@ jogo abrir, use propor_receita com os salvos."""
                     drop()
                     return when (code) {
                         400, 401, 403 -> "Gemini recusou a chave ou o pedido: ${e.optString("message")}"
-                        429 -> "Limite do Gemini atingido (no gratuito há limite por minuto e por dia). Espere e tente de novo."
+                        429 -> if ("quota" in e.optString("message").lowercase() || e.optString("status") == "RESOURCE_EXHAUSTED")
+                            "A cota grátis do Gemini acabou (limite por dia ou por minuto). Espere (a diária volta à meia-noite do horário do Pacífico) " +
+                                "ou troque de chave/modelo em Ajustes; o Claude não tem esse limite."
+                        else "Limite do Gemini atingido (no gratuito há limite por minuto e por dia). Espere e tente de novo."
                         else -> "Gemini respondeu com erro $code: ${e.optString("message")}"
                     }
                 }

@@ -94,13 +94,18 @@ data class GameClass(val name: String, val fields: Int, val fieldNames: List<Str
  */
 internal fun classMatch(c: GameClass, words: List<String>): List<String>? {
     if (words.isEmpty()) return emptyList()
-    val fields = c.fieldNames.filter { f -> words.any { f.contains(it, ignoreCase = true) } }
+    // por palavra do nome (camelCase, _ e .): "ring" acha Rings e m_ringCount, mas não String nem Recruiter
+    fun hit(name: String) = nameWords(name).any { w -> words.any { w.startsWith(it, ignoreCase = true) } }
+    val fields = c.fieldNames.filter(::hit)
     return when {
         fields.isNotEmpty() -> fields.map { it.removePrefix("<").substringBefore(">k__BackingField") }
-        words.any { c.name.contains(it, ignoreCase = true) } -> emptyList()
+        hit(c.name) -> emptyList()
         else -> null
     }
 }
+
+/** Palavras de um nome de código: PlayerData.m_ringCount → Player, Data, m, ring, Count. */
+internal fun nameWords(name: String): List<String> = Regex("""[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+""").findAll(name).map { it.value }.toList()
 
 internal fun searchWords(text: String) = text.split(Regex("""[\s,;]+""")).map { it.trim() }.filter { it.length >= 2 }
 
@@ -839,12 +844,24 @@ class Engine private constructor(private val app: Context) {
         return "$status\nResultados: ${count ?: 0}" + hits.take(50).joinToString("") { "\n0x${it.addr} ${it.type} ${it.region} = ${it.value}" + (names[it.addr]?.let { n -> " [$n]" } ?: "") }
     }
 
-    private suspend fun objectText(center: String): String {
-        val c = il2cpp(center)
+    private suspend fun objectText(center0: String): String {
+        // o começo do objeto nem sempre cai dentro de um campo (primeiro campo em +0x18…): tenta alguns passos à frente
+        var center = center0
+        var found = il2cpp(center)
+        for (step in listOf(8L, 16L, 24L, 32L)) {
+            if (found != null) break
+            val next = (center0.toLong(16) + step).toString(16)
+            found = il2cpp(next)
+            if (found != null) center = next
+        }
+        val c = found
         val rows = if (c != null) ficha(c.start, ((c.fields.maxOfOrNull { it.offset } ?: 0) + 8).coerceIn(16, 0x400), c, center)
         else ficha((center.toLong(16) - 0x40).coerceAtLeast(0).toString(16), 0x80, null, center)
+        // sem as linhas "zero": metade da ficha era vazia e cada rodada reenviava tudo (estourou a cota do Gemini)
+        val useful = rows.filterNot { it.value == "0" && (it.label.startsWith("zero") || c == null) }
         return (c?.let { "${it.name} em 0x${it.start}" } ?: "Sem classe IL2CPP em volta de 0x$center (tipos adivinhados)") +
-            rows.take(120).joinToString("") { "\n+${it.off.toString(16)} ${it.label} = ${it.value} (0x${it.addr})" }
+            useful.take(120).joinToString("") { "\n+${it.off.toString(16)} ${it.label} = ${it.value} (0x${it.addr})" } +
+            if (useful.size < rows.size) "\n(${rows.size - useful.size} campos com 0 omitidos)" else ""
     }
 
     /** O que a IA pode fazer sozinha: só olhar e buscar; editar e congelar ficam com você. */
@@ -1139,7 +1156,9 @@ class Engine private constructor(private val app: Context) {
         appendLine("Tipos: ${if (s.types.isEmpty()) "Auto" else s.types.joinToString()} · valor digitado: ${s.value.ifBlank { "(vazio)" }} · cifrados: ${if (s.findEncrypted) "sim" else "não"}")
         appendLine("Agora: ${s.status} · restantes: ${s.count ?: "nenhuma busca"}")
         appendLine("Passos da busca (registro, comando e resposta):")
-        val log = Diag.lines.toList()
+        // só desde que este jogo foi escolhido: antes levava as buscas do jogo anterior
+        val all = Diag.lines.toList()
+        val log = all.drop(all.indexOfLast { "Jogo escolhido:" in it }.coerceAtLeast(0))
         log.indices.filter { i -> listOf("> search", "> refine", "> compare", "> snapshot", "> undo", "> aob").any { it in log[i] } }.takeLast(30).forEach { i ->
             appendLine(log[i])
             log.getOrNull(i + 1)?.takeIf { "< " in it }?.let(::appendLine)
