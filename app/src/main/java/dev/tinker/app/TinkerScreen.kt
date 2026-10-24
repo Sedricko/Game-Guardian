@@ -122,6 +122,25 @@ fun TinkerPanel(
         Column {
             Header(overlay, onPick = { picking = true }, onMinimize = onMinimize, onOpenOverlay = onOpenOverlay, onExit = onExit, run = run, onQuickBar = onQuickBar)
             error?.let { Banner(it) { error = null } }
+            s.update?.let { (version, url) ->
+                val context = LocalContext.current
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                ) {
+                    Row(Modifier.padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Tinker $version disponível", Modifier.weight(1f), color = MaterialTheme.colorScheme.onPrimaryContainer)
+                        TextButton(onClick = {
+                            runCatching {
+                                context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                            }
+                            if (overlay) onMinimize()
+                        }) { Text("Baixar") }
+                        TextButton(onClick = { s.update = null }) { Text("Depois") }
+                    }
+                }
+            }
             if (s.busy) LinearProgressIndicator(Modifier.fillMaxWidth()) else Box(Modifier.padding(top = 4.dp))
             if (picking) {
                 Picker(engine, onBack = { picking = false }) { p ->
@@ -396,11 +415,14 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                 }
             }
         }
+        // mesmo número normal e cifrado: o normal costuma ser cópia (ou isca do antitrapaça); editar o 🔒
+        val cipher = s.results.filter { it.type.startsWith("x") }.mapNotNull { readable(it.value, it.type) }.toSet()
         items(s.results, key = { it.addr + it.type }) { hit ->
             val key = hit.addr + hit.type
             val open = editing == key
+            val copy = !hit.type.startsWith("x") && readable(hit.value, hit.type) in cipher
             ResultCard(
-                shown(hit.value, hit.type), "0x${hit.addr}", "${TYPE_NAMES[hit.type]} · ${hit.region}",
+                shown(hit.value, hit.type), "0x${hit.addr}" + if (copy) " · provável cópia: edite o 🔒" else "", "${TYPE_NAMES[hit.type]} · ${hit.region}",
                 onClick = { editing = if (open) null else key },
                 checked = key in selected, onCheck = { selected = if (it) selected + key else selected - key },
             ) {

@@ -80,7 +80,8 @@ object Session {
     var peek by mutableStateOf(false)
     var autoPause by mutableStateOf(true)
     var findEncrypted by mutableStateOf(true)
-    var useBar by mutableStateOf(false)  // a bolinha abre a barra rápida em vez do painel  // a busca também procura valores cifrados (🔒)
+    var useBar by mutableStateOf(false)
+    var update by mutableStateOf<Pair<String, String>?>(null)  // versão nova na página de releases: nome e link do APK  // a bolinha abre a barra rápida em vez do painel  // a busca também procura valores cifrados (🔒)
     var canUndo by mutableStateOf(false)  // há um refino para desfazer  // pausa o jogo durante busca/refino, para o valor não mudar no meio
     var view by mutableStateOf<Pair<String, String>?>(null)
     var tab by mutableIntStateOf(0)  // índice em TABS  // visualizador de memória: endereço e tipo  // segurando o "olho": painel quase invisível
@@ -115,6 +116,7 @@ class Engine private constructor(private val app: Context) {
         loadSaved()
         loadHistory()
         scope.launch { freezeLoop() }
+        scope.launch { checkUpdate() }
         // o jogo reabriu (PID novo): escolhe de novo sozinho e os salvos voltam pela restauração
         scope.launch {
             while (true) {
@@ -175,7 +177,26 @@ class Engine private constructor(private val app: Context) {
             "(ou era de outro tipo). Refine mais vezes até sobrar 1 resultado antes de editar.")
     }
 
-    /** Botão Sair: nunca deixa o jogo pausado e encerra o daemon root. */
+    /**
+     * Versão nova na página de releases? Só avisa; sem internet ou com o GitHub fora do ar, não aparece nada
+     * e o Tinker funciona igual.
+     */
+    private fun checkUpdate() = runCatching {
+        val c = java.net.URL("https://api.github.com/repos/Sedricko/Game-Guardian/releases/latest").openConnection() as java.net.HttpURLConnection
+        c.connectTimeout = 5000
+        c.readTimeout = 5000
+        c.setRequestProperty("User-Agent", "Tinker")
+        c.setRequestProperty("Accept", "application/vnd.github+json")
+        val json = JSONObject(c.inputStream.bufferedReader().use { it.readText() })
+        val latest = json.getString("tag_name").removePrefix("v")
+        val mine = app.packageManager.getPackageInfo(app.packageName, 0).versionName.orEmpty()
+        val apk = json.optJSONArray("assets")?.optJSONObject(0)?.optString("browser_download_url").orEmpty().ifEmpty { json.getString("html_url") }
+        if (newer(latest, mine)) {
+            Session.update = latest to apk
+            Diag.add("Versão nova disponível: $latest (instalada: $mine)")
+        }
+    }
+ e encerra o daemon root. */
     fun shutdown() {
         scope.launch {
             if (Session.paused) runCatching { resume() }
@@ -560,7 +581,7 @@ class Engine private constructor(private val app: Context) {
         r.status.toLongOrNull() to r.lines.map {
             val f = it.split(" ", limit = 4)
             Hit(f[0], f[1], f[2], f[3])
-        }
+        }.sortedBy { !it.type.startsWith("x") }  // cifrados primeiro: o normal com o mesmo número costuma ser só cópia
     }
 
     suspend fun regions(): List<Region> = call { d ->
@@ -615,7 +636,13 @@ class Engine private constructor(private val app: Context) {
             appendLine("Salvos: ${Session.saved.size} (congelados: ${Session.saved.count { it.frozen }})")
             val mem = android.app.ActivityManager.MemoryInfo().also { app.getSystemService(android.app.ActivityManager::class.java).getMemoryInfo(it) }
             appendLine("Memória do aparelho: ${mem.availMem shr 20} MB livres de ${mem.totalMem shr 20} MB${if (mem.lowMemory) " (POUCA MEMÓRIA)" else ""}")
-            appendLine("Pausa automática: ${if (Session.autoPause) "ligada" else "desligada"}")
+            appendLine("Pausa automática: ${if (Session.autoPause) "ligada" else "desligada"} · cifrados: ${if (Session.findEncrypted) "sim" else "não"} · " +
+                "ponteiros ao salvar: ${if (Session.autoPointers) "sim" else "não"} · só libs do jogo: ${if (Session.gameLibsOnly) "sim" else "não"}")
+            if (Session.saved.isNotEmpty()) {
+                appendLine()
+                appendLine("=== Salvos (${Session.saved.size}) ===")
+                Session.saved.forEach { appendLine(savedLine(it)) }
+            }
             val log = Diag.export().lines()
             val problems = log.filter { l ->
                 val msg = l.substringAfter(' ').substringAfter(' ')  // tira data e hora do registro
@@ -640,6 +667,16 @@ class Engine private constructor(private val app: Context) {
     }
 
     // Lista de salvos
+
+    /** Uma linha por salvo no relatório: onde está, se vale nesta vez do jogo e como volta quando o jogo reabre. */
+    private fun savedLine(it: SavedItem) = buildString {
+        append("${label(it)}: ${TYPE_NAMES[it.type]} 0x${it.addr} = ${it.value}")
+        append(if (stale(it)) " · de outra vez do jogo (PID ${it.pid})" else if (it.pid == 0) " · PID desconhecido" else "")
+        if (it.frozen) append(" · congelado")
+        if (it.pointer.isNotEmpty()) append(" · ponteiro ${it.pointer}${if (it.verified) "" else " (a confirmar)"}")
+        if (it.anchor.isNotEmpty()) append(" · segue ${Session.saved.firstOrNull { a -> a.id == it.anchor }?.let(::label) ?: "?"} ${offsetText(it.offset)}")
+        append(" · reservas ${it.chains.size} · assinatura ${if (sigUseful(it.sig)) "pronta" else "aprendendo"}")
+    }
 
     /** Valores vizinhos de addr (24 antes, 24 depois), lidos como type; shift anda em blocos de 48. */
     suspend fun nearby(addr: String, type: String, shift: Int): List<Hit> = call { d ->
@@ -897,6 +934,18 @@ private val AOB = Regex("""([0-9a-f]{2}|\?\?){1,192}""")
 private val POINTER = Regex("""[^\s+]{1,100}\+[0-9a-f]{1,16}( [0-9a-f]{1,8}){0,7}""")
 
 val COMPARE_NAMES = mapOf("inc" to "aumentou", "dec" to "diminuiu", "same" to "não mudou", "changed" to "mudou", "incby" to "aumentou", "decby" to "diminuiu")
+
+/** "1.10.0" é mais nova que "1.9.2"? Compara número por número. */
+internal fun newer(latest: String, mine: String): Boolean {
+    val a = latest.split('.').map { it.toIntOrNull() ?: 0 }
+    val b = mine.split('.').map { it.toIntOrNull() ?: 0 }
+    for (i in 0 until maxOf(a.size, b.size)) {
+        val x = a.getOrElse(i) { 0 }
+        val y = b.getOrElse(i) { 0 }
+        if (x != y) return x > y
+    }
+    return false
+}
 
 /** Bytes em volta do valor → assinatura hex, com ?? no próprio valor e em tudo que parece ponteiro (muda a cada vez que o jogo abre). */
 internal fun signature(raw: ByteArray, off: Int, vlen: Int): String {

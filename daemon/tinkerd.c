@@ -775,6 +775,14 @@ static int cmp_tgt(const void *a, const void *b) {
 typedef struct { uint32_t id; int key; } found_t;
 static int cmp_found(const void *a, const void *b) { return ((const found_t *)a)->key - ((const found_t *)b)->key; }
 
+// Ordem dos caminhos: libs do jogo antes das do sistema, menos níveis, e offsets menores (campos perto do começo
+// do objeto costumam ser os estáveis).
+static int rank(uint32_t id, int system, int level) {
+    uint64_t sum = 0;
+    for (uint32_t k = id; nodes[k].parent != UINT32_MAX; k = nodes[k].parent) sum += nodes[k].off;
+    return system * 10000000 + level * 100000 + (int)(sum / 16 < 99999 ? sum / 16 : 99999);
+}
+
 // only_game: base só em libs do jogo (/data/...); as do sistema (libc, linker) dão caminhos que quebram
 static void cmd_pointers(const char *addr, const char *maxoffs, const char *levels, int only_game) {
     uint64_t goal = strtoull(addr, NULL, 16), maxoff = strtoull(maxoffs, NULL, 0);
@@ -811,7 +819,7 @@ static void cmd_pointers(const char *addr, const char *maxoffs, const char *leve
                     if (nnodes - next >= MAXNODES) { limited = 1; break; }
                     uint32_t id = node_push(p, t[j].node, (uint32_t)(t[j].addr - v));
                     // caminhos pelas libs do jogo (/data) primeiro, depois os mais curtos
-                    if (m >= 0 && !(only_game && mods[m].system) && nfound < MAXFOUND) found[nfound++] = (found_t){id, mods[m].system * 100 + L};
+                    if (m >= 0 && !(only_game && mods[m].system) && nfound < MAXFOUND) found[nfound++] = (found_t){id, rank(id, mods[m].system, L)};
                 }
             }
             free(out[ci].h);

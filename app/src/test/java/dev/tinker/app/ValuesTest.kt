@@ -103,4 +103,12 @@ class ValuesTest {
         assertTrue(sigUseful("0102030405060708090a0b0c????"))
         assertFalse(sigUseful("000000000000000000000000000001"))  // só zeros não identifica nada
     }
+
+    @Test
+    fun versaoNova() {
+        assertTrue(newer("1.10.0", "1.9.2"))
+        assertTrue(newer("1.5", "1.4.1"))
+        assertFalse(newer("1.4.1", "1.4.1"))
+        assertFalse(newer("1.4.0", "1.4.1"))
+    }
 }

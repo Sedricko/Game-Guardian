@@ -53,7 +53,7 @@ Dicas:
 
 Muitos jogos Unity guardam moedas e vida trancadas com uma chave ao lado (Anti-Cheat Toolkit).
 A busca já procura esses valores sozinha e mostra o número real com **🔒**; editar ou congelar tranca o valor novo com a mesma chave.
-Se o mesmo número aparecer normal e com 🔒, edite o 🔒. Dá para desligar em **Ajustes → Procurar valores cifrados**.
+Os 🔒 aparecem primeiro; se o mesmo número aparecer normal, ele vem marcado como **provável cópia**: edite o 🔒. Dá para desligar em **Ajustes → Procurar valores cifrados**.
 
 ## Valor sem número (barra de vida)
 
@@ -84,10 +84,15 @@ Em **Ajustes**: "Preparar ponteiros ao salvar" e "Ponteiros só nas libs do jogo
 Aba **Busca → Busca por bytes**: pares hex com `??` como curinga, por exemplo `1F 20 03 D5 ?? ?? 00 B9`.
 **Dados** procura na memória do jogo; **Código** procura nas instruções. Os lugares achados viram resultados normais.
 
+## Versão nova
+
+Ao abrir, o Tinker olha a página de releases e mostra **"Tinker X disponível → Baixar"**. Sem internet, não aparece nada e tudo funciona igual.
+
 ## Reportar um problema
 
 Aba **Registro** → **Compartilhar relatório** e envie o arquivo `.txt`.
-Ele tem aparelho, versão, jogo, cada comando com o tempo que levou, resumo de problemas, falhas do Android e o logcat do jogo.
+Ele tem aparelho, versão, jogo, cada salvo (onde está, ponteiro, reservas, assinatura), cada comando com o tempo que levou,
+resumo de problemas, falhas do Android e o logcat do jogo.
 
 ## Para desenvolvedores
 
