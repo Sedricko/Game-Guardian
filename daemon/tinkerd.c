@@ -39,7 +39,7 @@ static int memfd = -1;
 // old: o valor na última busca/refino, para "aumentou/diminuiu/mudou"
 typedef struct { uint64_t addr, old; uint8_t type, region; } hit_t;
 // shortcut: resultados num vetor em RAM (24 bytes cada); acima de LIST_MAX a busca desconhecida fica no arquivo
-#define LIST_MAX 2000000
+static size_t list_max = 2000000;  // TINKER_LIST_MAX muda (só para os testes passarem pelo caminho do arquivo)
 static hit_t *res;
 static size_t nres, cap;
 // Estado anterior ao último refino, para o "Desfazer".
@@ -548,7 +548,7 @@ static void cmd_compare(const char *opname, const char *value) {
         cmpctx_t cc = {op, &v[snapt]};
         parallel(snap.n, cmp_chunk, &cc);
         snapn = count_mask();
-        if (snapn <= LIST_MAX) snap_to_list();
+        if (snapn <= list_max) snap_to_list();
         printf("ok %zu\n", snapfd >= 0 ? snapn : nres);
         return;
     }
@@ -976,6 +976,7 @@ static void on_exit_signal(int sig) {
 
 int main(void) {
     setvbuf(stdout, NULL, _IOLBF, 0);
+    if (getenv("TINKER_LIST_MAX")) list_max = strtoul(getenv("TINKER_LIST_MAX"), NULL, 10);
     signal(SIGPIPE, SIG_IGN);  // app morreu: escrever falha em vez de matar o daemon antes de continuar o jogo
     signal(SIGTERM, on_exit_signal);
     signal(SIGHUP, on_exit_signal);

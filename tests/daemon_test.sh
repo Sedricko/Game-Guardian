@@ -88,6 +88,14 @@ grep -qE "^$iaddr i32 (Ch|A) 987654999$" <<<"$unk" || { echo "FALHOU: aumentou";
 grep -qE "^$iaddr i32 (Ch|A) 987654000$" <<<"$unk" && [ "${u[10]}" = "ok 1" ] && [ "${u[12]}" = "ok 0" ] && [ "${u[13]}" = "ok 1" ] \
     && [ "${u[14]}" = "err comparação inválida: bla" ] || { echo "FALHOU: diminuiu em / desfazer"; exit 1; }
 
+# Muitos candidatos (aqui: mais de 10) ficam no arquivo: "não mudou" mantém, lista vazia, e o valor mudado sobra no fim
+big=$(printf '%s\n' "attach $pid" "snapshot i32" "compare same" "list 5" "write $iaddr i32 987654321" "compare changed" "list 5" "undo" "write $iaddr i32 987654000" \
+    | TINKER_LIST_MAX=10 "$out/tinkerd")
+echo "$big"
+mapfile -t b < <(grep -E '^(ok|err)' <<<"$big")
+[[ "${b[3]}" =~ ^ok\ [0-9]{3,}$ ]] && [ "${b[4]}" = "${b[3]}" ] && [ "$(sed -n '5p' <<<"$big")" = "${b[4]}" ] \
+    && grep -qE "^$iaddr i32 (Ch|A) 987654321$" <<<"$big" && [ "${b[8]}" = "err nada para desfazer" ] || { echo "FALHOU: candidatos no arquivo"; exit 1; }
+
 # Depois de uma busca exata também dá para comparar com o valor anterior
 cmpx=$(printf '%s\n' "attach $pid" "search i32 987654000" "write $iaddr i32 987654001" "compare incby 1" | "$out/tinkerd")
 [ "$(tail -1 <<<"$cmpx")" = "ok 1" ] || { echo "FALHOU: comparar após busca exata"; echo "$cmpx"; exit 1; }
