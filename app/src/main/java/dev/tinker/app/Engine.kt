@@ -122,6 +122,7 @@ class Engine private constructor(private val app: Context) {
             while (true) {
                 delay(3000)
                 if (!Session.busy) runCatching { followGame(startDaemon = false) }.getOrNull()?.let { Session.status = it }
+                if (!Session.busy) runCatching { retryRestore() }
             }
         }
     }
@@ -196,7 +197,8 @@ class Engine private constructor(private val app: Context) {
             Diag.add("Versão nova disponível: $latest (instalada: $mine)")
         }
     }
- e encerra o daemon root. */
+
+    /** Botão Sair: nunca deixa o jogo pausado e encerra o daemon root. */
     fun shutdown() {
         scope.launch {
             if (Session.paused) runCatching { resume() }
@@ -250,6 +252,8 @@ class Engine private constructor(private val app: Context) {
     suspend fun attach(p: GameProcess): String = call { d ->
         Diag.add("Jogo escolhido: ${p.label} (${p.pkg}, PID ${p.pid})")
         runCatching { lastGameFile.writeText(p.pkg) }
+        attachedAt = System.currentTimeMillis()
+        retries = 0
         d.send("attach ${p.pid}")
         Session.process = p
         Session.paused = false
@@ -461,7 +465,7 @@ class Engine private constructor(private val app: Context) {
      * Ao escolher o jogo: cada salvo de outra vez do jogo tenta voltar sozinho, nesta ordem:
      * ponteiro em uso → caminhos guardados (pelo último valor) → assinatura. Quem segue outro pelo offset vem por último.
      */
-    private fun Daemon.restoreAll(pid: Int): String {
+    private fun Daemon.restoreAll(pid: Int, signature: Boolean = true, retry: Boolean = false): String {
         val back = mutableListOf<String>()
         val lost = mutableListOf<String>()
         Session.saved.toList().sortedBy { it.anchor.isNotEmpty() }.forEach { old ->
@@ -471,23 +475,46 @@ class Engine private constructor(private val app: Context) {
                 item.pointer.isNotEmpty() -> confirmPointer(item, pid)
                 item.anchor.isNotEmpty() -> "offset".takeIf { resolve(item).pid == pid }
                 else -> null
-            } ?: fromChains(item, pid) ?: fromSignature(item, pid)
+            } ?: fromChains(item, pid) ?: (if (signature) fromSignature(item, pid) else null)
             when {
                 how != null -> back += "${label(item)} ($how)"
                 item.pid != 0 || item.chains.isNotEmpty() || item.sig.isNotEmpty() -> lost += label(item)
             }
         }
-        if (back.isEmpty() && lost.isEmpty()) return ""
+        if (back.isEmpty() && (lost.isEmpty() || retry)) return ""  // nova tentativa sem novidade: não repete o aviso
         val msg = (if (back.isEmpty()) "" else "Voltaram sozinhos: ${back.joinToString()}. ") +
             (if (lost.isEmpty()) "" else "Não achados (busque de novo): ${lost.joinToString()}.")
         Diag.add("Restauração dos salvos: $msg")
         return msg.trim()
     }
 
+    /**
+     * O jogo acabou de abrir e ainda carrega o save: o ponteiro não chega no valor ainda. Tenta de novo a cada 3 s
+     * (assinatura a cada 30 s, que lê a memória toda) durante 5 minutos depois de escolher o jogo.
+     */
+    private suspend fun retryRestore() {
+        val pid = currentPid
+        if (pid == 0 || daemon == null || System.currentTimeMillis() - attachedAt > 5 * 60_000) return
+        if (Session.saved.none { stale(it) && (it.pointer.isNotEmpty() || it.anchor.isNotEmpty() || it.chains.isNotEmpty() || sigUseful(it.sig)) }) return
+        retries++
+        val msg = call { d -> d.restoreAll(pid, signature = retries % 10 == 0, retry = true) }
+        if (msg.isNotEmpty()) Session.restoreInfo = msg
+    }
+
+    private var attachedAt = 0L
+    private var retries = 0
+
+    /** Último valor bom para reconhecer o salvo: 0, 1 e -1 aparecem em todo lugar e dariam falso positivo. */
+    private fun telling(item: SavedItem): List<ClosedFloatingPointRange<Double>>? {
+        val v = readable(item.value, item.type) ?: return null
+        if (v in setOf("0", "1", "-1", "?")) return null
+        return runCatching { parseValues(v) }.getOrNull()
+    }
+
     /** Ponteiro em uso ao reabrir: segue; se ainda não estava confirmado, só vale se chegar no último valor (aí fica confirmado). */
     private fun Daemon.confirmPointer(item: SavedItem, pid: Int): String? {
         if (item.verified) return "ponteiro".takeIf { resolve(item).pid == pid }
-        val wanted = runCatching { parseValues(readable(item.value, item.type) ?: return null) }.getOrNull() ?: return null
+        val wanted = telling(item) ?: return null
         val a = runCatching { send("resolve ${item.pointer}", quiet = true).status }.getOrNull() ?: return null
         if (!matchesAny(runCatching { send("read $a ${item.type}", quiet = true).status }.getOrDefault("?"), item.type, wanted)) return null
         if (moveTo(item, a, "Ponteiro").pid != pid) return null
@@ -509,7 +536,7 @@ class Engine private constructor(private val app: Context) {
     /** Caminhos guardados: fica quem chega no último valor conhecido; se todos chegam no mesmo endereço, usa o melhor. */
     private fun Daemon.fromChains(item: SavedItem, pid: Int): String? {
         if (item.chains.isEmpty()) return null
-        val wanted = runCatching { parseValues(readable(item.value, item.type) ?: return null) }.getOrNull() ?: return null
+        val wanted = telling(item) ?: return null
         val kept = matching(item.chains, item.type) { matchesAny(it, item.type, wanted) }
         if (kept.isEmpty() || kept.map { it.second }.distinct().size != 1) {
             if (kept.isNotEmpty()) replace(item) { it.copy(chains = kept.map { k -> k.first }) }
@@ -524,7 +551,7 @@ class Engine private constructor(private val app: Context) {
         if (!sigUseful(item.sig)) return null
         val places = runCatching { send("aobfind ${item.sig}", quiet = true).lines }.getOrNull()
             ?.map { (it.toLong(16) + item.sigOff).toString(16) } ?: return null
-        val wanted = runCatching { parseValues(readable(item.value, item.type) ?: "x") }.getOrNull()
+        val wanted = telling(item)
         val same = if (wanted == null) emptyList() else places.filter { a ->
             matchesAny(runCatching { send("read $a ${item.type}", quiet = true).status }.getOrDefault("?"), item.type, wanted)
         }

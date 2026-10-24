@@ -994,7 +994,7 @@ private val HELP = listOf(
         "Ao reabrir o jogo e escolher ele no Tinker, cada salvo volta sozinho (ponteiro → caminhos guardados → assinatura); os da mesma ficha " +
         "vêm junto pelo offset. Sobrou dúvida entre vários caminhos? Abra o salvo, digite o valor que o jogo mostra e toque em Filtrar pelo valor. " +
         "Salvo com ⚠ é de outra vez do jogo e não é lido nem escrito até voltar; se estava congelado, volta congelado. " +
-        "Com o Tinker aberto, quando o jogo reabre ele é escolhido de novo sozinho. " +
+        "Com o Tinker aberto, quando o jogo reabre ele é escolhido de novo sozinho; enquanto o jogo carrega, o Tinker tenta de novo por 5 minutos. " +
         "Sem nenhum caminho? Aumente os níveis ou a distância, ou desligue \"Ponteiros só nas libs do jogo\" em Ajustes.",
     "Reportar um problema" to "Na aba Registro, toque em Compartilhar relatório e envie o arquivo .txt. Ele tem tudo que é preciso para investigar.",
 )
