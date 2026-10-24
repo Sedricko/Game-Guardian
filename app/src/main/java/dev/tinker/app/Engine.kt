@@ -1739,6 +1739,12 @@ class Engine private constructor(private val app: Context) {
             appendLine(crash)
             appendLine()
             appendLine(game)
+            appendLine()
+            appendLine("=== Rastro da IA (perguntas, ferramentas com entrada e saída, chamadas à API) ===")
+            appendLine(Diag.aiTrace())
+            appendLine()
+            appendLine("=== Logcat do Tinker (erros internos do app) ===")
+            appendLine(Diag.ownLogcat())
         }
         val dir = File(app.cacheDir, "reports").apply { mkdirs() }
         dir.listFiles()?.forEach { it.delete() }  // só o último relatório fica no cache

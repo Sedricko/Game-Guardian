@@ -1667,6 +1667,7 @@ private fun LogTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, onE
     var info by remember { mutableStateOf<String?>(null) }
     var working by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
+    var logFilter by remember { mutableStateOf(LOG_FILTERS[0].first) }
     fun fetch(work: suspend () -> Unit) = scope.launch {
         working = true
         runCatching { work() }.onFailure { onError(it.message ?: "Erro") }
@@ -1715,13 +1716,30 @@ private fun LogTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, onE
         if (working) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
         info?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp)) }
         }
+        // filtro: acompanhar só o que interessa (erros, a IA, a busca) sem rolar por tudo
+        Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            LOG_FILTERS.forEach { (name, _) -> FilterChip(selected = logFilter == name, onClick = { logFilter = name }, label = { Text(name) }) }
+        }
+        val match = LOG_FILTERS.first { it.first == logFilter }.second
+        val shown = Diag.lines.filter(match)
         LazyColumn(Modifier.padding(top = 8.dp), reverseLayout = true) {
-            items(Diag.lines.asReversed()) { line ->
-                Text(line, fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            items(shown.asReversed()) { line ->
+                val bad = LOG_FILTERS[1].second(line)
+                Text(line, fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 14.sp,
+                    color = if (bad) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
 }
+
+/** Filtros do registro: nome e quais linhas entram. Problemas ficam em vermelho em qualquer filtro. */
+private val LOG_FILTERS: List<Pair<String, (String) -> Boolean>> = listOf(
+    "Tudo" to { _ -> true },
+    "Problemas" to { l -> listOf("erro", "falha", "aviso", "fechou", "exception", "bloqueado").any { l.contains(it, ignoreCase = true) } && " | " !in l },
+    "IA" to { l -> "Assistente" in l || "IA " in l || "Gemini" in l || "Sugestão da IA" in l },
+    "Busca" to { l -> listOf("> search", "> refine", "> compare", "> group", "> aob", "> snapshot", "Etapa", "< ok").any { it in l } },
+    "Salvos e ponteiros" to { l -> listOf("Salvo", "salvos", "Ponteiro", "ponteiro", "> pointers", "Receita", "Congel").any { it in l } },
+)
 
 /** Cópia em Download/Tinker para achar no gerenciador de arquivos. Só Android 10+, onde não precisa de permissão. */
 private fun saveToDownloads(context: Context, file: File, mime: String = "text/plain"): Uri? {

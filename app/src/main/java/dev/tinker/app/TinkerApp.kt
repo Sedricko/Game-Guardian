@@ -25,11 +25,13 @@ class TinkerApp : Application() {
 object Diag {
     val lines = mutableStateListOf<String>()
     private lateinit var file: File
+    private lateinit var aiFile: File  // rastro completo da IA (perguntas, cada ferramenta com entrada e saída, cada chamada à API)
     private val main = Handler(Looper.getMainLooper())
     private val clock = SimpleDateFormat("dd/MM HH:mm:ss.SSS", Locale.US)
 
     fun init(c: Context) {
         file = File(c.filesDir, "tinker.log")
+        aiFile = File(c.filesDir, "ia.log")
         // o registro nunca pode derrubar o app: numa instalação nova o arquivo ainda não existe
         runCatching {
             if (file.length() > 2_000_000) file.writeText(file.readText().takeLast(1_000_000))
@@ -70,12 +72,29 @@ object Diag {
         }
     }
 
+    /** Rastro da IA: vai inteiro para ia.log (o registro principal guarda só um resumo de cada passo). */
+    @Synchronized
+    fun ai(msg: String) {
+        runCatching {
+            if (aiFile.length() > 1_500_000) aiFile.writeText(aiFile.readText().takeLast(700_000))
+            aiFile.appendText("${clock.format(Date())} $msg\n")
+        }
+    }
+
+    fun aiTrace(max: Int = 80_000): String = runCatching { aiFile.readText().takeLast(max) }.getOrDefault("").ifEmpty { "(a IA ainda não foi usada)" }
+
+    /** Logcat do próprio Tinker (o app lê o dele sem root): erros internos do Android, do Compose e das bibliotecas. */
+    fun ownLogcat(): String = runCatching {
+        val p = ProcessBuilder("logcat", "-d", "-t", "300", "--pid=${android.os.Process.myPid()}").redirectErrorStream(true).start()
+        p.inputStream.bufferedReader().use { it.readText() }.also { p.waitFor() }
+    }.getOrElse { "(não deu para ler: ${it.message})" }
+
     /** O registro para o relatório: o logcat copiado no meio é encurtado, senão ele empurra as ações do Tinker para fora. */
     fun export(): String = runCatching { compactLog(file.readLines()).takeLast(3000).joinToString("\n") }.getOrDefault("")
 
     @Synchronized
     fun clear() {
-        runCatching { file.writeText("") }
+        runCatching { file.writeText(""); aiFile.writeText("") }
         main.post { lines.clear() }
     }
 }

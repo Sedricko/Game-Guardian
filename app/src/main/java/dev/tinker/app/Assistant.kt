@@ -103,8 +103,12 @@ jogo abrir, use propor_receita com os salvos."""
     suspend fun ask(chat: AiChat, context: suspend () -> String, question: String, tools: List<AiTool>, onStep: (String) -> Unit): String {
         if (chat.provider != Session.aiProvider) { chat.reset(); chat.provider = Session.aiProvider }
         val prompt = if (chat.started) question else "${context()}\n\n=== Pergunta ===\n$question"
+        Diag.ai("==== PERGUNTA (${Session.aiProvider}, ${if (Session.aiProvider == "gemini") Session.geminiModel else "claude-opus-5-5"}${if (chat.started) ", continuando" else ""}): $question")
+        if (!chat.started) Diag.ai("contexto (${prompt.length} letras):\n${prompt.take(6000)}${if (prompt.length > 6000) "\n…(cortado)" else ""}")
+        val t0 = System.currentTimeMillis()
         val answer = if (Session.aiProvider == "gemini") askGemini(Session.geminiKey, chat, prompt, tools, onStep)
         else askClaude(Session.aiKey, chat, prompt, tools, onStep)
+        Diag.ai("==== RESPOSTA (${(System.currentTimeMillis() - t0) / 1000} s):\n$answer")
         return answer
     }
 
@@ -115,7 +119,11 @@ jogo abrir, use propor_receita com os salvos."""
         onStep("🔧 $name $shown".trim())
         Diag.add("Assistente usou $name $shown")
         // cancelado (a pessoa saiu da tela): para a conversa, em vez de mandar "erro" para a API até o limite de rodadas
-        return runCatching { t.run(args) }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }.getOrElse { "Erro: ${it.message}" }.take(20_000)
+        val t0 = System.currentTimeMillis()
+        val out = runCatching { t.run(args) }.onFailure { if (it is kotlinx.coroutines.CancellationException) { Diag.ai("ferramenta $name cancelada"); throw it } }
+            .getOrElse { Diag.ai("ferramenta $name ERRO: ${it.stackTraceToString().take(1500)}"); "Erro: ${it.message}" }.take(20_000)
+        Diag.ai("ferramenta $name $args (${System.currentTimeMillis() - t0} ms) →\n${out.take(3000)}${if (out.length > 3000) "\n…(${out.length} letras)" else ""}")
+        return out
     }
 
     /** Claude pelo SDK oficial, com as ferramentas; erros viram texto para a tela (chave errada, sem internet, limite). */
@@ -148,7 +156,10 @@ jogo abrir, use propor_receita com os salvos."""
                     .addBeta("server-side-fallback-2026-07-01")
                     .putAdditionalBodyProperty("fallbacks", JsonValue.from("default"))
                     .build()
+                val c0 = System.currentTimeMillis()
                 val r = client.beta().messages().create(params)
+                Diag.ai("API Claude rodada ${it + 1}: ${System.currentTimeMillis() - c0} ms, parada ${r.stopReason().orElse(null)}, tokens entrada ${r.usage().inputTokens()} " +
+                    "(cache ${r.usage().cacheReadInputTokens().orElse(0L)}), saída ${r.usage().outputTokens()}")
                 if (r.stopReason().orElse(null) == BetaStopReason.REFUSAL) {
                     while (messages.size > before) messages.removeAt(messages.lastIndex)  // a pergunta recusada não fica na conversa
                     return "O assistente não respondeu essa pergunta."
@@ -226,7 +237,10 @@ jogo abrir, use propor_receita com os salvos."""
                     Session.geminiModel = m
                     http("models/$m:generateContent", key, body).let { code = it.first; reply = it.second }
                 }
-                val j = runCatching { JSONObject(reply) }.getOrNull() ?: return "Gemini respondeu $code sem conteúdo.".also { drop() }
+                val j = runCatching { JSONObject(reply) }.getOrNull() ?: return "Gemini respondeu $code sem conteúdo.".also { drop(); Diag.ai("API Gemini: código $code sem JSON: ${reply.take(500)}") }
+                Diag.ai("API Gemini rodada ${it + 1} (${Session.geminiModel}): código $code, tokens ${j.optJSONObject("usageMetadata")?.let { u -> "entrada ${u.optInt("promptTokenCount")}, saída ${u.optInt("candidatesTokenCount")}" } ?: "?"}" +
+                    (j.optJSONObject("error")?.let { e -> ", erro ${e.optString("status")}: ${e.optString("message").take(300)}" } ?: "") +
+                    (j.optJSONArray("candidates")?.optJSONObject(0)?.optString("finishReason")?.let { f -> ", fim $f" } ?: ""))
                 j.optJSONObject("error")?.let { e ->
                     drop()
                     return when (code) {
