@@ -4,11 +4,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 out=$(mktemp -d); tpid=
 trap 'kill $tpid 2>/dev/null || true; rm -rf "$out"' EXIT
-cc -O2 -Wall -Werror -o "$out/tinkerd" daemon/tinkerd.c -lm
+cc -O2 -Wall -Werror -pthread -o "$out/tinkerd" daemon/tinkerd.c -lm
 cc -O2 -o "$out/target" tests/target.c
 "$out/target" > "$out/info" & tpid=$!
 for _ in $(seq 50); do [ -s "$out/info" ] && break; sleep 0.1; done
-read -r pid iaddr faddr < "$out/info"
+read -r pid iaddr faddr paddr < "$out/info"
 
 got=$("$out/tinkerd" <<CMDS
 search i32 1
@@ -76,6 +76,31 @@ und=$(printf 'attach %s\nsearch i32 0~1000\nrefine 555\nundo\nundo\n' "$pid" | "
 echo "$und"
 mapfile -t n < <(sed 's/^ok //' <<<"$und")
 [ "${n[0]}" -gt "${n[1]}" ] && [ "${n[2]}" = "${n[0]}" ] && [ "${n[3]}" = "${n[1]}" ] || { echo "FALHOU: desfazer/refazer"; exit 1; }
+
+# Valor desconhecido: guarda a memória, muda o valor, "aumentou" acha; depois "diminuiu em 999"
+unk=$(printf '%s\n' "attach $pid" "snapshot i32" "list 5" "writeall 1" "write $iaddr i32 987654999" "compare inc" "list 50" \
+    "compare same" "write $iaddr i32 987654000" "compare decby 999" "list 5" "compare incby 1~5" "undo" "compare bla" | "$out/tinkerd")
+echo "$unk"
+mapfile -t u < <(grep -E '^(ok|err)' <<<"$unk")
+[[ "${u[2]}" =~ ^ok\ [0-9]{4,}$ ]] && [ "${u[3]}" = "${u[2]}" ] && [ "${u[4]}" = "err refine mais antes de editar todos" ] \
+    || { echo "FALHOU: snapshot"; exit 1; }
+grep -qE "^$iaddr i32 (Ch|A) 987654999$" <<<"$unk" || { echo "FALHOU: aumentou"; exit 1; }
+grep -qE "^$iaddr i32 (Ch|A) 987654000$" <<<"$unk" && [ "${u[10]}" = "ok 1" ] && [ "${u[12]}" = "ok 0" ] && [ "${u[13]}" = "ok 1" ] \
+    && [ "${u[14]}" = "err comparação inválida: bla" ] || { echo "FALHOU: diminuiu em / desfazer"; exit 1; }
+
+# Depois de uma busca exata também dá para comparar com o valor anterior
+cmpx=$(printf '%s\n' "attach $pid" "search i32 987654000" "write $iaddr i32 987654001" "compare incby 1" | "$out/tinkerd")
+[ "$(tail -1 <<<"$cmpx")" = "ok 1" ] || { echo "FALHOU: comparar após busca exata"; echo "$cmpx"; exit 1; }
+
+# Ponteiros: acha root → +10 → +20 e o caminho volta a dar no mesmo endereço
+ptr=$(printf '%s\n' "attach $pid" "pointers $paddr 256 3" | "$out/tinkerd")
+echo "$ptr" | head -20
+chain=$(grep -m1 -E '^target\+[0-9a-f]+ 10 20$' <<<"$ptr") || { echo "FALHOU: ponteiro não achado"; exit 1; }
+res=$(printf '%s\n' "attach $pid" "resolve $chain" "resolve target+0" "resolve nada.so+10 8" "resolve xyz" | "$out/tinkerd")
+echo "$res"
+mapfile -t r < <(sed 1,2d <<<"$res")
+[ "${r[0]}" = "ok $paddr" ] && [[ "${r[1]}" =~ ^ok\ [0-9a-f]+$ ]] && [ "${r[2]}" = "err módulo nada.so não carregado" ] \
+    && [ "${r[3]}" = "err ponteiro inválido" ] || { echo "FALHOU: resolve"; exit 1; }
 
 kill $tpid; wait $tpid 2>/dev/null || true
 dead=$(printf 'attach %s\n' "$pid" | "$out/tinkerd")

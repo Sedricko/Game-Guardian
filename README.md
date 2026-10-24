@@ -27,8 +27,8 @@ Cada versão instala por cima da anterior, sem perder os salvos.
 
 | Aba | Para que serve |
 |---|---|
-| **Busca** | Achar um valor: tipo (Auto, Dword, Float…), **Nova busca**, **Refinar**, **Desfazer**. Marque resultados para salvar, congelar, editar ou **Buscar perto**. Os valores atualizam ao vivo. |
-| **Salvos** | Endereços guardados, por jogo: nome, valor ao vivo, congelar, editar vários, ler como outro tipo, exportar/importar (.json). |
+| **Busca** | Achar um valor: tipo (Auto, Dword, Float…), **Nova busca**, **Refinar**, **Desfazer**, histórico das últimas buscas. Valor desconhecido: **Começar sem valor** e depois **Aumentou / Diminuiu / Mudou / Não mudou**. Marque resultados para salvar, congelar, editar ou **Buscar perto**. Os valores atualizam ao vivo. |
+| **Salvos** | Endereços guardados, por jogo: nome, valor ao vivo, congelar, editar vários, ler como outro tipo, **ponteiros**, exportar/importar (.json). |
 | **Memória** | Valores em volta de um endereço, em qualquer tipo; **Buscar perto** e **Ir para endereço**. |
 | **Registro** | Tudo o que o Tinker fez, falhas do Android e logcat do jogo. **Compartilhar relatório** gera um .txt completo. |
 | **Ajustes** | Ajuda, pausa automática, tamanho e transparência do painel, fechar jogo, regiões de memória (Jh, Ch, Ca, Cd, Cb, A…). |
@@ -48,6 +48,24 @@ Dicas:
 - Achou o ouro e quer a prata? Marque o ouro → **Buscar perto**.
 - O jogo fechou depois de editar? O endereço não era o certo; refine mais antes de editar.
 
+## Valor sem número (barra de vida)
+
+1. Escolha o tipo (barra costuma ser **Float**) e toque em **Começar sem valor**.
+2. Perca vida e toque em **Diminuiu**; sem mudar nada, toque em **Não mudou**. Repita até sobrar pouco.
+3. Sabe quanto mudou? Digite o número e toque em **Diminuiu 10** / **Aumentou 10**.
+
+## Ponteiros (como no Cheat Engine)
+
+Quando o jogo reinicia, os endereços mudam. Um ponteiro é um caminho fixo até o valor,
+por exemplo `[[libil2cpp.so+1A2B30]+18]+40`, que o Tinker segue sozinho toda vez.
+
+1. Na aba **Salvos**, abra o valor e toque em **Buscar ponteiros**.
+2. Feche e abra o jogo, ache o mesmo valor de novo e salve.
+3. Nesse novo salvo, toque em **Filtrar por este endereço**: ficam só os caminhos certos.
+4. Toque em **Usar**. O salvo passa a mostrar 🔗 e vale em todas as próximas vezes.
+
+Sem resultado? Aumente **Níveis** (até 7) ou **Distância máx.** Jogos 32 bits são reconhecidos sozinhos.
+
 ## Reportar um problema
 
 Aba **Registro** → **Compartilhar relatório** e envie o arquivo `.txt`.
@@ -56,6 +74,7 @@ Ele tem aparelho, versão, jogo, cada comando com o tempo que levou, resumo de p
 ## Para desenvolvedores
 
 - `daemon/tinkerd.c`: daemon root (C, sem dependências). Lê e escreve memória com `process_vm_*` (cai para `/proc/pid/mem`). Protocolo de texto por stdin/stdout.
+  A busca usa todos os núcleos; a busca desconhecida guarda a memória em `/data/local/tmp/tinker-snap` (apagado ao sair).
 - `app/`: app Kotlin + Jetpack Compose (Material 3). Só duas dependências diretas: Compose BOM e activity-compose.
 - `tests/daemon_test.sh`: testa o daemon no Linux contra um processo de verdade. `app/src/test`: testes JVM.
 - O GitHub Actions compila o daemon com o NDK, roda os testes, gera os APKs e publica a release.

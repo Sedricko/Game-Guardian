@@ -2,15 +2,18 @@
 // um comando por linha; cada resposta termina com "ok ..." ou "err ...".
 // Linhas de texto livre (ex.: crashlog) começam com "| " para não confundir o protocolo.
 #define _GNU_SOURCE
+#define _FILE_OFFSET_BITS 64  // pread em endereços acima de 2 GB mesmo num build 32 bits
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
 #include <math.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/statvfs.h>
 #include <sys/uio.h>
 #include <sys/utsname.h>
 #include <unistd.h>
@@ -33,8 +36,10 @@ static unsigned ranges = ~(1u << R_V);  // padrão: tudo menos memória de víde
 static pid_t target;
 static int memfd = -1;
 
-typedef struct { uint64_t addr; uint8_t type, region; } hit_t;
-// shortcut: resultados num vetor em RAM (16 bytes cada), trocar por arquivo mmap se passar de dezenas de milhões
+// old: o valor na última busca/refino, para "aumentou/diminuiu/mudou"
+typedef struct { uint64_t addr, old; uint8_t type, region; } hit_t;
+// shortcut: resultados num vetor em RAM (24 bytes cada); acima de LIST_MAX a busca desconhecida fica no arquivo
+#define LIST_MAX 2000000
 static hit_t *res;
 static size_t nres, cap;
 // Estado anterior ao último refino, para o "Desfazer".
@@ -196,13 +201,89 @@ static int each_region(void (*fn)(uint64_t s, uint64_t e, int region, void *ctx)
 
 static int alive(void) { return target > 0 && !(kill(target, 0) && errno == ESRCH); }
 
-static void push(uint64_t a, int t, int region) {
-    if (nres == cap) {
-        cap = cap ? cap * 2 : 4096;
-        res = realloc(res, cap * sizeof *res);
-        if (!res) { puts("err sem memória"); exit(1); }
+typedef struct { hit_t *h; size_t n, cap; } hits_t;
+
+static void hpush(hits_t *v, hit_t h) {
+    if (v->n == v->cap) {
+        v->cap = v->cap ? v->cap * 2 : 256;
+        v->h = realloc(v->h, v->cap * sizeof *v->h);
+        if (!v->h) { puts("err sem memória"); exit(1); }
     }
-    res[nres++] = (hit_t){a, (uint8_t)t, (uint8_t)region};
+    v->h[v->n++] = h;
+}
+
+static void push(hit_t h) {
+    hits_t v = {res, nres, cap};
+    hpush(&v, h);
+    res = v.h; nres = v.n; cap = v.cap;
+}
+
+static uint64_t bits(const unsigned char *p, int sz) { uint64_t x = 0; memcpy(&x, p, sz); return x; }
+
+// Memória a percorrer, em pedaços de 1 MB; off = posição no arquivo da busca desconhecida.
+#define CHUNK (1u << 20)
+typedef struct { uint64_t addr, off; uint32_t len; uint8_t region; } chunk_t;
+typedef struct { chunk_t *c; size_t n, cap; uint64_t total; unsigned want; } chunks_t;
+
+static void add_chunks(uint64_t s, uint64_t e, int region, void *ctx) {
+    chunks_t *cs = ctx;
+    if (!(cs->want & (1u << region))) return;
+    for (uint64_t a = s; a < e; a += CHUNK) {
+        if (cs->n == cs->cap) {
+            cs->cap = cs->cap ? cs->cap * 2 : 1024;
+            cs->c = realloc(cs->c, cs->cap * sizeof *cs->c);
+            if (!cs->c) { puts("err sem memória"); exit(1); }
+        }
+        uint32_t len = e - a < CHUNK ? (uint32_t)(e - a) : CHUNK;
+        cs->c[cs->n++] = (chunk_t){a, cs->total, len, (uint8_t)region};
+        cs->total += len;
+    }
+}
+
+// Roda fn em cada pedaço usando todos os núcleos (até 8). Cada thread tem um buffer de 2 MB.
+typedef void (*chunk_fn)(size_t i, unsigned char *buf, void *ctx);
+typedef struct { chunk_fn fn; void *ctx; size_t n, next; } pool_t;
+
+static void *worker(void *arg) {
+    pool_t *p = arg;
+    unsigned char *buf = malloc(2 * CHUNK);
+    if (!buf) return NULL;  // as outras threads fazem o trabalho
+    for (size_t i; (i = __atomic_fetch_add(&p->next, 1, __ATOMIC_RELAXED)) < p->n;) p->fn(i, buf, p->ctx);
+    free(buf);
+    return NULL;
+}
+
+static void parallel(size_t n, chunk_fn fn, void *ctx) {
+    pool_t p = {fn, ctx, n, 0};
+    long cpus = sysconf(_SC_NPROCESSORS_ONLN);
+    int nt = cpus < 1 ? 1 : cpus > 8 ? 8 : (int)cpus, started = 0;
+    pthread_t th[8];
+    for (int k = 1; k < nt; k++) if (!pthread_create(&th[started], NULL, worker, &p)) started++;
+    worker(&p);
+    for (int k = 0; k < started; k++) pthread_join(th[k], NULL);
+}
+
+// Junta os achados de cada pedaço em res, na ordem dos endereços.
+static void collect(hits_t *per, size_t n) {
+    nres = 0;
+    for (size_t i = 0; i < n; i++) {
+        for (size_t k = 0; k < per[i].n; k++) push(per[i].h[k]);
+        free(per[i].h);
+    }
+    free(per);
+}
+
+// Leitura com cache de 64 KB: o refino lê resultados vizinhos sem uma chamada ao kernel para cada um.
+#define CBLOCK 65536
+static unsigned char cbuf[CBLOCK];
+static uint64_t cbase = 1;
+static int cok;
+
+static int cread(uint64_t a, unsigned char *out, int sz) {
+    uint64_t b = a & ~(uint64_t)(CBLOCK - 1);
+    if (b != cbase) { cbase = b; cok = !read_mem(b, cbuf, CBLOCK); }
+    if (cok && a + sz <= b + CBLOCK) { memcpy(out, cbuf + (a - b), sz); return 0; }
+    return read_mem(a, out, sz);  // bloco cruza memória sem mapa, ou o valor passa do fim do bloco
 }
 
 static void count_region(uint64_t s, uint64_t e, int region, void *ctx) {
@@ -234,24 +315,83 @@ static int set_ranges(const char *list) {
     return 1;
 }
 
-typedef struct { int types[NTYPES], ntypes, step; vset_t v[NTYPES]; unsigned char *buf; } scan_t;
+typedef struct { int types[NTYPES], ntypes, step; vset_t v[NTYPES]; chunks_t cs; hits_t *out; } scan_t;
 
-static void scan_region(uint64_t s, uint64_t e, int region, void *ctx) {
+static void scan_chunk(size_t ci, unsigned char *buf, void *ctx) {
     scan_t *sc = ctx;
-    if (!(ranges & (1u << region))) return;
-    const size_t CHUNK = 1 << 20;
-    for (uint64_t a = s; a < e; a += CHUNK) {
-        size_t n = e - a < CHUNK ? e - a : CHUNK;
-        if (read_mem(a, sc->buf, n)) continue;
-        // um resultado por endereço: no Auto, Dword/Float ganham de Qword/Double,
-        // senão o Qword no mesmo lugar sobrescreveria os 4 bytes vizinhos ao editar
-        for (size_t i = 0; i + sc->step <= n; i += sc->step)
-            for (int k = 0; k < sc->ntypes; k++) {
-                int t = sc->types[k], sz = TYPES[t].size;
-                if (i % sz || i + sz > n) continue;
-                if (matches_set(t, sc->buf + i, &sc->v[t])) { push(a + i, t, region); break; }
+    const chunk_t *c = &sc->cs.c[ci];
+    if (read_mem(c->addr, buf, c->len)) return;
+    // um resultado por endereço: no Auto, Dword/Float ganham de Qword/Double,
+    // senão o Qword no mesmo lugar sobrescreveria os 4 bytes vizinhos ao editar
+    for (size_t i = 0; i + sc->step <= c->len; i += sc->step)
+        for (int k = 0; k < sc->ntypes; k++) {
+            int t = sc->types[k], sz = TYPES[t].size;
+            if (i % sz || i + sz > c->len) continue;
+            if (matches_set(t, buf + i, &sc->v[t])) {
+                hpush(&sc->out[ci], (hit_t){c->addr + i, bits(buf + i, sz), (uint8_t)t, c->region});
+                break;
             }
+        }
+}
+
+// Busca desconhecida: a memória inteira vai para um arquivo e cada posição do tipo tem um bit de "ainda é candidata".
+static chunks_t snap;
+static uint8_t *smask;
+static int snapfd = -1, snapt;
+static size_t snapn;
+static char snappath[64];
+
+static void drop_snap(void) {
+    if (snapfd >= 0) { close(snapfd); unlink(snappath); }
+    snapfd = -1;
+    free(snap.c);
+    snap = (chunks_t){0};
+    free(smask);
+    smask = NULL;
+    snapn = 0;
+}
+
+static size_t count_mask(void) {
+    size_t n = 0, bytes = snap.total / TYPES[snapt].size / 8;
+    for (size_t i = 0; i < bytes; i++) n += __builtin_popcount(smask[i]);
+    return n;
+}
+
+static void snap_chunk(size_t ci, unsigned char *buf, void *ctx) {
+    (void)ctx;
+    const chunk_t *c = &snap.c[ci];
+    int sz = TYPES[snapt].size;
+    // ilegível agora: sai da busca
+    if (read_mem(c->addr, buf, c->len) || pwrite(snapfd, buf, c->len, (off_t)c->off) != (ssize_t)c->len)
+        memset(smask + c->off / sz / 8, 0, c->len / sz / 8);
+}
+
+static void cmd_snapshot(const char *tname) {
+    int t = find_type(tname);
+    if (t < 0) { printf("err tipo inválido: %s\n", tname); return; }
+    drop_snap();
+    nres = nprev = 0;
+    snap.want = ranges;
+    if (each_region(add_chunks, &snap)) { puts("err não leu o mapa de memória"); return; }
+    size_t bytes = snap.total / TYPES[t].size / 8;
+    if (!bytes) { puts("err nenhuma região marcada para busca"); drop_snap(); return; }
+    const char *dir = access("/data/local/tmp", W_OK) ? "/tmp" : "/data/local/tmp";
+    struct statvfs fs;
+    if (!statvfs(dir, &fs) && (uint64_t)fs.f_bavail * fs.f_frsize < snap.total + (64u << 20)) {
+        printf("err sem espaço para a busca desconhecida: precisa de %" PRIu64 " MB livres em %s; desmarque regiões em Ajustes\n",
+               (snap.total >> 20) + 64, dir);
+        drop_snap();
+        return;
     }
+    snprintf(snappath, sizeof snappath, "%s/tinker-snap", dir);
+    snapfd = open(snappath, O_RDWR | O_CREAT | O_TRUNC, 0600);
+    smask = malloc(bytes);
+    if (snapfd < 0 || !smask) { printf("err não criou %s: %s\n", snappath, strerror(errno)); drop_snap(); return; }
+    snapt = t;
+    memset(smask, 0xff, bytes);
+    parallel(snap.n, snap_chunk, NULL);
+    snapn = count_mask();
+    printf("ok %zu\n", snapn);
 }
 
 static void cmd_search(const char *tname, const char *value) {
@@ -271,19 +411,105 @@ static void cmd_search(const char *tname, const char *value) {
     if (!sc.ntypes) { printf("err valor inválido: %s\n", value); return; }
     sc.step = 8;
     for (int k = 0; k < sc.ntypes; k++) if (TYPES[sc.types[k]].size < sc.step) sc.step = TYPES[sc.types[k]].size;
-    sc.buf = malloc(1 << 20);
+    drop_snap();
     nres = 0;
     nprev = 0;  // nova busca: não há refino para desfazer
-    int r = each_region(scan_region, &sc);
-    free(sc.buf);
-    if (r) puts("err não leu o mapa de memória");
-    else printf("ok %zu\n", nres);
+    sc.cs.want = ranges;
+    if (each_region(add_chunks, &sc.cs)) { puts("err não leu o mapa de memória"); return; }
+    sc.out = calloc(sc.cs.n ? sc.cs.n : 1, sizeof *sc.out);
+    if (!sc.out) { puts("err sem memória"); exit(1); }
+    parallel(sc.cs.n, scan_chunk, &sc);
+    collect(sc.out, sc.cs.n);
+    free(sc.cs.c);
+    printf("ok %zu\n", nres);
 }
 
-static void cmd_refine(const char *value) {
+// Refino: igual a um valor, ou comparado com o valor da última busca/refino (busca desconhecida).
+enum { OP_EQ, OP_INC, OP_DEC, OP_SAME, OP_CHANGED, OP_INCBY, OP_DECBY };
+static const char *OPS[] = {"eq", "inc", "dec", "same", "changed", "incby", "decby"};
+
+static double num(int t, const unsigned char *p) {
+    if (t == T_F32) { float x; memcpy(&x, p, 4); return x; }
+    if (t == T_F64) { double x; memcpy(&x, p, 8); return x; }
+    int sz = TYPES[t].size;
+    uint64_t x = bits(p, sz);
+    if (sz < 8 && (x >> (sz * 8 - 1))) x |= ~0ULL << (sz * 8);
+    return (double)(int64_t)x;
+}
+
+static int keep(int t, const unsigned char *cur, const unsigned char *old, int op, const vset_t *v) {
+    int sz = TYPES[t].size;
+    if (op == OP_EQ) return matches_set(t, cur, v);
+    if (op == OP_SAME) return !memcmp(cur, old, sz);
+    if (op == OP_CHANGED) return memcmp(cur, old, sz) != 0;
+    double c = num(t, cur), o = num(t, old);
+    if (op == OP_INC) return c > o;
+    if (op == OP_DEC) return c < o;
+    double d = op == OP_INCBY ? c - o : o - c;
+    for (int i = 0; i < v->n; i++) {
+        const value_t *x = &v->v[i];
+        // float guardado nunca é exato: +0.1 vira +0.100000001
+        double slack = TYPES[t].isfloat ? 1e-4 * fmax(1, x->range ? fmax(fabs(x->lo), fabs(x->hi)) : fabs(x->f)) : 0;
+        if (x->range ? d >= x->lo - slack && d <= x->hi + slack : fabs(d - x->f) <= slack) return 1;
+    }
+    return 0;
+}
+
+typedef struct { int op; const vset_t *v; } cmpctx_t;
+
+static void cmp_chunk(size_t ci, unsigned char *buf, void *ctx) {
+    const cmpctx_t *cc = ctx;
+    const chunk_t *c = &snap.c[ci];
+    int sz = TYPES[snapt].size;
+    uint8_t *m = smask + c->off / sz / 8;
+    size_t nb = c->len / sz / 8, any = 0;
+    for (size_t j = 0; j < nb && !any; j++) any = m[j];
+    if (!any) return;  // pedaço já descartado: não lê nada
+    unsigned char *cur = buf, *old = buf + CHUNK;
+    if (read_mem(c->addr, cur, c->len) || pread(snapfd, old, c->len, (off_t)c->off) != (ssize_t)c->len) { memset(m, 0, nb); return; }
+    for (size_t k = 0; k < c->len / sz; k++)
+        if ((m[k >> 3] & (1 << (k & 7))) && !keep(snapt, cur + k * sz, old + k * sz, cc->op, cc->v)) m[k >> 3] &= ~(1 << (k & 7));
+    if (pwrite(snapfd, cur, c->len, (off_t)c->off) != (ssize_t)c->len) memset(m, 0, nb);  // próxima comparação parte daqui
+}
+
+// Poucos candidatos: sai do arquivo e vira uma lista normal (aparece na tela, edita, desfaz).
+static void snap_to_list(void) {
+    int sz = TYPES[snapt].size;
+    unsigned char *buf = malloc(CHUNK);
+    if (!buf) { puts("err sem memória"); exit(1); }
+    nres = 0;
+    for (size_t ci = 0; ci < snap.n; ci++) {
+        const chunk_t *c = &snap.c[ci];
+        const uint8_t *m = smask + c->off / sz / 8;
+        int loaded = 0;
+        for (size_t k = 0; k < c->len / sz; k++) {
+            if (!(m[k >> 3] & (1 << (k & 7)))) continue;
+            if (!loaded && pread(snapfd, buf, c->len, (off_t)c->off) != (ssize_t)c->len) break;
+            loaded = 1;
+            push((hit_t){c->addr + k * sz, bits(buf + k * sz, sz), (uint8_t)snapt, c->region});
+        }
+    }
+    free(buf);
+    drop_snap();
+}
+
+static void cmd_compare(const char *opname, const char *value) {
+    int op = -1;
+    for (int i = 0; i < (int)(sizeof OPS / sizeof *OPS); i++) if (!strcmp(opname, OPS[i])) op = i;
+    if (op < 0) { printf("err comparação inválida: %s\n", opname); return; }
+    int needv = op == OP_EQ || op == OP_INCBY || op == OP_DECBY;
     vset_t v[NTYPES];
     int ok[NTYPES];
-    for (int t = 0; t < NTYPES; t++) ok[t] = parse_set(t, value, &v[t]);
+    for (int t = 0; t < NTYPES; t++) ok[t] = !needv || parse_set(t, value, &v[t]);
+    if (snapfd >= 0) {
+        if (!ok[snapt]) { printf("err valor inválido: %s\n", value); return; }
+        cmpctx_t cc = {op, &v[snapt]};
+        parallel(snap.n, cmp_chunk, &cc);
+        snapn = count_mask();
+        if (snapn <= LIST_MAX) snap_to_list();
+        printf("ok %zu\n", snapfd >= 0 ? snapn : nres);
+        return;
+    }
     if (nres > capprev) {
         capprev = nres;
         prev = realloc(prev, capprev * sizeof *prev);
@@ -291,18 +517,23 @@ static void cmd_refine(const char *value) {
     }
     memcpy(prev, res, nres * sizeof *res);
     nprev = nres;
-    // shortcut: uma leitura por resultado, lento só se o refino começar com milhões
     size_t k = 0;
-    unsigned char b[8];
+    unsigned char cur[8], old[8];
+    cbase = 1;  // a memória mudou desde a última leitura
     for (size_t i = 0; i < nres; i++) {
-        int t = res[i].type;
-        if (ok[t] && !read_mem(res[i].addr, b, TYPES[t].size) && matches_set(t, b, &v[t])) res[k++] = res[i];
+        int t = res[i].type, sz = TYPES[t].size;
+        memcpy(old, &res[i].old, 8);
+        if (ok[t] && !cread(res[i].addr, cur, sz) && keep(t, cur, old, op, &v[t])) {
+            res[k] = res[i];
+            res[k++].old = bits(cur, sz);
+        }
     }
     nres = k;
     printf("ok %zu\n", nres);
 }
 
 static void cmd_list(size_t n) {
+    if (snapfd >= 0) { printf("ok %zu\n", snapn); return; }  // milhões ainda no arquivo: nada para mostrar
     unsigned char b[8];
     char out[64];
     for (size_t i = 0; i < nres && i < n; i++) {
@@ -356,6 +587,7 @@ static void cmd_write(const char *addr, const char *tname, const char *value) {
 }
 
 static void cmd_writeall(const char *value) {
+    if (snapfd >= 0) { puts("err refine mais antes de editar todos"); return; }
     size_t fail = 0, skip = 0;
     for (size_t i = 0; i < nres; i++) {
         int t = res[i].type;
@@ -366,6 +598,217 @@ static void cmd_writeall(const char *value) {
         fail += write_mem(res[i].addr, b, TYPES[t].size) != 0;
     }
     printf("ok %zu %zu\n", nres - fail - skip, fail + skip);
+}
+
+// Ponteiros, como no Cheat Engine: um caminho "módulo+deslocamento → +o1 → +o2" que acha o valor
+// mesmo depois de o jogo reiniciar, porque a base é um endereço fixo dentro de uma .so do jogo.
+typedef struct { char name[96]; uint64_t base; int system; } module_t;
+typedef struct { uint64_t start, end; int mod; } srange_t;  // parte gravável de um módulo (.data/.bss)
+static module_t *mods;
+static size_t nmods, nsr;
+static srange_t *sr;
+static pid_t mods_pid;
+static int psize = 8;
+#define TAGMASK 0x00ffffffffffffffULL  // Android arm64 marca ponteiros do malloc no byte de cima
+
+static int ptr_size(void) {
+    char path[64];
+    unsigned char e[5];
+    snprintf(path, sizeof path, "/proc/%d/exe", target);
+    FILE *f = fopen(path, "rb");
+    size_t n = f ? fread(e, 1, 5, f) : 0;
+    if (f) fclose(f);
+    return n == 5 && e[4] == 1 ? 4 : 8;  // ELFCLASS32: jogo 32 bits (app_process32)
+}
+
+static int read_ptr(uint64_t a, uint64_t *v) {
+    *v = 0;
+    if (read_mem(a, v, psize)) return -1;
+    if (psize == 8) *v &= TAGMASK;
+    return 0;
+}
+
+// Módulo = cada mapeamento de arquivo que começa com o cabeçalho ELF, mais os mapeamentos seguintes do mesmo
+// arquivo e o .bss logo depois. Lib dentro do APK (sem extrair) vira "base.apk@deslocamento".
+static int load_modules(void) {
+    char path[64], line[1024], curpath[512] = "";
+    snprintf(path, sizeof path, "/proc/%d/maps", target);
+    FILE *f = fopen(path, "r");
+    if (!f) return -1;
+    nmods = nsr = 0;
+    int cur = -1;
+    uint64_t prev_end = 0;
+    size_t capm = 0, caps = 0;
+    while (fgets(line, sizeof line, f)) {
+        unsigned long long s, e, off;
+        char perms[8];
+        int pos = 0;
+        if (sscanf(line, "%llx-%llx %7s %llx %*s %*s %n", &s, &e, perms, &off, &pos) < 4) continue;
+        char *name = pos ? line + pos : line + strlen(line);
+        name[strcspn(name, "\n")] = 0;
+        unsigned char magic[4];
+        if (name[0] == '/' && perms[0] == 'r' && !read_mem(s, magic, 4) && !memcmp(magic, "\177ELF", 4)) {
+            if (nmods == capm) {
+                capm = capm ? capm * 2 : 256;
+                mods = realloc(mods, capm * sizeof *mods);
+                if (!mods) { puts("err sem memória"); exit(1); }
+            }
+            module_t *m = &mods[nmods];
+            const char *b = strrchr(name, '/') + 1;
+            size_t L = strlen(b);
+            if (L > 4 && !strcmp(b + L - 4, ".apk")) snprintf(m->name, sizeof m->name, "%.70s@%llx", b, off);
+            else snprintf(m->name, sizeof m->name, "%.95s", b);
+            m->base = s;
+            m->system = strncmp(name, "/data/", 6) != 0;
+            cur = (int)nmods++;
+            snprintf(curpath, sizeof curpath, "%.511s", name);
+        } else if (cur >= 0 && strcmp(name, curpath) && !((!name[0] || !strcmp(name, "[anon:.bss]")) && s == prev_end)) {
+            cur = -1;
+        }
+        prev_end = e;
+        if (cur >= 0 && perms[1] == 'w') {
+            if (nsr == caps) {
+                caps = caps ? caps * 2 : 256;
+                sr = realloc(sr, caps * sizeof *sr);
+                if (!sr) { puts("err sem memória"); exit(1); }
+            }
+            sr[nsr++] = (srange_t){s, e, cur};
+        }
+    }
+    fclose(f);
+    mods_pid = target;
+    return 0;
+}
+
+static int static_of(uint64_t a) {
+    for (size_t i = 0; i < nsr; i++) if (a >= sr[i].start && a < sr[i].end) return sr[i].mod;
+    return -1;
+}
+
+// Nó da busca de ponteiros: em addr há um ponteiro que, somado a off, dá o endereço do nó parent.
+typedef struct { uint64_t addr; uint32_t parent, off; } pnode_t;
+typedef struct { uint64_t addr; uint32_t node; } tgt_t;
+typedef struct { const tgt_t *t; size_t nt; uint64_t lo, hi, maxoff; chunks_t cs; hits_t *out; } pscan_t;
+static pnode_t *nodes;
+static size_t nnodes, capnodes;
+#define MAXNODES 200000  // por nível; acima disso os caminhos explodem e ficam inúteis
+#define MAXFOUND 5000
+#define MAXSHOW 500
+
+static uint32_t node_push(uint64_t addr, uint32_t parent, uint32_t off) {
+    if (nnodes == capnodes) {
+        capnodes = capnodes ? capnodes * 2 : 4096;
+        nodes = realloc(nodes, capnodes * sizeof *nodes);
+        if (!nodes) { puts("err sem memória"); exit(1); }
+    }
+    nodes[nnodes] = (pnode_t){addr, parent, off};
+    return (uint32_t)nnodes++;
+}
+
+static size_t lower(const tgt_t *t, size_t n, uint64_t v) {
+    size_t a = 0, b = n;
+    while (a < b) { size_t m = a + (b - a) / 2; if (t[m].addr < v) a = m + 1; else b = m; }
+    return a;
+}
+
+static void ptr_chunk(size_t ci, unsigned char *buf, void *ctx) {
+    pscan_t *ps = ctx;
+    const chunk_t *c = &ps->cs.c[ci];
+    if (read_mem(c->addr, buf, c->len)) return;
+    for (size_t i = 0; i + psize <= c->len; i += psize) {
+        uint64_t v = 0;
+        memcpy(&v, buf + i, psize);
+        if (psize == 8) v &= TAGMASK;
+        if (v < ps->lo || v > ps->hi) continue;
+        size_t j = lower(ps->t, ps->nt, v);
+        if (j < ps->nt && ps->t[j].addr - v <= ps->maxoff) hpush(&ps->out[ci], (hit_t){c->addr + i, v, 0, c->region});
+    }
+}
+
+static int cmp_tgt(const void *a, const void *b) {
+    uint64_t x = ((const tgt_t *)a)->addr, y = ((const tgt_t *)b)->addr;
+    return x < y ? -1 : x > y;
+}
+
+typedef struct { uint32_t id; int key; } found_t;
+static int cmp_found(const void *a, const void *b) { return ((const found_t *)a)->key - ((const found_t *)b)->key; }
+
+static void cmd_pointers(const char *addr, const char *maxoffs, const char *levels) {
+    uint64_t goal = strtoull(addr, NULL, 16), maxoff = strtoull(maxoffs, NULL, 0);
+    int lv = atoi(levels);
+    if (lv < 1 || lv > 7) lv = 4;
+    if (maxoff < 8 || maxoff > 65536) maxoff = 4096;
+    psize = ptr_size();
+    if (load_modules()) { puts("err não leu o mapa de memória"); return; }
+    chunks_t cs = {.want = ~((1u << R_V) | (1u << 7))};  // sem vídeo e sem pilha: pilha muda a cada instante
+    if (each_region(add_chunks, &cs)) { puts("err não leu o mapa de memória"); return; }
+    nnodes = 0;
+    node_push(goal, UINT32_MAX, 0);
+    found_t *found = malloc(MAXFOUND * sizeof *found);
+    if (!found) { puts("err sem memória"); exit(1); }
+    size_t nfound = 0, lstart = 0, lend = 1;
+    int limited = 0;
+    if (static_of(goal) >= 0) found[nfound++] = (found_t){0, 0};
+    for (int L = 1; L <= lv && lstart < lend && nfound < MAXFOUND; L++) {
+        size_t nt = lend - lstart;
+        tgt_t *t = malloc(nt * sizeof *t);
+        hits_t *out = calloc(cs.n ? cs.n : 1, sizeof *out);
+        if (!t || !out) { puts("err sem memória"); exit(1); }
+        for (size_t i = 0; i < nt; i++) t[i] = (tgt_t){nodes[lstart + i].addr, (uint32_t)(lstart + i)};
+        qsort(t, nt, sizeof *t, cmp_tgt);
+        pscan_t ps = {t, nt, t[0].addr > maxoff ? t[0].addr - maxoff : 0, t[nt - 1].addr, maxoff, cs, out};
+        parallel(cs.n, ptr_chunk, &ps);
+        size_t next = nnodes;
+        for (size_t ci = 0; ci < cs.n; ci++) {
+            for (size_t k = 0; k < out[ci].n; k++) {
+                uint64_t p = out[ci].h[k].addr, v = out[ci].h[k].old;
+                int m = static_of(p);
+                for (size_t j = lower(t, nt, v); j < nt && t[j].addr - v <= maxoff; j++) {
+                    if (nnodes - next >= MAXNODES) { limited = 1; break; }
+                    uint32_t id = node_push(p, t[j].node, (uint32_t)(t[j].addr - v));
+                    // caminhos pelas libs do jogo (/data) primeiro, depois os mais curtos
+                    if (m >= 0 && nfound < MAXFOUND) found[nfound++] = (found_t){id, mods[m].system * 100 + L};
+                }
+            }
+            free(out[ci].h);
+        }
+        free(out);
+        free(t);
+        lstart = next;
+        lend = nnodes;
+    }
+    free(cs.c);
+    qsort(found, nfound, sizeof *found, cmp_found);
+    for (size_t i = 0; i < nfound && i < MAXSHOW; i++) {
+        uint32_t id = found[i].id;
+        const module_t *m = &mods[static_of(nodes[id].addr)];
+        printf("%s+%" PRIx64, m->name, nodes[id].addr - m->base);
+        for (uint32_t k = id; nodes[k].parent != UINT32_MAX; k = nodes[k].parent) printf(" %x", nodes[k].off);
+        putchar('\n');
+    }
+    free(found);
+    printf("ok %zu %d\n", nfound < MAXSHOW ? nfound : MAXSHOW, limited || nfound >= MAXFOUND);
+}
+
+// "libjogo.so+1a2b30 18 40": base da lib + 1a2b30, lê o ponteiro, soma 18, lê, soma 40 = endereço do valor.
+static void cmd_resolve(char *chain) {
+    char *save = NULL, *tok = strtok_r(chain, " \n", &save);
+    char *plus = tok ? strrchr(tok, '+') : NULL;
+    if (!plus) { puts("err ponteiro inválido"); return; }
+    *plus = 0;
+    int m = -1;
+    for (int pass = 0; pass < 2 && m < 0; pass++) {
+        // a lista de módulos fica guardada: só relê se o jogo reiniciou ou a lib ainda não estava carregada
+        if (pass || mods_pid != target) { psize = ptr_size(); if (load_modules()) { puts("err não leu o mapa de memória"); return; } }
+        for (size_t i = 0; i < nmods; i++) if (!strcmp(mods[i].name, tok)) { m = (int)i; break; }
+    }
+    if (m < 0) { printf("err módulo %s não carregado\n", tok); return; }
+    uint64_t a = mods[m].base + strtoull(plus + 1, NULL, 16), v;
+    for (tok = strtok_r(NULL, " \n", &save); tok; tok = strtok_r(NULL, " \n", &save)) {
+        if (read_ptr(a, &v)) { printf("err ponteiro quebrado em %" PRIx64 "\n", a); return; }
+        a = v + strtoull(tok, NULL, 16);
+    }
+    printf("ok %" PRIx64 "\n", a);
 }
 
 // Roda um logcat (como root vê todos os apps) e repassa cada linha com "| ".
@@ -403,7 +846,7 @@ static void cmd_ps(void) {
 int main(void) {
     setvbuf(stdout, NULL, _IOLBF, 0);
     char line[512], cmd[32], a1[128], a2[128], a3[128];
-    puts("ok tinkerd 2");
+    puts("ok tinkerd 3");
     while (fgets(line, sizeof line, stdin)) {
         a1[0] = a2[0] = a3[0] = 0;
         if (sscanf(line, "%31s %127s %127s %127s", cmd, a1, a2, a3) < 1) continue;
@@ -434,7 +877,8 @@ int main(void) {
             snprintf(path, sizeof path, "/proc/%d/mem", target);
             if (memfd >= 0) close(memfd);
             memfd = open(path, O_RDWR);
-            nres = 0;
+            nres = nprev = 0;
+            drop_snap();
             if (!alive()) printf("err processo %d não existe\n", target);
             else puts("ok");
             continue;
@@ -444,7 +888,11 @@ int main(void) {
         if (!strcmp(cmd, "regions")) cmd_regions();
         else if (!strcmp(cmd, "ranges")) puts(set_ranges(a1) ? "ok" : "err região inválida");
         else if (!strcmp(cmd, "search")) cmd_search(a1, a2);
-        else if (!strcmp(cmd, "refine")) cmd_refine(a1);
+        else if (!strcmp(cmd, "refine")) cmd_compare("eq", a1);
+        else if (!strcmp(cmd, "compare")) cmd_compare(a1, a2);
+        else if (!strcmp(cmd, "snapshot")) cmd_snapshot(a1);
+        else if (!strcmp(cmd, "pointers")) cmd_pointers(a1, a2, a3);
+        else if (!strcmp(cmd, "resolve")) cmd_resolve(strstr(line, "resolve") + 7);
         else if (!strcmp(cmd, "list")) cmd_list(strtoul(a1, NULL, 10));
         else if (!strcmp(cmd, "read")) cmd_read(a1, a2);
         else if (!strcmp(cmd, "dump")) cmd_dump(a1, a2, a3);
@@ -453,7 +901,7 @@ int main(void) {
         else if (!strcmp(cmd, "pause")) puts(kill(target, SIGSTOP) ? "err não pausou" : "ok");
         else if (!strcmp(cmd, "resume")) puts(kill(target, SIGCONT) ? "err não continuou" : "ok");
         else if (!strcmp(cmd, "kill")) puts(kill(target, SIGKILL) ? "err não fechou" : "ok");
-        else if (!strcmp(cmd, "reset")) { nres = nprev = 0; puts("ok 0"); }
+        else if (!strcmp(cmd, "reset")) { nres = nprev = 0; drop_snap(); puts("ok 0"); }
         else if (!strcmp(cmd, "undo")) {
             // troca atual e anterior: desfazer de novo refaz
             if (!nprev) { puts("err nada para desfazer"); continue; }
@@ -469,5 +917,6 @@ int main(void) {
         }
         else printf("err comando desconhecido: %s\n", cmd);
     }
+    drop_snap();  // não deixa o arquivo da busca desconhecida para trás
     return 0;
 }

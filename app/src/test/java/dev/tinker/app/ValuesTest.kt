@@ -55,4 +55,10 @@ class ValuesTest {
         assertEquals("?", readable("?", "f64"))
         assertEquals("123456789", readable("123456789", "i32"))
     }
+
+    @Test
+    fun pointerTextMostraComoOCheatEngine() {
+        assertEquals("[[libgame.so+1A2B30]+18]+40", pointerText("libgame.so+1a2b30 18 40"))
+        assertEquals("base.apk@1f000+10", pointerText("base.apk@1f000+10"))
+    }
 }

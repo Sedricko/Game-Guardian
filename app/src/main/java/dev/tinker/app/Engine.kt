@@ -41,7 +41,9 @@ data class GameProcess(val pid: Int, val pkg: String, val label: String, val ico
 // base: na busca perto, o endereço de partida em volta do qual este foi achado
 data class Hit(val addr: String, val type: String, val region: String, val value: String, val base: String = "", val asDword: String = "")
 data class Region(val code: String, val count: Long, val bytes: Long, val enabled: Boolean)
-data class SavedItem(val addr: String, val type: String, val region: String, val value: String, val frozen: Boolean = false, val name: String = "")
+// pointer: caminho "lib.so+1a2b 18 40"; com ele o addr é recalculado sozinho, mesmo depois de reiniciar o jogo
+data class SavedItem(val addr: String, val type: String, val region: String, val value: String, val frozen: Boolean = false, val name: String = "", val pointer: String = "")
+data class Recent(val types: Set<String>, val value: String)
 
 /** Estado da tela; fica fora da Activity para a janela flutuante e a Activity verem o mesmo. */
 object Session {
@@ -62,6 +64,10 @@ object Session {
     var view by mutableStateOf<Pair<String, String>?>(null)
     var tab by mutableIntStateOf(0)  // índice em TABS  // visualizador de memória: endereço e tipo  // segurando o "olho": painel quase invisível
     val saved = mutableStateListOf<SavedItem>()
+    val history = mutableStateListOf<Recent>()  // últimas buscas, para repetir com um toque
+    var pointers by mutableStateOf(listOf<String>())  // caminhos da última busca de ponteiros deste jogo
+    var pointersFor by mutableStateOf("")  // endereço para o qual eles foram buscados
+    var pointerInfo by mutableStateOf("")
 }
 
 /** Ponte entre a tela e o daemon; tudo roda fora da thread de UI. Uma instância por processo. */
@@ -78,9 +84,14 @@ class Engine private constructor(private val app: Context) {
     // uma lista de salvos por jogo; "saved.json" é a lista de antes de escolher um jogo
     private var savedPkg: String? = null
     private val savedFile get() = File(app.filesDir, savedPkg?.let { "saved-$it.json" } ?: "saved.json")
+    private val pointersFile get() = File(app.filesDir, "pointers-${savedPkg ?: "sem-jogo"}.txt")
+    private val historyFile get() = File(app.filesDir, "history.txt")
+    private var inFile = false  // busca desconhecida ainda no arquivo do daemon
+    private val trail = mutableListOf<String>()  // etapas da busca atual, para o registro: 500 (1234) → 480 (12)
 
     init {
         loadSaved()
+        loadHistory()
         scope.launch { freezeLoop() }
     }
 
@@ -171,6 +182,7 @@ class Engine private constructor(private val app: Context) {
         Session.paused = false
         Session.canUndo = false
         switchSaved(p.pkg)
+        Session.saved.toList().forEach { d.resolve(it) }
         "Pronto. Digite um valor que você vê no jogo e toque em Nova busca."
     }
 
@@ -190,6 +202,9 @@ class Engine private constructor(private val app: Context) {
         val list = TYPES.map { it.first }.filter { it in types }.joinToString(",").ifEmpty { "auto" }
         val n = d.frozenGame { d.send("search $list ${value.arg()}") }.status
         Session.canUndo = false
+        addRecent(Recent(types, value.trim()))
+        inFile = false
+        step(true, value.trim(), n)
         if (n == "0") "Nada encontrado. Dicas: use Auto; se o número da tela é arredondado (1.2K), busque uma faixa como 1150~1250; ou marque mais regiões em Ajustes."
         else "$n encontrados. Mude o valor no jogo e refine."
     }
@@ -198,12 +213,118 @@ class Engine private constructor(private val app: Context) {
         val before = Session.count
         val n = d.frozenGame { d.send("refine ${value.arg()}") }.status
         Session.canUndo = true
+        step(false, value.trim(), n)
         when {
             n == "0" -> "Nenhum restou. O valor pode ter mudado de novo antes do refino: toque em Desfazer e refine com o valor atual."
             // refinar com o mesmo número não filtra nada: o valor precisa mudar no jogo antes
             n == before?.toString() -> "Continuam $n: nenhum mudou. Faça o valor mudar no jogo (gaste ou ganhe) e refine com o número novo."
             else -> "$n restantes."
         }
+    }
+
+    /**
+     * Busca desconhecida: guarda a memória inteira para comparar depois (barra de vida, energia…).
+     * Um tipo só: Auto vira Dword.
+     */
+    suspend fun startUnknown(types: Set<String>): String = call { d ->
+        val type = TYPES.map { it.first }.firstOrNull { it in types } ?: "i32"
+        val n = d.frozenGame { d.send("snapshot $type") }.status
+        Session.canUndo = false
+        inFile = true
+        step(true, "desconhecido ${TYPE_NAMES[type]}", n)
+        "Memória guardada: $n posições como ${TYPE_NAMES[type]}" + (if (types.isEmpty()) " (barra de vida costuma ser Float: escolha Float e comece de novo)" else "") +
+            ". Agora faça o valor mudar no jogo e toque em Aumentou, Diminuiu, Mudou ou Não mudou."
+    }
+
+    /** Refino comparando com o valor anterior: inc, dec, same, changed; incby/decby com quanto mudou. */
+    suspend fun compare(op: String, value: String = ""): String = call { d ->
+        val n = d.frozenGame { d.send("compare $op ${if (value.isBlank()) "" else value.arg()}".trimEnd()) }.status
+        // enquanto os candidatos estão no arquivo do daemon (milhões) não há desfazer
+        Session.canUndo = !inFile
+        inFile = inFile && n.toLong() > 2_000_000
+        step(false, COMPARE_NAMES.getValue(op) + if (value.isBlank()) "" else " $value", n)
+        when {
+            n == "0" -> "Nenhum restou. Toque em Desfazer, ou comece de novo sem valor."
+            n.toLong() > 2_000_000 -> "$n candidatos. Continue: mude o valor no jogo e compare de novo."
+            else -> "$n restantes."
+        }
+    }
+
+    private fun step(new: Boolean, what: String, n: String) {
+        if (new) trail.clear()
+        trail += "$what ($n)"
+        if (trail.size > 1) Diag.add("Etapas da busca: ${trail.takeLast(12).joinToString(" → ")}")
+    }
+
+    private fun addRecent(r: Recent) {
+        if (r.value.isEmpty()) return
+        Session.history.remove(r)
+        Session.history.add(0, r)
+        while (Session.history.size > 12) Session.history.removeAt(Session.history.lastIndex)
+        runCatching { historyFile.writeText(Session.history.joinToString("\n") { it.types.joinToString(",") + "\t" + it.value }) }
+    }
+
+    private fun loadHistory() = runCatching {
+        if (!historyFile.exists()) return@runCatching
+        historyFile.readLines().mapNotNull { l ->
+            val (t, v) = l.split('\t', limit = 2).takeIf { it.size == 2 } ?: return@mapNotNull null
+            Recent(t.split(',').filter { it in TYPE_SIZES }.toSet(), v)
+        }.let(Session.history::addAll)
+    }
+
+    // Ponteiros
+
+    /** Procura caminhos de ponteiro até addr, como o "Pointer scan" do Cheat Engine. */
+    suspend fun scanPointers(addr: String, maxOff: Int, levels: Int): String = call { d ->
+        val r = d.frozenGame { d.send("pointers $addr $maxOff $levels") }
+        val (n, limited) = r.status.split(" ").let { it[0] to (it.getOrNull(1) == "1") }
+        Session.pointers = r.lines
+        Session.pointersFor = addr
+        storePointers()
+        Session.pointerInfo = when {
+            r.lines.isEmpty() -> "Nenhum caminho. Tente mais níveis ou uma distância maior."
+            else -> "$n caminhos${if (limited) " (há mais; mostrando os melhores)" else ""}. Para achar o certo: feche e abra o jogo, " +
+                "ache o valor de novo, salve e toque em \"Filtrar\" nesse salvo."
+        }
+        Session.pointerInfo
+    }
+
+    /** Depois de reiniciar o jogo: fica só quem ainda chega no endereço novo do mesmo valor. */
+    suspend fun filterPointers(addr: String): String = call { d ->
+        val before = Session.pointers.size
+        val want = addr.toLong(16)
+        Session.pointers = Session.pointers.filter { c -> runCatching { d.send("resolve $c", quiet = true).status.toLong(16) }.getOrNull() == want }
+        Session.pointersFor = addr
+        storePointers()
+        Diag.add("Ponteiros filtrados por 0x$addr: ${Session.pointers.size} de $before")
+        Session.pointerInfo = if (Session.pointers.isEmpty()) "Nenhum caminho continuou certo. Busque ponteiros de novo com mais níveis."
+        else "${Session.pointers.size} de $before continuam certos. Toque em Usar num deles (o primeiro costuma ser o melhor)."
+        Session.pointerInfo
+    }
+
+    fun setPointer(item: SavedItem, chain: String) {
+        Diag.add("Salvo 0x${item.addr} ${if (chain.isEmpty()) "sem ponteiro" else "agora segue o ponteiro $chain"}")
+        replace(item) { it.copy(pointer = chain) }
+    }
+
+    /** Recalcula o endereço de um salvo com ponteiro; devolve o salvo atualizado. */
+    private fun Daemon.resolve(item: SavedItem): SavedItem {
+        if (item.pointer.isEmpty() || !isAttached) return item
+        val a = runCatching { send("resolve ${item.pointer}", quiet = true).status }.getOrNull() ?: return item
+        // outro salvo já está nesse endereço: não duplica (a lista usa endereço+tipo como chave)
+        if (a == item.addr || Session.saved.any { it.addr == a && it.type == item.type }) return item
+        Diag.add("Ponteiro ${item.name.ifEmpty { item.pointer }}: 0x${item.addr} → 0x$a")
+        replace(item) { it.copy(addr = a) }
+        return item.copy(addr = a)
+    }
+
+    private fun storePointers() = runCatching { pointersFile.writeText(Session.pointersFor + "\n" + Session.pointers.joinToString("\n")) }
+
+    private fun loadPointers() {
+        val lines = runCatching { pointersFile.readLines() }.getOrDefault(emptyList())
+        Session.pointersFor = lines.firstOrNull().orEmpty()
+        Session.pointers = lines.drop(1).filter { POINTER.matches(it) }
+        Session.pointerInfo = ""
     }
 
     /** Volta ao resultado de antes do último refino; tocar de novo refaz. */
@@ -434,7 +555,8 @@ class Engine private constructor(private val app: Context) {
 
     suspend fun refreshSaved() = call { d ->
         if (!d.isAttached) return@call
-        Session.saved.toList().forEach { item ->
+        Session.saved.toList().forEach { old ->
+            val item = d.resolve(old)
             if (item.frozen) return@forEach
             val v = runCatching { d.send("read ${item.addr} ${item.type}", quiet = true).status }.getOrDefault("?")
             if (v != item.value) replace(item) { it.copy(value = v) }
@@ -454,7 +576,8 @@ class Engine private constructor(private val app: Context) {
             val frozen = Session.saved.filter { it.frozen }
             val d = daemon
             if (frozen.isEmpty() || d == null || !d.isAttached) continue
-            for (item in frozen) {
+            for (old in frozen) {
+                val item = d.resolve(old)
                 val key = item.addr + item.type
                 try {
                     d.send("write ${item.addr} ${item.type} ${item.value}", quiet = true)
@@ -479,6 +602,7 @@ class Engine private constructor(private val app: Context) {
             Session.saved.clear()
             loadSaved()
         }
+        loadPointers()
         Diag.add("Salvos do jogo $pkg: ${Session.saved.size}${if (adopt) " (lista anterior adotada)" else ""}")
     }
 
@@ -515,13 +639,27 @@ internal fun normalizeNumbers(input: String): String =
     }.filter { it.isNotEmpty() }.joinToString(";")
 
 private fun SavedItem.toJson() = JSONObject().put("addr", addr).put("type", type).put("region", region).put("value", value).put("name", name).put("frozen", frozen)
+    .put("pointer", pointer)
+
+/** Caminho de ponteiro aceito: vai direto para o daemon, então nada de espaço extra, quebra de linha ou outro comando. */
+private val POINTER = Regex("""[^\s+]{1,100}\+[0-9a-f]{1,16}( [0-9a-f]{1,8}){0,7}""")
+
+val COMPARE_NAMES = mapOf("inc" to "aumentou", "dec" to "diminuiu", "same" to "não mudou", "changed" to "mudou", "incby" to "aumentou", "decby" to "diminuiu")
+
+/** "lib.so+1a2b 18 40" como o Cheat Engine mostra: [[lib.so+1A2B]+18]+40 */
+fun pointerText(chain: String): String {
+    val parts = chain.split(' ')
+    return parts.drop(1).fold(parts[0].substringBeforeLast('+') + "+" + parts[0].substringAfterLast('+').uppercase()) { acc, o -> "[$acc]+${o.uppercase()}" }
+}
 
 private fun JSONObject.toSaved(): SavedItem {
     val type = getString("type")
     require(type in TYPE_SIZES) { "Tipo desconhecido na lista: $type" }
     val addr = getString("addr").removePrefix("0x").lowercase()
     require(addr.toLongOrNull(16) != null) { "Endereço inválido na lista: $addr" }
-    return SavedItem(addr, type, optString("region", "?"), optString("value", "?"), optBoolean("frozen", false), optString("name", ""))
+    val pointer = optString("pointer", "")
+    require(pointer.isEmpty() || POINTER.matches(pointer)) { "Ponteiro inválido na lista: $pointer" }
+    return SavedItem(addr, type, optString("region", "?"), optString("value", "?"), optBoolean("frozen", false), optString("name", ""), pointer)
 }
 
 /** "50;75" ou "100~200" ou misturado ("50;100~200"); cada item vira uma faixa (um número é a faixa dele mesmo). */

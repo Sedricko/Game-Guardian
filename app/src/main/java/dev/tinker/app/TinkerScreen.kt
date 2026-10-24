@@ -37,6 +37,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -306,6 +307,15 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                 }
                 // teclado de texto: o numérico não tem o ~ da faixa (100~200)
                 ValueField(s.value, "Valor (ex.: 100 ou faixa 100~200)", { s.value = it }, keyboard = KeyboardType.Ascii)
+                if (s.history.isNotEmpty()) {
+                    // últimas buscas: um toque repete valor e tipos
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        s.history.forEach { h ->
+                            val types = if (h.types.isEmpty()) "" else " · " + h.types.joinToString("+") { TYPE_NAMES.getValue(it) }
+                            AssistChip(onClick = { s.value = h.value; s.types = h.types }, label = { Text(h.value + types, maxLines = 1) })
+                        }
+                    }
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = { run { engine.search(s.types, s.value) } }, enabled = enabled && s.value.isNotBlank(), modifier = Modifier.weight(1f)) {
                         Text("Nova busca")
@@ -317,6 +327,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                     ) { Text("Refinar") }
                 }
                 if (s.canUndo) TextButton(onClick = { run { engine.undo() } }, enabled = enabled) { Text("↶ Desfazer último refino") }
+                UnknownSearch(engine, enabled, run)
                 Text(s.status, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 TextButton(onClick = { s.view = null; s.tab = TAB_MEMORY }, enabled = s.process != null) { Text("Ir para endereço…") }
             }
@@ -383,6 +394,70 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                     }
                 }
             }
+        }
+    }
+}
+
+/** Busca desconhecida: sem número na tela (barra de vida), compara como o valor mudou. */
+@Composable
+private fun UnknownSearch(engine: Engine, enabled: Boolean, run: (suspend () -> String) -> Unit) {
+    val s = Session
+    Text("Não sabe o número? (barra de vida, energia…)", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        OutlinedButton(onClick = { run { engine.startUnknown(s.types) } }, enabled = enabled) { Text("Começar sem valor") }
+        if ((s.count ?: 0) > 0) {
+            listOf("inc" to "↑ Aumentou", "dec" to "↓ Diminuiu", "changed" to "≠ Mudou", "same" to "= Não mudou").forEach { (op, label) ->
+                FilledTonalButton(onClick = { run { engine.compare(op) } }, enabled = enabled) { Text(label) }
+            }
+            // com um número no campo: quanto mudou (ex.: perdeu 10 de vida → Diminuiu 10)
+            if (s.value.isNotBlank()) {
+                OutlinedButton(onClick = { run { engine.compare("incby", s.value) } }, enabled = enabled) { Text("Aumentou ${s.value}", maxLines = 1) }
+                OutlinedButton(onClick = { run { engine.compare("decby", s.value) } }, enabled = enabled) { Text("Diminuiu ${s.value}", maxLines = 1) }
+            }
+        }
+    }
+}
+
+/** Ponteiros de um salvo, como o "Pointer scan" do Cheat Engine: o valor é achado de novo mesmo depois de reiniciar o jogo. */
+@Composable
+private fun PointerPanel(engine: Engine, item: SavedItem, run: (suspend () -> String) -> Unit) {
+    val s = Session
+    var maxOff by remember { mutableStateOf("4096") }
+    var levels by remember { mutableStateOf("4") }
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text("Ponteiro (endereço que não muda ao reiniciar)", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+        if (item.pointer.isNotEmpty()) {
+            Text(pointerText(item.pointer), fontFamily = FontFamily.Monospace, fontSize = 13.sp)
+            Text("O Tinker segue esse caminho sozinho a cada leitura.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            TextButton(onClick = { engine.setPointer(item, "") }) { Text("Parar de usar o ponteiro") }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(maxOff, { maxOff = it.filter(Char::isDigit) }, label = { Text("Distância máx. (bytes)") }, singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
+            OutlinedTextField(levels, { levels = it.filter(Char::isDigit).take(1) }, label = { Text("Níveis") }, singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(0.6f))
+        }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilledTonalButton(onClick = { run { engine.scanPointers(item.addr, maxOff.toIntOrNull() ?: 4096, levels.toIntOrNull() ?: 4) } }, enabled = !s.busy && s.process != null) {
+                Text("Buscar ponteiros")
+            }
+            // a lista é de outra vez do jogo (outro endereço): filtra pelo endereço novo do mesmo valor
+            if (s.pointers.isNotEmpty() && s.pointersFor != item.addr) {
+                OutlinedButton(onClick = { run { engine.filterPointers(item.addr) } }, enabled = !s.busy && s.process != null) { Text("Filtrar ${s.pointers.size} por este endereço") }
+            }
+        }
+        if (s.pointerInfo.isNotEmpty()) Text(s.pointerInfo, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (s.pointersFor == item.addr) {
+            s.pointers.take(30).forEach { chain ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(pointerText(chain), Modifier.weight(1f), fontFamily = FontFamily.Monospace, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    TextButton(onClick = { engine.setPointer(item, chain) }, enabled = chain != item.pointer) { Text(if (chain == item.pointer) "Em uso" else "Usar") }
+                }
+            }
+            if (s.pointers.size > 30) Text("…e mais ${s.pointers.size - 30}. Filtre para sobrar menos.", style = MaterialTheme.typography.bodySmall)
         }
     }
 }
@@ -498,7 +573,7 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
             val key = item.addr + item.type
             val open = editing == key
             ResultCard(
-                shown(item.value, item.type), "0x${item.addr}", "${TYPE_NAMES[item.type]} · ${item.region}",
+                shown(item.value, item.type), "0x${item.addr}" + if (item.pointer.isNotEmpty()) " · 🔗 ponteiro" else "", "${TYPE_NAMES[item.type]} · ${item.region}",
                 onClick = { editing = if (open) null else key },
                 checked = key in selected, onCheck = { selected = if (it) selected + key else selected - key }, title = item.name,
                 trailing = {
@@ -516,6 +591,7 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
                     NameEditor(item.name) { engine.rename(item, it) }
                     Text("Ler como outro tipo:", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     TypeChips(item.type) { t -> engine.changeType(item, t); editing = null }
+                    PointerPanel(engine, item, run)
                 }
             }
         }
@@ -776,7 +852,13 @@ private val HELP = listOf(
         "(ex.: a prata) nas linhas em volta de um ou vários endereços (ex.: o ouro).",
     "O jogo fechou" to "Quase sempre é edição num endereço que não era o valor certo, ou de outro tipo. Refine até sobrar 1 resultado " +
         "antes de editar e evite Qword/Double se o valor for Dword. O motivo da queda fica na aba Registro.",
-    "Endereços mudaram" to "Quando o jogo reinicia, os endereços mudam: os salvos antigos deixam de valer. Faça a busca de novo.",
+    "Valor desconhecido" to "Para barras sem número (vida, energia): escolha o tipo (barra costuma ser Float) e toque em Começar sem valor. " +
+        "Faça a barra mudar e toque em Aumentou ou Diminuiu; sem mudar nada, toque em Não mudou. Repita até sobrar pouco. " +
+        "Com um número no campo dá para dizer quanto mudou (Diminuiu 10).",
+    "Endereços mudaram" to "Quando o jogo reinicia, os endereços mudam. Para um salvo continuar valendo, use um ponteiro (abaixo).",
+    "Ponteiros" to "Como no Cheat Engine. 1. Abra o salvo e toque em Buscar ponteiros. 2. Feche e abra o jogo, ache o mesmo valor de novo " +
+        "e salve. 3. Nesse novo salvo, toque em Filtrar: ficam só os caminhos que continuam certos. 4. Toque em Usar. " +
+        "Daí em diante o Tinker acha o endereço sozinho toda vez que o jogo abrir. Sem resultado? Aumente os níveis ou a distância.",
     "Reportar um problema" to "Na aba Registro, toque em Compartilhar relatório e envie o arquivo .txt. Ele tem tudo que é preciso para investigar.",
 )
 
