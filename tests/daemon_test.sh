@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 out=$(mktemp -d); tpid=
-trap 'kill $tpid 2>/dev/null || true; rm -rf "$out"' EXIT
+trap 'kill -9 $tpid 2>/dev/null || true; rm -rf "$out"' EXIT  # -9: um alvo parado (SIGSTOP) ignora o SIGTERM
 cc -O2 -Wall -Werror -pthread -o "$out/tinkerd" daemon/tinkerd.c -lm
 cc -O2 -o "$out/target" tests/target.c
 "$out/target" > "$out/info" & tpid=$!
@@ -110,6 +110,13 @@ echo "$res"
 mapfile -t r < <(sed 1,2d <<<"$res")
 [ "${r[0]}" = "ok $paddr" ] && [[ "${r[1]}" =~ ^ok\ [0-9a-f]+$ ]] && [ "${r[2]}" = "err módulo nada.so não carregado" ] \
     && [ "${r[3]}" = "err ponteiro inválido" ] || { echo "FALHOU: resolve"; exit 1; }
+
+# Daemon saindo com o jogo pausado (app caiu no meio da busca): o jogo tem que voltar a rodar
+printf '%s\n' "attach $pid" "pause" | "$out/tinkerd" >/dev/null
+grep -q '^State:.*S (sleeping)' /proc/$pid/status || { echo "FALHOU: jogo ficou pausado após EOF"; grep State /proc/$pid/status; exit 1; }
+{ printf '%s\n' "attach $pid" "pause"; sleep 1; } | "$out/tinkerd" >/dev/null & dpid=$!
+sleep 0.5; pkill -TERM -f "^$out/tinkerd$" || { echo "FALHOU: daemon não encontrado"; exit 1; }; wait $dpid 2>/dev/null || true
+grep -q '^State:.*S (sleeping)' /proc/$pid/status || { echo "FALHOU: jogo ficou pausado após SIGTERM"; grep State /proc/$pid/status; exit 1; }
 
 kill $tpid; wait $tpid 2>/dev/null || true
 dead=$(printf 'attach %s\n' "$pid" | "$out/tinkerd")

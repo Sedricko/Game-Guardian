@@ -883,8 +883,22 @@ static void cmd_ps(void) {
     puts("ok");
 }
 
+// O jogo nunca pode ficar pausado (SIGSTOP) depois que o daemon sai: o app caiu, foi fechado ou matou o su.
+static void resume_target(void) { if (target > 0) kill(target, SIGCONT); }
+
+static void on_exit_signal(int sig) {
+    (void)sig;
+    resume_target();
+    if (snapfd >= 0) unlink(snappath);
+    _exit(0);
+}
+
 int main(void) {
     setvbuf(stdout, NULL, _IOLBF, 0);
+    signal(SIGPIPE, SIG_IGN);  // app morreu: escrever falha em vez de matar o daemon antes de continuar o jogo
+    signal(SIGTERM, on_exit_signal);
+    signal(SIGHUP, on_exit_signal);
+    signal(SIGINT, on_exit_signal);
     char line[512], cmd[32], a1[128], a2[128], a3[128];
     puts("ok tinkerd 3");
     while (fgets(line, sizeof line, stdin)) {
@@ -912,6 +926,7 @@ int main(void) {
             continue;
         }
         if (!strcmp(cmd, "attach")) {
+            resume_target();  // trocou de jogo: o anterior não fica parado
             target = atoi(a1);
             char path[64];
             snprintf(path, sizeof path, "/proc/%d/mem", target);
@@ -958,5 +973,6 @@ int main(void) {
         else printf("err comando desconhecido: %s\n", cmd);
     }
     drop_snap();  // não deixa o arquivo da busca desconhecida para trás
+    resume_target();
     return 0;
 }
