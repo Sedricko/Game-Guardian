@@ -654,6 +654,7 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
     ) { uri -> uri?.let { u -> runCatching { context.contentResolver.openInputStream(u)!!.use { it.reader().readText() } }.onSuccess(::import).onFailure { info = "Não leu o arquivo: ${it.message}" } } } else null
     var editing by remember { mutableStateOf<String?>(null) }
     var editingMany by remember { mutableStateOf(false) }
+    var naming by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf(setOf<String>()) }
     LaunchedEffect(s.process) {
         while (true) {
@@ -691,6 +692,7 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
             if (s.process != null && s.saved.any(engine::stale)) {
                 TextButton(onClick = { run { engine.retryNow() } }, enabled = !s.busy) { Text("↻ Procurar os salvos ⚠ agora") }
             }
+            Recipes(engine, run, onInfo = { info = it })
         }
         if (s.process == null) {
             item {
@@ -731,6 +733,17 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
                 FilledTonalButton(onClick = { engine.setFrozen(targets, false) }) { Text("Descongelar $label") }
                 OutlinedButton(onClick = { editingMany = !editingMany }, enabled = !s.busy) { Text("Editar $label") }
                 TextButton(onClick = { engine.removeSaved(targets); selected = emptySet() }) { Text("Remover $label") }
+                // receita: guarda os campos marcados pelo nome (classe IL2CPP) para aplicar com um toque, toda vez
+                if (chosen.isNotEmpty()) OutlinedButton(onClick = { naming = true }) { Text("Criar receita (${chosen.size})") }
+            }
+            if (naming) {
+                // nome tem letras: teclado do telefone (o do Tinker só tem números)
+                var name by remember { mutableStateOf("") }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedTextField(name, { name = it }, label = { Text("Nome da receita") }, singleLine = true, modifier = Modifier.weight(1f))
+                    Button(onClick = { naming = false; info = engine.createRecipe(chosen, name); selected = emptySet() }) { Text("Criar") }
+                    TextButton(onClick = { naming = false }) { Text("✕") }
+                }
             }
         }
         if (editingMany) {
@@ -782,6 +795,59 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
                         TextButton(onClick = { engine.unlink(item) }) { Text("Desligar") }
                     } else PointerPanel(engine, item, run)
                 }
+            }
+        }
+    }
+}
+
+/** Receitas do jogo: aplicar com um toque, aplicar sozinha ao abrir, mudar valores, copiar para outra pessoa. */
+@Composable
+private fun Recipes(engine: Engine, run: (suspend () -> String) -> Unit, onInfo: (String) -> Unit) {
+    val s = Session
+    val context = LocalContext.current
+    var open by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<String?>(null) }
+    if (s.recipes.isEmpty()) return
+    TextButton(onClick = { open = !open }) { Text((if (open) "▾ " else "▸ ") + "Receitas (${s.recipes.size})") }
+    if (!open) return
+    s.recipes.toList().forEach { r ->
+        Column(
+            Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceContainerLow).padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(r.name, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("ao abrir", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Switch(checked = r.auto, onCheckedChange = { engine.updateRecipe(r.copy(auto = it)) })
+            }
+            r.steps.forEachIndexed { i, st ->
+                val key = r.id + i
+                Row(Modifier.fillMaxWidth().clickable { editing = if (editing == key) null else key }, verticalAlignment = Alignment.CenterVertically) {
+                    Text(st.label, Modifier.weight(1f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(st.value + if (st.freeze) " ❄" else "", fontFamily = FontFamily.Monospace, fontSize = 14.sp)
+                }
+                if (editing == key) {
+                    InlineEditor(st.value, "Valor de ${st.label}", onSave = { v ->
+                        editing = null
+                        engine.updateRecipe(r.copy(steps = r.steps.toMutableList().also { it[i] = st.copy(value = normalizeNumbers(v)) }))
+                    }, onCancel = { editing = null }) {
+                        TextButton(onClick = {
+                            engine.updateRecipe(r.copy(steps = r.steps.toMutableList().also { it[i] = st.copy(freeze = !st.freeze) }))
+                        }) { Text(if (st.freeze) "Não congelar" else "Congelar ❄") }
+                        TextButton(onClick = {
+                            editing = null
+                            engine.updateRecipe(r.copy(steps = r.steps.filterIndexed { j, _ -> j != i }))
+                        }) { Text("Tirar da receita") }
+                    }
+                }
+            }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { run { engine.applyRecipe(r) } }, enabled = !s.busy && s.process != null) { Text("Aplicar") }
+                OutlinedButton(onClick = {
+                    context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Receita do Tinker", engine.exportRecipe(r)))
+                    onInfo("Receita copiada. Quem colar em Salvos → Colar lista recebe ela.")
+                }) { Text("Copiar") }
+                TextButton(onClick = { engine.deleteRecipe(r) }) { Text("Apagar", color = MaterialTheme.colorScheme.error) }
             }
         }
     }
@@ -840,7 +906,7 @@ private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
             FilterChip(selected = !s.fichaMode, onClick = { s.fichaMode = false }, label = { Text("Endereços") })
             FilterChip(selected = s.fichaMode, onClick = { s.fichaMode = true }, label = { Text("Ficha do objeto") })
         }
-        if (s.fichaMode && center != "0") {
+        if (s.fichaMode) {
             FichaView(engine, center, run)
             return@Column
         }
@@ -912,6 +978,70 @@ private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
 @Composable
 private fun FichaView(engine: Engine, center: String, run: (suspend () -> String) -> Unit) {
     val s = Session
+    ClassOpener(engine)
+    if (center == "0") {
+        Text("Digite o nome de uma classe do jogo (ex.: PlayerData) ou abra a ficha de um salvo (Salvos → Explorar ficha).",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        return
+    }
+    FichaBody(engine, center, run)
+}
+
+/** "Abrir objeto pelo nome": digita a classe (PlayerData) e a ficha abre com todos os valores, sem buscar número nenhum. */
+@Composable
+private fun ClassOpener(engine: Engine) {
+    val s = Session
+    val scope = rememberCoroutineScope()
+    var cls by remember { mutableStateOf("") }
+    var loading by remember { mutableStateOf(false) }
+    var info by remember { mutableStateOf<String?>(null) }
+    var objs by remember { mutableStateOf(listOf<String>()) }
+    fun open(name: String) {
+        if (loading || name.isBlank()) return
+        cls = name
+        loading = true
+        info = "Procurando objetos de $name… (lê a memória toda)"
+        scope.launch {
+            runCatching { engine.findObjects(name) }.onSuccess { found ->
+                objs = if (found.size > 1) found else emptyList()
+                info = when {
+                    found.isEmpty() -> "Nenhum objeto $name agora."
+                    found.size == 1 -> null
+                    else -> "${found.size} objetos $name: escolha um."
+                }
+                // ficha pelo primeiro campo (+0x10): o começo do objeto não está dentro de nenhum campo
+                found.singleOrNull()?.let { s.view = (it.toLong(16) + 0x10).toString(16) to "i32" }
+            }.onFailure { info = it.message }
+            loading = false
+        }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        OutlinedTextField(cls, { cls = it.trim() }, label = { Text("Classe (ex.: PlayerData)") }, singleLine = true, modifier = Modifier.weight(1f))
+        Button(onClick = { open(cls) }, enabled = !loading && s.process != null && cls.isNotBlank(), contentPadding = PaddingValues(horizontal = 12.dp)) { Text("Abrir") }
+    }
+    // atalhos: classes abertas antes e as dos salvos que têm nome IL2CPP
+    val shortcuts = (s.classes + s.saved.mapNotNull { it.il2.substringBeforeLast('+', "").ifEmpty { null } }).distinct().take(10)
+    if (shortcuts.isNotEmpty()) {
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            shortcuts.forEach { c -> AssistChip(onClick = { open(c) }, label = { Text(c.substringAfterLast('.'), maxLines = 1) }) }
+        }
+    }
+    if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+    info?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    if (objs.isNotEmpty()) {
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            objs.take(30).forEachIndexed { i, o ->
+                FilterChip(selected = false, onClick = { s.view = (o.toLong(16) + 0x10).toString(16) to "i32" }, label = { Text("#${i + 1} 0x$o", maxLines = 1) })
+            }
+        }
+    }
+}
+
+@Composable
+private fun FichaBody(engine: Engine, center: String, run: (suspend () -> String) -> Unit) {
+    val s = Session
+    var filter by remember { mutableStateOf("") }
+    var items by remember(center) { mutableStateOf<List<ListItem>?>(null) }
     var il2 by remember(center) { mutableStateOf<Il2Class?>(null) }
     var looked by remember(center) { mutableStateOf(false) }
     var page by remember(center) { mutableIntStateOf(0) }
@@ -923,6 +1053,12 @@ private fun FichaView(engine: Engine, center: String, run: (suspend () -> String
     LaunchedEffect(center) {
         il2 = runCatching { engine.il2cpp(center) }.getOrNull()
         looked = true
+        // lista do jogo (List<T>): mostra os itens, cada um abre a própria ficha
+        val c = il2
+        if (c != null && c.name.contains("List`1")) while (true) {
+            items = runCatching { engine.listItems(c) }.getOrNull()
+            delay(2000)
+        }
     }
     LaunchedEffect(center, looked, page) {
         if (!looked) return@LaunchedEffect
@@ -957,9 +1093,28 @@ private fun FichaView(engine: Engine, center: String, run: (suspend () -> String
             OutlinedButton(onClick = { page++ }) { Text("▼ Depois") }
         }
     }
+    if (c != null && c.fields.size > 6) {
+        OutlinedTextField(filter, { filter = it }, label = { Text("Filtrar campo (ex.: gem)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+    }
+    items?.let { list ->
+        Text("Lista com ${list.size} itens${if (list.size == 200) " (mostrando os 200 primeiros)" else ""}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            list.take(40).forEach { it2 ->
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceContainerLow)
+                        .clickable(enabled = it2.isRef) { s.view = it2.addr to "i32" }.padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(it2.label, Modifier.weight(1f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(if (it2.isRef) "abrir ›" else it2.value, fontFamily = FontFamily.Monospace, fontSize = 14.sp, color = MaterialTheme.colorScheme.primary)
+                }
+            }
+            if (list.size > 40) Text("…e mais ${list.size - 40}.", style = MaterialTheme.typography.bodySmall)
+        }
+    }
     error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        items(rows, key = { it.addr + it.label }) { r ->
+        items(rows.filter { filter.isBlank() || it.label.contains(filter.trim(), ignoreCase = true) }, key = { it.addr + it.label }) { r ->
             val a = r.addr.toLong(16)
             val here = center.toLong(16) in a until a + (if (r.type.isEmpty() || r.type == "xi32" || r.type == "i64" || r.type == "f64") 8 else 4)
             val hot = (changed[r.addr] ?: 0L) > System.currentTimeMillis() - 3000
@@ -983,6 +1138,8 @@ private fun FichaView(engine: Engine, center: String, run: (suspend () -> String
                         if (r.type.isNotEmpty()) {
                             // entra nos Salvos já ligado pelo offset aos outros da mesma ficha, com nome do campo quando é IL2CPP
                             FilledTonalButton(onClick = { engine.addSaved(listOf(Hit(r.addr, r.type, "?", r.value))); s.status = "Salvo: ${r.label}"; open = null }) { Text("Salvar") }
+                            // congela já no valor de agora (vira salvo congelado, com o nome do campo)
+                            OutlinedButton(onClick = { engine.addSaved(listOf(Hit(r.addr, r.type, "?", r.value)), frozen = true); s.status = "Congelado: ${r.label}"; open = null }) { Text("Congelar") }
                         }
                         if (r.value.startsWith("0x")) {
                             // ponteiro: abre a ficha do objeto para onde ele aponta
@@ -1204,6 +1361,12 @@ private val HELP = listOf(
         "do jogo; Código procura nas instruções. Os lugares achados viram resultados normais.",
     "Qual resultado salvar" to "Com até 20 resultados, em jogo Unity IL2CPP, cada um mostra o campo do jogo (ex.: PlayerData.UpgradeStone). " +
         "\"Cópia temporária (Int32)\" é o número que o jogo cria só para mostrar na tela: editar não muda nada e some ao fechar. Salve o campo de verdade.",
+    "Receitas" to "Nos Salvos, marque campos que têm nome do jogo (os salvos pela ficha) e toque em Criar receita. A receita guarda cada " +
+        "campo pelo nome da classe, não pelo endereço: Aplicar escreve todos os valores de uma vez (e congela os ❄), em qualquer vez que o " +
+        "jogo abrir. Ligue \"ao abrir\" para aplicar sozinha quando o jogo carregar. Copiar manda a receita como texto; Colar lista recebe.",
+    "Abrir objeto pelo nome" to "Memória → Ficha do objeto: digite a classe (ex.: PlayerData) e toque em Abrir: aparecem todos os campos com " +
+        "o valor de agora (Gem = 1000…); toque num campo para Editar, Salvar ou Congelar. Filtrar campo acha rápido (gem). " +
+        "Campos de lista (OwnedWeapons) abrem a lista com cada item.",
     "Ficha do objeto" to "Num salvo, toque em Explorar ficha (ou na aba Memória, em Ficha do objeto): aparecem os campos em volta do valor, " +
         "com tipo e valor ao vivo; o que muda fica destacado. Em jogo Unity IL2CPP, com os nomes do próprio jogo (Player.hp); nos outros, " +
         "com o tipo adivinhado (inteiro, decimal, ponteiro, cifrado 🔒). Toque num campo para salvar ou editar; num ponteiro, para abrir o objeto. " +

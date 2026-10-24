@@ -82,6 +82,16 @@ val BOXED = setOf(
 data class Il2Field(val offset: Int, val code: Int, val name: String)
 data class Il2Class(val name: String, val start: String, val fields: List<Il2Field>)
 
+/** Item de uma lista do jogo (List<T>): referência a outro objeto (abre a ficha dele) ou um número. */
+data class ListItem(val index: Int, val addr: String, val label: String, val value: String, val isRef: Boolean)
+
+/**
+ * Receita: um passo por campo, guardado pelo nome (classe IL2CPP + offset), não pelo endereço; por isso vale
+ * toda vez que o jogo abre e dá para passar para outra pessoa.
+ */
+data class Step(val cls: String, val off: Long, val type: String, val value: String, val freeze: Boolean, val label: String)
+data class Recipe(val id: String = java.util.UUID.randomUUID().toString(), val name: String, val steps: List<Step>, val auto: Boolean = false)
+
 /** Uma linha da ficha: um campo (ou 4 bytes) em volta do valor, com o tipo provável e o valor lido do jeito certo. */
 data class FichaRow(val addr: String, val off: Long, val type: String, val label: String, val value: String)
 data class Recent(val types: Set<String>, val value: String)
@@ -113,6 +123,8 @@ object Session {
     var fichaMode by mutableStateOf(false)  // aba Memória: lista de endereços (false) ou ficha do objeto (true)
     var tab by mutableIntStateOf(0)  // índice em TABS  // visualizador de memória: endereço e tipo  // segurando o "olho": painel quase invisível
     val saved = mutableStateListOf<SavedItem>()
+    val recipes = mutableStateListOf<Recipe>()
+    val classes = mutableStateListOf<String>()  // classes IL2CPP abertas por nome neste jogo (atalhos)
     val history = mutableStateListOf<Recent>()  // últimas buscas, para repetir com um toque
     var pointerInfo by mutableStateOf("")
     var restoreInfo by mutableStateOf("")  // o que voltou sozinho ao escolher o jogo
@@ -170,6 +182,7 @@ class Engine private constructor(private val app: Context) {
                 delay(3000)
                 if (!Session.busy) runCatching { followGame(startDaemon = false) }.getOrNull()?.let { Session.status = it }
                 if (!Session.busy) runCatching { retryRestore() }
+                if (!Session.busy) runCatching { autoRecipes() }
             }
         }
     }
@@ -524,6 +537,133 @@ class Engine private constructor(private val app: Context) {
         Diag.add("${label(item)} achado pela classe IL2CPP $cls em 0x$addr")
         return "classe $cls"
     }
+
+    /** Objetos de uma classe IL2CPP pelo nome (PlayerData, ou Namespace.PlayerData); lê a memória toda, leva alguns segundos. */
+    suspend fun findObjects(cls: String): List<String> = call { d ->
+        val c = cls.trim()
+        require(CLASS_NAME.matches(c)) { "Nome de classe inválido: letras, números, ponto e _ (ex.: PlayerData)" }
+        val objs = d.send("il2objs $c").lines.mapNotNull { it.removePrefix("obj ").takeIf { a -> a.toLongOrNull(16) != null } }
+        if (objs.isNotEmpty()) {
+            Session.classes.remove(c)
+            Session.classes.add(0, c)
+            while (Session.classes.size > 8) Session.classes.removeAt(Session.classes.lastIndex)
+            prefs.edit().putString("classes-$savedPkg", Session.classes.joinToString(",")).apply()
+        }
+        objs
+    }
+
+    /** Itens de uma lista do jogo (List<T>: campos _items e _size); referências viram atalhos para a ficha de cada item. */
+    suspend fun listItems(c: Il2Class): List<ListItem>? = call { d ->
+        val start = c.start.toLong(16)
+        val itemsF = c.fields.firstOrNull { it.name == "_items" } ?: return@call null
+        val sizeF = c.fields.firstOrNull { it.name == "_size" } ?: return@call null
+        val items = (d.send("read ${(start + itemsF.offset).toString(16)} i64", quiet = true).status.toLongOrNull() ?: 0L) and 0x00ffffffffffffffL
+        val size = (d.send("read ${(start + sizeF.offset).toString(16)} i32", quiet = true).status.toIntOrNull() ?: 0).coerceIn(0, 200)
+        if (items < 0x10000 || size == 0) return@call emptyList()
+        // array do IL2CPP (64 bits): klass, monitor, bounds, tamanho; os itens começam em +0x20
+        val first = items + 0x20
+        val words = d.send("dump ${first.toString(16)} i64 $size", quiet = true).lines.map { (it.substringAfter(' ').toLongOrNull() ?: 0L) and 0x00ffffffffffffffL }
+        if (words.all { it == 0L || it in 0x10000000L until 0x10000000000L }) {
+            words.mapIndexed { i, p ->
+                // ficha do item pelo primeiro campo (+0x10): o próprio começo do objeto não está dentro de nenhum campo
+                val name = if (p == 0L) "vazio" else d.il2((p + 0x10).toString(16))?.name?.substringAfterLast('.') ?: "objeto"
+                ListItem(i, (p + 0x10).toString(16), "#$i $name", if (p == 0L) "nulo" else "0x" + p.toString(16), p != 0L)
+            }
+        } else {
+            d.send("dump ${first.toString(16)} i32 $size", quiet = true).lines.mapIndexed { i, l ->
+                val (a, v) = l.split(" ", limit = 2)
+                ListItem(i, a, "#$i", v, false)
+            }
+        }
+    }
+
+    // Receitas
+
+    private val recipesFile get() = File(app.filesDir, "recipes-${savedPkg ?: "sem-jogo"}.json")
+
+    /** Receita com os salvos marcados que têm classe IL2CPP (os achados pela ficha ou que ganharam nome sozinhos). */
+    fun createRecipe(items: List<SavedItem>, name: String): String {
+        val steps = items.filter { it.il2.isNotEmpty() && !it.temp }.map {
+            Step(it.il2.substringBeforeLast('+'), it.il2.substringAfterLast('+').toLong(16), it.type, readable(it.value, it.type) ?: it.value, it.frozen, it.name.ifEmpty { it.il2 })
+        }
+        if (steps.isEmpty()) return "Nenhum dos marcados tem classe IL2CPP: salve os campos pela ficha do objeto (Memória → Ficha)."
+        Session.recipes.add(Recipe(name = name.trim().ifEmpty { "Receita ${Session.recipes.size + 1}" }, steps = steps))
+        storeRecipes()
+        Diag.add("Receita criada com ${steps.size} campos: ${steps.joinToString { "${it.label} = ${it.value}" }}")
+        return "Receita criada com ${steps.size} campos (dos ${items.size} marcados). Toque em Aplicar."
+    }
+
+    fun updateRecipe(r: Recipe) {
+        val i = Session.recipes.indexOfFirst { it.id == r.id }
+        if (i >= 0) Session.recipes[i] = r
+        storeRecipes()
+    }
+
+    fun deleteRecipe(r: Recipe) {
+        Session.recipes.removeAll { it.id == r.id }
+        storeRecipes()
+    }
+
+    /**
+     * Aplica: acha o objeto de cada classe pelo nome, escreve o valor e, nos marcados com ❄, congela (vira salvo
+     * congelado, que volta sozinho ao reabrir). Classe com vários objetos fica de fora: não dá para saber qual.
+     */
+    suspend fun applyRecipe(r: Recipe): String {
+        val frozen = mutableListOf<Hit>()
+        val notes = mutableListOf<String>()
+        val ok = call { d ->
+            val objs = HashMap<String, List<Long>>()
+            r.steps.count { st ->
+                val o = objs.getOrPut(st.cls) {
+                    runCatching { d.send("il2objs ${st.cls}", quiet = true).lines.mapNotNull { it.removePrefix("obj ").toLongOrNull(16) } }.getOrDefault(emptyList())
+                }
+                when {
+                    o.isEmpty() -> { notes += "${st.label}: classe ainda não carregou"; false }
+                    o.size > 1 -> { notes += "${st.label}: ${o.size} objetos, não sei qual"; false }
+                    else -> {
+                        val a = (o[0] + st.off).toString(16)
+                        val w = runCatching { d.send("write $a ${st.type} ${st.value.arg()}", quiet = true) }
+                        if (w.isFailure) notes += "${st.label}: ${w.exceptionOrNull()?.message}"
+                        else if (st.freeze) frozen += Hit(a, st.type, "?", normalizeNumbers(st.value))
+                        w.isSuccess
+                    }
+                }
+            }
+        }
+        if (frozen.isNotEmpty()) addSaved(frozen, frozen = true)
+        Diag.add("Receita ${r.name}: $ok de ${r.steps.size} aplicados" + if (notes.isEmpty()) "" else " (${notes.joinToString("; ")})")
+        return "${r.name}: $ok de ${r.steps.size} aplicados." + if (notes.isEmpty()) "" else " " + notes.joinToString("; ")
+    }
+
+    // receitas com "aplicar ao abrir": tenta a cada 3 s até o jogo carregar as classes (até 3 minutos)
+    private val autoDone = HashSet<String>()
+
+    private suspend fun autoRecipes() {
+        val pid = currentPid
+        if (pid == 0 || daemon == null || System.currentTimeMillis() - attachedAt > 3 * 60_000 || retries % 2 != 0) return
+        Session.recipes.filter { it.auto && "$pid:${it.id}" !in autoDone }.forEach { r ->
+            val msg = applyRecipe(r)
+            if (msg.startsWith("${r.name}: ${r.steps.size} de")) {
+                autoDone += "$pid:${r.id}"
+                Session.restoreInfo = "Receita aplicada sozinha: $msg"
+            }
+        }
+    }
+
+    private fun storeRecipes() = runCatching { recipesFile.writeText(JSONArray().apply { Session.recipes.forEach { put(it.toJson()) } }.toString()) }
+
+    private fun loadRecipes() {
+        Session.recipes.clear()
+        runCatching {
+            val a = JSONArray(recipesFile.readText())
+            for (i in 0 until a.length()) Session.recipes.add(a.getJSONObject(i).toRecipe())
+        }
+        Session.classes.clear()
+        prefs.getString("classes-$savedPkg", null)?.split(',')?.filter { CLASS_NAME.matches(it) }?.let(Session.classes::addAll)
+    }
+
+    /** Receita em texto (JSON) para copiar e mandar; Colar lista nos Salvos aceita de volta. */
+    fun exportRecipe(r: Recipe): String = JSONObject().put("tinker_receita", 1).put("jogo", Session.process?.pkg ?: "").put("receita", r.toJson()).toString(2)
 
     // Ponteiros, offsets e assinatura: como um salvo volta a valer depois de reiniciar o jogo
 
@@ -1119,6 +1259,13 @@ class Engine private constructor(private val app: Context) {
     /** Aceita o formato do exportSaved ou só a lista. Devolve uma mensagem para a tela. */
     fun importSaved(text: String): String {
         val root = runCatching { JSONObject(text) }.getOrNull()
+        root?.optJSONObject("receita")?.let { j ->
+            val r = j.toRecipe().copy(id = java.util.UUID.randomUUID().toString(), auto = false)
+            Session.recipes.add(r)
+            storeRecipes()
+            Diag.add("Receita importada: ${r.name} (${r.steps.size} campos)")
+            return "Receita \"${r.name}\" importada com ${r.steps.size} campos."
+        }
         val a = root?.optJSONArray("itens") ?: runCatching { JSONArray(text) }.getOrNull()
             ?: throw IllegalArgumentException("Isso não parece uma lista do Tinker (JSON).")
         var added = 0
@@ -1211,7 +1358,8 @@ class Engine private constructor(private val app: Context) {
             Session.saved.clear()
             loadSaved()
         }
-        Diag.add("Salvos do jogo $pkg: ${Session.saved.size}${if (adopt) " (lista anterior adotada)" else ""}")
+        loadRecipes()
+        Diag.add("Salvos do jogo $pkg: ${Session.saved.size}${if (adopt) " (lista anterior adotada)" else ""} · receitas: ${Session.recipes.size}")
     }
 
     private fun loadSaved() = runCatching {
@@ -1250,6 +1398,27 @@ private fun SavedItem.toJson() = JSONObject().put("addr", addr).put("type", type
     .put("pointer", pointer).put("id", id).put("anchor", anchor).put("offset", offset).put("pid", pid)
     .put("chains", JSONArray(chains)).put("sig", sig).put("sigOff", sigOff).put("verified", verified)
     .put("trusted", trusted).put("il2", il2).put("temp", temp).put("history", JSONArray(history)).apply { if (!seenMin.isNaN()) put("seenMin", seenMin).put("seenMax", seenMax) }  // JSON não aceita NaN
+
+private val CLASS_NAME = Regex("""[A-Za-z0-9_.`<>]{1,120}""")  // vai para o daemon
+
+private fun Recipe.toJson() = JSONObject().put("id", id).put("name", name).put("auto", auto).put("steps", JSONArray().apply {
+    steps.forEach { put(JSONObject().put("cls", it.cls).put("off", it.off).put("type", it.type).put("value", it.value).put("freeze", it.freeze).put("label", it.label)) }
+})
+
+/** Receita de arquivo ou colada: tudo validado, porque classe, tipo e valor vão para o daemon. */
+private fun JSONObject.toRecipe(): Recipe {
+    val a = getJSONArray("steps")
+    val steps = List(a.length()) { i ->
+        val j = a.getJSONObject(i)
+        val cls = j.getString("cls")
+        val type = j.getString("type")
+        require(CLASS_NAME.matches(cls) && type in TYPE_SIZES) { "Receita inválida: $cls / $type" }
+        val v = normalizeNumbers(j.getString("value"))
+        require(Regex("""-?[0-9.eE+-]{1,40}""").matches(v)) { "Receita inválida: valor $v" }
+        Step(cls, j.getLong("off").coerceIn(0L, 0x10000L), type, v, j.optBoolean("freeze", false), j.optString("label", cls).take(60))
+    }
+    return Recipe(optString("id", "").ifEmpty { java.util.UUID.randomUUID().toString() }, optString("name", "Receita").take(40), steps, optBoolean("auto", false))
+}
 
 private val IL2 = Regex("""[A-Za-z0-9_.<>`]{1,120}\+[0-9a-f]{1,6}""")  // vai para o daemon: sem espaço nem quebra de linha
 

@@ -1072,7 +1072,8 @@ static void cmd_il2objs(const char *full) {
     for (size_t ci = 0; ci < cs.n; ci++) {
         for (size_t k = 0; k < out[ci].n; k++) {
             uint64_t cand = out[ci].h[k].addr - 2 * psize;
-            if (nk < 16 && read_klass(cand, &kl) && !strcmp(kl.ns, ns) && !strcmp(kl.name, name)) ks[nk++] = (tgt_t){cand, 0};
+            // sem ponto no nome ("PlayerData"): vale em qualquer namespace
+            if (nk < 16 && read_klass(cand, &kl) && (!dot || !strcmp(kl.ns, ns)) && !strcmp(kl.name, name)) ks[nk++] = (tgt_t){cand, 0};
         }
         free(out[ci].h);
     }
