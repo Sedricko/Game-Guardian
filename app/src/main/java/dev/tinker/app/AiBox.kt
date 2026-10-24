@@ -29,7 +29,31 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+
+/** Uma conversa com a IA por caixa (busca, classes, salvos…): guardada enquanto o app está aberto. */
+class AiConversation {
+    val chat = AiChat()
+    var open by mutableStateOf(false)
+    var question by mutableStateOf("")
+    var turns by mutableStateOf(listOf<Pair<String, String>>())  // (pergunta, resposta)
+    var loading by mutableStateOf(false)
+    var steps by mutableStateOf(listOf<String>())
+    var applied by mutableStateOf<String?>(null)
+}
+
+object AiConversations {
+    private val all = HashMap<String, AiConversation>()
+    fun of(key: String) = all.getOrPut(key) { AiConversation() }
+
+    /** Outro jogo (ou o mesmo reaberto): endereços e contexto da conversa não valem mais. */
+    fun clear() = all.clear()
+}
+
+private val aiScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
 /**
  * "✨ Perguntar à IA": pergunta livre ou uma das prontas, com o contexto da tela (montado só na primeira mensagem).
@@ -44,13 +68,15 @@ fun AiBox(
     val s = Session
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
-    var open by remember { mutableStateOf(false) }
-    var question by remember { mutableStateOf("") }
-    var turns by remember { mutableStateOf(listOf<Pair<String, String>>()) }  // (pergunta, resposta)
-    var loading by remember { mutableStateOf(false) }
-    var steps by remember { mutableStateOf(listOf<String>()) }
-    var applied by remember { mutableStateOf<String?>(null) }
-    val chat = remember { AiChat() }
+    // a conversa mora fora da tela: minimizar o painel ou trocar de aba destruía tudo e voltava ao começo
+    val c = AiConversations.of(key)
+    var open by c::open
+    var question by c::question
+    var turns by c::turns
+    var loading by c::loading
+    var steps by c::steps
+    var applied by c::applied
+    val chat = c.chat
     fun ask(q: String, fresh: Boolean) {
         if (loading || q.isBlank() || !Assistant.ready()) return
         if (fresh) { chat.reset(); turns = emptyList(); s.aiClasses.clear() }
@@ -58,10 +84,11 @@ fun AiBox(
         loading = true
         steps = emptyList()
         applied = null
-        scope.launch {
-            val a = runCatching { engine.askAi(chat, context, q) { st -> steps = steps + st } }.getOrElse { it.message ?: "Erro" }
-            turns = (turns + (q to a)).takeLast(6)
-            loading = false
+        // fora da tela também: a resposta chega mesmo com o painel minimizado
+        aiScope.launch {
+            val a = runCatching { engine.askAi(chat, context, q) { st -> c.steps = c.steps + st } }.getOrElse { it.message ?: "Erro" }
+            c.turns = (c.turns + (q to a)).takeLast(6)
+            c.loading = false
         }
     }
     // pedido automático de outra parte do app (busca deu 0, jogo fechou, salvo não voltou): abre e pergunta sozinha

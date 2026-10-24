@@ -488,6 +488,7 @@ class Engine private constructor(private val app: Context) {
         switchSaved(p.pkg)
         Session.aiProposals.clear()  // endereços da vez anterior do jogo
         Session.aiUndo.clear()
+        AiConversations.clear()
         Session.engine = detectEngine(p.pkg)?.also { Diag.add("Motor do jogo: $it") }
         // a restauração roda em segundo plano (a cada 3 s): aqui ela segurava a escolha do jogo por até 45 s
         Session.restoreInfo = if (Session.saved.any(::stale)) "Procurando os salvos da última vez…" else ""
@@ -763,8 +764,9 @@ class Engine private constructor(private val app: Context) {
             Session.results = hits
             Session.status = status
         }
-        val names = if ((count ?: 0L) in 1L..20L) runCatching { il2Names(hits.map { it.addr }) }.getOrDefault(emptyMap()) else emptyMap()
-        return "$status\nResultados: ${count ?: 0}" + hits.take(30).joinToString("") { "\n0x${it.addr} ${it.type} ${it.region} = ${it.value}" + (names[it.addr]?.let { n -> " [$n]" } ?: "") }
+        // até 50: a IA vê de qual classe e campo é cada resultado e acha o verdadeiro sem precisar refinar
+        val names = if ((count ?: 0L) in 1L..50L) runCatching { il2Names(hits.take(50).map { it.addr }) }.getOrDefault(emptyMap()) else emptyMap()
+        return "$status\nResultados: ${count ?: 0}" + hits.take(50).joinToString("") { "\n0x${it.addr} ${it.type} ${it.region} = ${it.value}" + (names[it.addr]?.let { n -> " [$n]" } ?: "") }
     }
 
     private suspend fun objectText(center: String): String {
