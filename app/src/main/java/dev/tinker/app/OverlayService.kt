@@ -77,7 +77,7 @@ class OverlayService : Service() {
         // o jogo fechou sozinho: abre o painel com a pergunta "Reabrir o jogo?", como o GameGuardian
         watch.launch {
             snapshotFlow { Session.gameGone }.collect { gone ->
-                if (gone != null && panel == null) {
+                if (gone != null && panel == null && !Session.gameGoneByUser) {
                     closeBar()
                     openPanel()
                 }

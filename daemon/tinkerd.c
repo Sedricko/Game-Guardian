@@ -858,6 +858,8 @@ static void cmd_resolve(char *chain) {
     uint64_t a = mods[m].base + strtoull(plus + 1, NULL, 16), v;
     for (tok = strtok_r(NULL, " \n", &save); tok; tok = strtok_r(NULL, " \n", &save)) {
         if (read_ptr(a, &v)) { printf("err ponteiro quebrado em %" PRIx64 "\n", a); return; }
+        // ponteiro nulo (objeto ainda não criado, jogo carregando): somar o offset daria um endereço sem sentido como 0x4ac
+        if (v < 0x10000) { printf("err ponteiro nulo em %" PRIx64 "\n", a); return; }
         a = v + strtoull(tok, NULL, 16);
     }
     printf("ok %" PRIx64 "\n", a);

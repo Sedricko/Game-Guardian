@@ -113,11 +113,11 @@ mapfile -t x < <(grep -E '^(ok|err)' <<<"$xr")
 ptr=$(printf '%s\n' "attach $pid" "pointers $paddr 256 3" | "$out/tinkerd")
 echo "$ptr" | head -20
 chain=$(grep -m1 -E '^target\+[0-9a-f]+ 10 20$' <<<"$ptr") || { echo "FALHOU: ponteiro não achado"; exit 1; }
-res=$(printf '%s\n' "attach $pid" "resolve $chain" "resolve target+0" "resolve nada.so+10 8" "resolve xyz" | "$out/tinkerd")
+res=$(printf '%s\n' "attach $pid" "resolve $chain" "resolve target+0" "resolve nada.so+10 8" "resolve xyz" "resolve target+8 0" | "$out/tinkerd")
 echo "$res"
 mapfile -t r < <(sed 1,2d <<<"$res")
 [ "${r[0]}" = "ok $paddr" ] && [[ "${r[1]}" =~ ^ok\ [0-9a-f]+$ ]] && [ "${r[2]}" = "err módulo nada.so não carregado" ] \
-    && [ "${r[3]}" = "err ponteiro inválido" ] || { echo "FALHOU: resolve"; exit 1; }
+    && [ "${r[3]}" = "err ponteiro inválido" ] && [[ "${r[4]}" =~ ^err\ ponteiro\ nulo ]] || { echo "FALHOU: resolve"; exit 1; }
 
 # Ponteiros só em libs do jogo (/data/...): o alvo do teste está em /tmp, então nenhum caminho
 only=$(printf '%s\n' "attach $pid" "pointers $paddr 256 3 1" | "$out/tinkerd" | tail -1)

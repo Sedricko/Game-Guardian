@@ -114,7 +114,8 @@ fun TinkerPanel(
     val s = Session
     var picking by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    val run = rememberRun(engine) { error = it }
+    // "o jogo fechou" de um comando já está no cartão "Reabrir o jogo?": não repete em vermelho
+    val run = rememberRun(engine) { error = if (it == "o jogo fechou" && s.gameGone != null) null else it }
     // abriu o Tinker com o jogo da última vez aberto: já escolhe ele (e os salvos voltam sozinhos)
     LaunchedEffect(Unit) { if (s.process == null) runCatching { engine.followGame(startDaemon = true) }.getOrNull()?.let { s.status = it } }
 
@@ -130,7 +131,7 @@ fun TinkerPanel(
                 ) {
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                         Text("${gone.label} fechou. Reabrir o jogo?", color = MaterialTheme.colorScheme.onTertiaryContainer, style = MaterialTheme.typography.titleSmall)
-                        Text("O motivo da queda fica na aba Registro. Ao reabrir, os salvos voltam sozinhos.",
+                        Text(if (s.gameGoneByUser) "Ao reabrir, os salvos voltam sozinhos." else "O motivo da queda fica na aba Registro. Ao reabrir, os salvos voltam sozinhos.",
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onTertiaryContainer)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(onClick = { s.status = engine.relaunch(); if (overlay) onMinimize() }) { Text("Reabrir") }
@@ -637,6 +638,16 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
             if (s.process != null && s.saved.any(engine::stale)) {
                 TextButton(onClick = { run { engine.retryNow() } }, enabled = !s.busy) { Text("↻ Procurar os salvos ⚠ agora") }
             }
+        }
+        if (s.process == null) {
+            item {
+                Text(
+                    "Escolha o jogo primeiro: o Tinker mostra só os salvos dele e traz de volta os da última vez." +
+                        if (s.saved.isNotEmpty()) " (Há ${s.saved.size} salvos de outro jogo ou da última vez.)" else "",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            return@LazyColumn
         }
         if (s.saved.isEmpty()) {
             item {
