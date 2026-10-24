@@ -52,10 +52,13 @@ fun QuickBar(engine: Engine, onDrag: (Float, Float) -> Unit, onKeyboard: (Boolea
     var error by remember { mutableStateOf<String?>(null) }
     val run = rememberRun(engine) { error = it }
     val focus = LocalFocusManager.current
+    val own = s.ownKeypad
+    var pad by remember { mutableStateOf(false) }
     val enabled = s.process != null && !s.busy
     val n = s.count ?: 0
     val small = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
     fun act(work: suspend () -> String) {
+        pad = false
         focus.clearFocus()
         onKeyboard(false)
         run(work)
@@ -75,10 +78,13 @@ fun QuickBar(engine: Engine, onDrag: (Float, Float) -> Unit, onKeyboard: (Boolea
                 modifier = Modifier.pointerInput(Unit) { detectDragGestures { c, d -> c.consume(); onDrag(d.x, d.y) } }.padding(horizontal = 6.dp, vertical = 8.dp),
             )
             OutlinedTextField(
-                s.value, { s.value = it }, singleLine = true, placeholder = { Text("Valor") },
+                s.value, { s.value = it }, singleLine = true, placeholder = { Text("Valor") }, readOnly = own,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
-                // pede o teclado no primeiro toque, antes do campo tentar pegar o foco
-                modifier = Modifier.weight(1f).pointerInput(Unit) { awaitEachGesture { awaitFirstDown(pass = PointerEventPass.Initial); onKeyboard(true) } }
+                // com o teclado do Tinker o toque só abre ele (a janela nem pega o foco); sem, pede o teclado do telefone
+                // no primeiro toque, antes do campo tentar pegar o foco
+                modifier = Modifier.weight(1f).pointerInput(own) {
+                    awaitEachGesture { awaitFirstDown(pass = PointerEventPass.Initial); if (own) pad = true else onKeyboard(true) }
+                }
                     // saiu do campo (tocou fora, fechou o teclado): o jogo volta a receber as teclas
                     .onFocusChanged { if (!it.isFocused) onKeyboard(false) },
             )
@@ -108,6 +114,7 @@ fun QuickBar(engine: Engine, onDrag: (Float, Float) -> Unit, onKeyboard: (Boolea
             TextButton(onClick = { onKeyboard(false); onOpenPanel() }, contentPadding = PaddingValues(0.dp), modifier = Modifier.size(44.dp)) { Text("▢", fontSize = 20.sp) }
             TextButton(onClick = { onKeyboard(false); onBubble() }, contentPadding = PaddingValues(0.dp), modifier = Modifier.size(44.dp)) { Text("–", fontSize = 22.sp) }
         }
+        if (own && pad) NumPad(onKey = { s.value = applyKey(s.value, it) }, onDone = { pad = false })
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, maxLines = 3) }
     }
 }

@@ -19,6 +19,8 @@ import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -118,7 +120,7 @@ fun TinkerPanel(
     var picking by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     // "o jogo fechou" de um comando já está no cartão "Reabrir o jogo?": não repete em vermelho
-    val run = rememberRun(engine) { error = if (it == "o jogo fechou" && s.gameGone != null) null else it }
+    val run = rememberRun(engine) { error = if (it == "o jogo fechou") null else it }
     // abriu o Tinker com o jogo da última vez aberto: já escolhe ele (e os salvos voltam sozinhos)
     LaunchedEffect(Unit) { if (s.process == null) runCatching { engine.followGame(startDaemon = true) }.getOrNull()?.let { s.status = it } }
 
@@ -311,15 +313,26 @@ private fun AppIcon(p: GameProcess?, size: Int) {
 
 @Composable
 private fun ValueField(value: String, label: String, onChange: (String) -> Unit, modifier: Modifier = Modifier, keyboard: KeyboardType = KeyboardType.Decimal) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = onChange,
-        label = { Text(label) },
-        singleLine = true,
-        textStyle = MaterialTheme.typography.titleLarge,
-        keyboardOptions = KeyboardOptions(keyboardType = keyboard),
-        modifier = modifier.fillMaxWidth(),
-    )
+    // teclado do Tinker (Ajustes): o campo não chama o teclado do telefone, que cobre o jogo; tocar abre o do Tinker
+    val own = Session.ownKeypad
+    var pad by remember { mutableStateOf(false) }
+    val taps = remember { MutableInteractionSource() }
+    val pressed by taps.collectIsPressedAsState()
+    LaunchedEffect(pressed) { if (pressed && own) pad = true }
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = onChange,
+            label = { Text(label) },
+            singleLine = true,
+            readOnly = own,
+            interactionSource = taps,
+            textStyle = MaterialTheme.typography.titleLarge,
+            keyboardOptions = KeyboardOptions(keyboardType = keyboard),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (own && pad) NumPad(onKey = { onChange(applyKey(value, it)) }, onDone = { pad = false })
+    }
 }
 
 /** Editor que abre dentro da própria lista, no lugar de um diálogo. */
@@ -735,6 +748,7 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
             ResultCard(
                 shown(item.value, item.type), "0x${item.addr}" + when {
                     // a linha do endereço é estreita no painel: marcas curtas, explicadas ao abrir o salvo e na Ajuda
+                    item.temp -> "\ncópia temporária do jogo: não volta ao reabrir"
                     old -> "\n⚠ de outra vez do jogo: busque de novo"
                     item.pointer.isNotEmpty() -> if (item.verified) " · 🔗" else " · 🔗 a confirmar"
                     item.anchor.isNotEmpty() -> "\n↳ segue " + (s.saved.firstOrNull { it.id == item.anchor }?.let { it.name.ifEmpty { "0x" + it.addr } } ?: "?") + " " + offsetText(item.offset)
@@ -1095,6 +1109,9 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
             Panel {
                 Text("Busca", style = MaterialTheme.typography.titleSmall)
                 Toggle("Pausar o jogo durante a busca e o refino", "O valor não muda no meio da busca.", s.autoPause) { s.autoPause = it; engine.saveSettings() }
+                Toggle("Teclado do Tinker", "Números, ~ e ; dentro do painel; o teclado do telefone abre por cima do jogo e esconde o valor.", s.ownKeypad) {
+                    s.ownKeypad = it; engine.saveSettings()
+                }
                 Toggle("Procurar valores cifrados (🔒)", "Acha moedas e vida protegidas com chave (comum em jogos Unity). Deixa a busca um pouco mais lenta.", s.findEncrypted) {
                     s.findEncrypted = it; engine.saveSettings()
                 }

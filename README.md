@@ -36,7 +36,8 @@ Cada versão instala por cima da anterior, sem perder os salvos.
 
 O cabeçalho é uma linha só: toque no nome do jogo para trocar; **👁** (segure) espia o jogo através do painel,
 **⏸/▶** pausa e continua, **⚡** abre a barra rápida, **—** minimiza e **✕** sai.
-Opções menos usadas ficam recolhidas (**Mais formas de buscar**, **Buscar perto**), para a lista ter espaço.
+O **teclado do Tinker** (números, `~` e `;`) abre dentro do painel e da barra rápida, sem o teclado do telefone por cima
+do jogo; dá para voltar ao do telefone em Ajustes. Opções menos usadas ficam recolhidas (**Mais formas de buscar**, **Buscar perto**), para a lista ter espaço.
 **Barra rápida**: uma barra pequena sobre o jogo com valor, **Refinar** e **↑ ↓ = ≠**, para refinar sem abrir o painel; **▢** abre o painel completo.
 
 ## Passo a passo: achar um valor

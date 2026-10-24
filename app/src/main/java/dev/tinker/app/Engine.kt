@@ -62,6 +62,8 @@ data class SavedItem(
     val trusted: Boolean = true,
     // il2: "Namespace.Classe+offset" do objeto IL2CPP onde o valor mora; com ele o salvo volta procurando o objeto pela classe
     val il2: String = "",
+    // temp: cópia que o jogo cria só para a tela (número solto do C#); some ao fechar o jogo, então não se procura de volta
+    val temp: Boolean = false,
 )
 
 const val MAX_CHAINS = 200
@@ -101,7 +103,8 @@ object Session {
     var autoPause by mutableStateOf(true)
     var findEncrypted by mutableStateOf(true)
     var useBar by mutableStateOf(false)
-    var autoOverlay by mutableStateOf(true)  // ao abrir o app, já abre o menu flutuante e sai da frente (como o GameGuardian)
+    var autoOverlay by mutableStateOf(true)
+    var ownKeypad by mutableStateOf(true)  // teclado do Tinker no lugar do teclado do telefone  // ao abrir o app, já abre o menu flutuante e sai da frente (como o GameGuardian)
     var update by mutableStateOf<Pair<String, String>?>(null)
     var gameGone by mutableStateOf<GameProcess?>(null)
     var gameGoneByUser = false  // fechado pelo botão do Tinker: mostra "Reabrir", mas não abre o painel sozinho  // o jogo fechou sozinho (não pelo Tinker): pergunta se reabre  // versão nova na página de releases: nome e link do APK  // a bolinha abre a barra rápida em vez do painel  // a busca também procura valores cifrados (🔒)
@@ -142,7 +145,7 @@ class Engine private constructor(private val app: Context) {
     fun saveSettings() {
         prefs.edit().putBoolean("autoPause", Session.autoPause).putBoolean("findEncrypted", Session.findEncrypted)
             .putBoolean("autoPointers", Session.autoPointers).putBoolean("gameLibsOnly", Session.gameLibsOnly)
-            .putBoolean("autoOverlay", Session.autoOverlay).putFloat("alpha", Session.alpha).putInt("panelSize", Session.panelSize).apply()
+            .putBoolean("autoOverlay", Session.autoOverlay).putBoolean("ownKeypad", Session.ownKeypad).putFloat("alpha", Session.alpha).putInt("panelSize", Session.panelSize).apply()
     }
 
     /** Pede a permissão de sobreposição sozinho só na primeira vez; recusou, o app abre normal nas próximas. */
@@ -154,6 +157,7 @@ class Engine private constructor(private val app: Context) {
         Session.autoPointers = prefs.getBoolean("autoPointers", true)
         Session.gameLibsOnly = prefs.getBoolean("gameLibsOnly", true)
         Session.autoOverlay = prefs.getBoolean("autoOverlay", true)
+        Session.ownKeypad = prefs.getBoolean("ownKeypad", true)
         Session.alpha = prefs.getFloat("alpha", Session.alpha)
         Session.panelSize = prefs.getInt("panelSize", Session.panelSize).coerceIn(0, PANEL_SIZES.lastIndex)
         loadSaved()
@@ -481,7 +485,12 @@ class Engine private constructor(private val app: Context) {
     /** Marca o salvo com a classe e o offset IL2CPP (e o nome do campo, se ele não tem nome). */
     private fun Daemon.tagIl2(item: SavedItem) {
         // número solto do C# (System.Int32...): é cópia que o jogo cria para mostrar na tela e joga fora; não volta pela classe
-        val c = il2(item.addr)?.takeIf { it.name !in BOXED } ?: return
+        val c = il2(item.addr) ?: return
+        if (c.name in BOXED) {
+            if (!item.temp) Diag.add("Salvo 0x${item.addr} é cópia temporária (${c.name}): mostra o valor na tela, não volta ao reabrir")
+            replace(item) { it.copy(temp = true) }
+            return
+        }
         val off = item.addr.toLong(16) - c.start.toLong(16)
         val f = c.fields.firstOrNull { it.offset.toLong() == off } ?: c.fields.lastOrNull { it.offset <= off && off < it.offset + 8 } ?: return
         val name = "${c.name.substringAfterLast('.')}.${f.name}"
@@ -638,7 +647,7 @@ class Engine private constructor(private val app: Context) {
         val lost = mutableListOf<String>()
         Session.saved.toList().sortedBy { it.anchor.isNotEmpty() }.forEach { old ->
             val item = Session.saved.firstOrNull { it.id == old.id } ?: return@forEach
-            if (item.pid == pid) return@forEach  // mesmo processo: o endereço ainda vale
+            if (item.pid == pid || item.temp) return@forEach  // mesmo processo: vale; cópia temporária: não existe mais
             val why = mutableListOf<String>()  // por que não voltou: vai para o registro
             val how = when {
                 item.pointer.isNotEmpty() -> confirmPointer(item, pid, why)
@@ -667,7 +676,7 @@ class Engine private constructor(private val app: Context) {
     private suspend fun retryRestore() {
         val pid = currentPid
         if (pid == 0 || daemon == null) return
-        if (Session.saved.none { stale(it) && (it.pointer.isNotEmpty() || it.anchor.isNotEmpty() || it.chains.isNotEmpty() || sigUseful(it.sig)) }) return
+        if (Session.saved.none { stale(it) && !it.temp && (it.pointer.isNotEmpty() || it.anchor.isNotEmpty() || it.chains.isNotEmpty() || sigUseful(it.sig) || it.il2.isNotEmpty()) }) return
         retries++
         val late = System.currentTimeMillis() - attachedAt > 2 * 60_000
         if (late && !gaveUp) {
@@ -953,6 +962,7 @@ class Engine private constructor(private val app: Context) {
         if (it.anchor.isNotEmpty()) append(" · segue ${Session.saved.firstOrNull { a -> a.id == it.anchor }?.let(::label) ?: "?"} ${offsetText(it.offset)}")
         append(" · reservas ${it.chains.size} · assinatura ${if (sigUseful(it.sig)) "pronta" else "aprendendo"}")
         if (it.il2.isNotEmpty()) append(" · IL2CPP ${it.il2}")
+        if (it.temp) append(" · cópia temporária")
         historyText(it, System.currentTimeMillis()).takeIf { h -> h.isNotEmpty() }?.let { h -> append(" · histórico $h") }
     }
 
@@ -1139,7 +1149,7 @@ class Engine private constructor(private val app: Context) {
             val item = d.resolve(old)
             if (stale(item)) return@forEach  // endereço de outra vez do jogo: não lê lixo
             if (item.pid == currentPid) d.learnSig(item)
-            if (item.pid == currentPid && item.il2.isEmpty() && (refreshTick + item.id.hashCode()) % 30 == 0) d.tagIl2(item)
+            if (item.pid == currentPid && item.il2.isEmpty() && !item.temp && (refreshTick + item.id.hashCode()) % 30 == 0) d.tagIl2(item)
             // confere os caminhos de reserva de tempos em tempos e quando o valor muda (o jogo mudou de estado)
             val check = item.chains.isNotEmpty() && item.pid == currentPid
             if (item.frozen) {
@@ -1239,7 +1249,7 @@ internal fun normalizeNumbers(input: String): String =
 private fun SavedItem.toJson() = JSONObject().put("addr", addr).put("type", type).put("region", region).put("value", value).put("name", name).put("frozen", frozen)
     .put("pointer", pointer).put("id", id).put("anchor", anchor).put("offset", offset).put("pid", pid)
     .put("chains", JSONArray(chains)).put("sig", sig).put("sigOff", sigOff).put("verified", verified)
-    .put("trusted", trusted).put("il2", il2).put("history", JSONArray(history)).apply { if (!seenMin.isNaN()) put("seenMin", seenMin).put("seenMax", seenMax) }  // JSON não aceita NaN
+    .put("trusted", trusted).put("il2", il2).put("temp", temp).put("history", JSONArray(history)).apply { if (!seenMin.isNaN()) put("seenMin", seenMin).put("seenMax", seenMax) }  // JSON não aceita NaN
 
 private val IL2 = Regex("""[A-Za-z0-9_.<>`]{1,120}\+[0-9a-f]{1,6}""")  // vai para o daemon: sem espaço nem quebra de linha
 
@@ -1417,7 +1427,7 @@ private fun JSONObject.toSaved(): SavedItem {
         pid = optInt("pid", 0), chains = chains, sig = sig, sigOff = optInt("sigOff", 0).coerceIn(0, 191), verified = optBoolean("verified", true),
         history = optJSONArray("history")?.let { a -> List(a.length()) { a.getString(it) } }.orEmpty().takeLast(20),
         seenMin = optDouble("seenMin", Double.NaN), seenMax = optDouble("seenMax", Double.NaN), trusted = optBoolean("trusted", true),
-        il2 = optString("il2", "").takeIf { IL2.matches(it) }.orEmpty(),
+        il2 = optString("il2", "").takeIf { IL2.matches(it) }.orEmpty(), temp = optBoolean("temp", false),
     )
 }
 
