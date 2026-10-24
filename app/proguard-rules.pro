@@ -10,3 +10,7 @@
 -dontwarn javax.annotation.**
 -dontwarn org.jetbrains.annotations.**
 -dontwarn kotlin.reflect.jvm.internal.**
+# gerador de schema JSON do SDK (saídas estruturadas, que o Tinker não usa) cita reflexão que o Android não tem
+-dontwarn com.github.victools.**
+-dontwarn java.lang.reflect.AnnotatedType
+-dontwarn java.lang.reflect.AnnotatedParameterizedType
