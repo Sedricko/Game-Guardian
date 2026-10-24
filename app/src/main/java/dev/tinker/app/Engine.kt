@@ -52,6 +52,7 @@ object Session {
     var paused by mutableStateOf(false)
     var alpha by mutableFloatStateOf(0.92f)
     var panelSize by mutableIntStateOf(1)  // índice em PANEL_SIZES
+    var peek by mutableStateOf(false)  // segurando o "olho": painel quase invisível
     val saved = mutableStateListOf<SavedItem>()
 }
 
@@ -231,24 +232,40 @@ class Engine private constructor(private val app: Context) {
 
     // Lista de salvos
 
-    fun addSaved(hit: Hit) {
-        if (Session.saved.none { it.addr == hit.addr && it.type == hit.type }) Session.saved.add(SavedItem(hit.addr, hit.type, hit.region, hit.value))
+    /** Salva vários de uma vez; com frozen=true já entram congelados no valor atual. */
+    fun addSaved(hits: List<Hit>, frozen: Boolean = false) {
+        hits.forEach { hit ->
+            val i = Session.saved.indexOfFirst { it.addr == hit.addr && it.type == hit.type }
+            if (i < 0) Session.saved.add(SavedItem(hit.addr, hit.type, hit.region, hit.value, frozen))
+            else if (frozen) Session.saved[i] = Session.saved[i].copy(frozen = true)
+        }
+        Diag.add("${if (frozen) "Congelados" else "Salvos"} ${hits.size} endereços")
         storeSaved()
     }
 
-    fun removeSaved(item: SavedItem) {
-        Session.saved.remove(item)
+    fun removeSaved(items: List<SavedItem>) {
+        val keys = items.map { it.addr + it.type }.toSet()
+        Session.saved.removeAll { it.addr + it.type in keys }
+        Diag.add("Removidos ${items.size} salvos")
         storeSaved()
     }
 
-    suspend fun setSaved(item: SavedItem, value: String) {
-        write(item.addr, item.type, value)
-        replace(item) { it.copy(value = value) }
+    /** Escreve o mesmo valor em vários endereços (selecionados), cada um no seu tipo. */
+    suspend fun writeMany(targets: List<Pair<String, String>>, value: String): String = call { d ->
+        val fail = targets.count { (addr, type) -> runCatching { d.send("write $addr $type ${value.arg()}", quiet = true) }.isFailure }
+        Diag.add("Editados ${targets.size - fail} de ${targets.size} endereços para $value")
+        if (fail == 0) "${targets.size} valores alterados." else "${targets.size - fail} alterados, $fail não couberam no tipo ou falharam."
     }
 
-    fun setFrozen(item: SavedItem, frozen: Boolean) {
-        Diag.add("${if (frozen) "Congelado" else "Descongelado"}: 0x${item.addr} = ${item.value}")
-        replace(item) { it.copy(frozen = frozen) }
+    suspend fun setSaved(items: List<SavedItem>, value: String): String {
+        val msg = writeMany(items.map { it.addr to it.type }, value)
+        items.forEach { item -> replace(item) { it.copy(value = value) } }
+        return msg
+    }
+
+    fun setFrozen(items: List<SavedItem>, frozen: Boolean) {
+        Diag.add("${if (frozen) "Congelados" else "Descongelados"} ${items.size} salvos")
+        items.forEach { item -> replace(item) { it.copy(frozen = frozen) } }
     }
 
     suspend fun refreshSaved() = call { d ->

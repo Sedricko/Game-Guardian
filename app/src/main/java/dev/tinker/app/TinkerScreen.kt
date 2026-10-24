@@ -15,6 +15,7 @@ import java.io.File
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -61,6 +62,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -149,6 +151,14 @@ private fun Header(overlay: Boolean, onPick: () -> Unit, onMinimize: () -> Unit,
                     style = MaterialTheme.typography.labelSmall,
                     color = if (s.paused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+            if (overlay) {
+                // como o olho do GameGuardian: segure para ver o jogo, solte para voltar
+                Box(
+                    Modifier.padding(end = 6.dp).clip(RoundedCornerShape(50)).background(MaterialTheme.colorScheme.secondaryContainer)
+                        .pointerInput(Unit) { detectTapGestures(onPress = { s.peek = true; tryAwaitRelease(); s.peek = false }) }
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                ) { Text("👁 Espiar", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSecondaryContainer) }
             }
             FilledTonalButton(onClick = onPick, enabled = !s.busy, contentPadding = small) { Text(if (p == null) "Escolher jogo" else "Trocar") }
             if (overlay) TextButton(onClick = onMinimize, contentPadding = small) { Text("Minimizar") }
@@ -241,6 +251,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
     val s = Session
     var editing by remember { mutableStateOf<String?>(null) }
     var editingAll by remember { mutableStateOf(false) }
+    var selected by remember { mutableStateOf(setOf<String>()) }
     val enabled = s.process != null && !s.busy
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
@@ -263,31 +274,56 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
             }
         }
         val count = s.count ?: return@LazyColumn
+        val visible = s.results.map { it.addr + it.type }.toSet()
+        val chosen = s.results.filter { it.addr + it.type in selected }
+        val targets = chosen.ifEmpty { s.results }
+        val label = if (chosen.isEmpty()) "todos" else "${chosen.size}"
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = visible.isNotEmpty() && selected.containsAll(visible), onCheckedChange = { selected = if (it) visible else emptySet() })
                 Column(Modifier.weight(1f)) {
                     Text("$count resultados", style = MaterialTheme.typography.titleMedium)
-                    if (count > s.results.size) {
-                        Text("Mostrando ${s.results.size}. Refine para ver todos.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+                    Text(
+                        if (count > s.results.size) "Mostrando ${s.results.size}. Refine para ver todos." else "Marque para agir só nos escolhidos.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
-                TextButton(onClick = { editingAll = !editingAll }, enabled = count > 0 && !s.busy) { Text("Editar todos") }
+            }
+        }
+        if (s.results.isNotEmpty()) {
+            item {
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilledTonalButton(onClick = { engine.addSaved(targets); s.status = "${targets.size} salvos na lista." }) { Text("Salvar $label") }
+                    FilledTonalButton(onClick = { engine.addSaved(targets, frozen = true); s.status = "${targets.size} congelados (veja Salvos)." }) { Text("Congelar $label") }
+                    OutlinedButton(onClick = { editingAll = !editingAll }, enabled = !s.busy) { Text("Editar $label") }
+                }
             }
         }
         if (editingAll) {
             item {
                 Panel {
-                    Text("O novo valor vai para os $count resultados.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    InlineEditor("", "Novo valor", onSave = { v -> editingAll = false; run { engine.writeAll(v) } }, onCancel = { editingAll = false })
+                    Text(
+                        if (chosen.isEmpty()) "O novo valor vai para os $count resultados." else "O novo valor vai para os ${chosen.size} escolhidos.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    InlineEditor("", "Novo valor", onSave = { v ->
+                        editingAll = false
+                        run { if (chosen.isEmpty()) engine.writeAll(v) else engine.writeMany(chosen.map { it.addr to it.type }, v) }
+                    }, onCancel = { editingAll = false })
                 }
             }
         }
         items(s.results, key = { it.addr + it.type }) { hit ->
-            val open = editing == hit.addr + hit.type
-            ResultCard(hit.value, "0x${hit.addr}", "${TYPE_NAMES[hit.type]} · ${hit.region}", onClick = { editing = if (open) null else hit.addr + hit.type }) {
+            val key = hit.addr + hit.type
+            val open = editing == key
+            ResultCard(
+                hit.value, "0x${hit.addr}", "${TYPE_NAMES[hit.type]} · ${hit.region}",
+                onClick = { editing = if (open) null else key },
+                checked = key in selected, onCheck = { selected = if (it) selected + key else selected - key },
+            ) {
                 if (open) {
                     InlineEditor(hit.value, "Novo valor", onSave = { v -> editing = null; run { engine.write(hit.addr, hit.type, v) } }, onCancel = { editing = null }) {
-                        TextButton(onClick = { engine.addSaved(hit); editing = null }) { Text("Salvar na lista") }
+                        TextButton(onClick = { engine.addSaved(listOf(hit)); editing = null }) { Text("Salvar na lista") }
                     }
                 }
             }
@@ -296,15 +332,20 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
 }
 
 @Composable
-private fun ResultCard(value: String, addr: String, tag: String, onClick: () -> Unit, trailing: @Composable () -> Unit = {}, below: @Composable () -> Unit = {}) {
+private fun ResultCard(
+    value: String, addr: String, tag: String, onClick: () -> Unit,
+    checked: Boolean, onCheck: (Boolean) -> Unit,
+    trailing: @Composable () -> Unit = {}, below: @Composable () -> Unit = {},
+) {
     Card(
         onClick = onClick,
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.padding(start = 4.dp, end = 16.dp, top = 8.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = checked, onCheckedChange = onCheck)
                 Column(Modifier.weight(1f)) {
                     Text(value, style = MaterialTheme.typography.titleMedium, fontFamily = FontFamily.Monospace)
                     Text(addr, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -321,38 +362,67 @@ private fun ResultCard(value: String, addr: String, tag: String, onClick: () -> 
 private fun SavedTab(engine: Engine, run: (suspend () -> String) -> Unit) {
     val s = Session
     var editing by remember { mutableStateOf<String?>(null) }
+    var editingMany by remember { mutableStateOf(false) }
+    var selected by remember { mutableStateOf(setOf<String>()) }
     LaunchedEffect(s.process) {
         while (true) {
             runCatching { engine.refreshSaved() }
             delay(1000)
         }
     }
+    val all = s.saved.map { it.addr + it.type }.toSet()
+    val chosen = s.saved.filter { it.addr + it.type in selected }
+    val targets = chosen.ifEmpty { s.saved.toList() }
+    val label = if (chosen.isEmpty()) "todos" else "${chosen.size}"
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         if (s.saved.isEmpty()) {
             item {
                 Text(
-                    "Nenhum endereço salvo. Na aba Busca, toque num resultado e escolha \"Salvar na lista\".",
+                    "Nenhum endereço salvo. Na aba Busca, marque resultados e toque em \"Salvar\" ou \"Congelar\".",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            return@LazyColumn
+        }
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = selected.containsAll(all), onCheckedChange = { selected = if (it) all else emptySet() })
+                Text("${s.saved.size} salvos · ${s.saved.count { it.frozen }} congelados", style = MaterialTheme.typography.titleMedium)
+            }
+        }
+        item {
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilledTonalButton(onClick = { engine.setFrozen(targets, true) }) { Text("Congelar $label") }
+                FilledTonalButton(onClick = { engine.setFrozen(targets, false) }) { Text("Descongelar $label") }
+                OutlinedButton(onClick = { editingMany = !editingMany }, enabled = !s.busy) { Text("Editar $label") }
+                TextButton(onClick = { engine.removeSaved(targets); selected = emptySet() }) { Text("Remover $label") }
+            }
+        }
+        if (editingMany) {
+            item {
+                Panel {
+                    Text("O novo valor vai para ${if (chosen.isEmpty()) "todos os ${s.saved.size} salvos" else "os ${chosen.size} escolhidos"}.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    InlineEditor("", "Novo valor", onSave = { v -> editingMany = false; run { engine.setSaved(targets, v) } }, onCancel = { editingMany = false })
+                }
+            }
         }
         items(s.saved, key = { it.addr + it.type }) { item ->
-            val open = editing == item.addr + item.type
+            val key = item.addr + item.type
+            val open = editing == key
             ResultCard(
-                item.value,
-                "0x${item.addr}",
-                "${TYPE_NAMES[item.type]} · ${item.region}",
-                onClick = { editing = if (open) null else item.addr + item.type },
+                item.value, "0x${item.addr}", "${TYPE_NAMES[item.type]} · ${item.region}",
+                onClick = { editing = if (open) null else key },
+                checked = key in selected, onCheck = { selected = if (it) selected + key else selected - key },
                 trailing = {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(start = 12.dp)) {
-                        Switch(checked = item.frozen, onCheckedChange = { engine.setFrozen(item, it) })
+                        Switch(checked = item.frozen, onCheckedChange = { engine.setFrozen(listOf(item), it) })
                         Text("Congelar", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 },
             ) {
                 if (open) {
-                    InlineEditor(item.value, "Novo valor", onSave = { v -> editing = null; run { engine.setSaved(item, v); "Valor salvo alterado." } }, onCancel = { editing = null }) {
-                        TextButton(onClick = { engine.removeSaved(item); editing = null }) { Text("Remover") }
+                    InlineEditor(item.value, "Novo valor", onSave = { v -> editing = null; run { engine.setSaved(listOf(item), v) } }, onCancel = { editing = null }) {
+                        TextButton(onClick = { engine.removeSaved(listOf(item)); editing = null }) { Text("Remover") }
                     }
                 }
             }

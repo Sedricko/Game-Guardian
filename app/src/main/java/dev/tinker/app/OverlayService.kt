@@ -116,7 +116,7 @@ class OverlayService : Service() {
             softInputMode = LayoutParams.SOFT_INPUT_ADJUST_RESIZE
         }
         val view = compose {
-            Box(Modifier.fillMaxSize().graphicsLayer { alpha = Session.alpha }.clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp))) {
+            Box(Modifier.fillMaxSize().graphicsLayer { alpha = if (Session.peek) 0.06f else Session.alpha }.clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp))) {
                 TinkerPanel(Engine.get(this@OverlayService), overlay = true, onMinimize = ::closePanel, onResize = ::resizePanel)
             }
         }
