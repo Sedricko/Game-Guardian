@@ -148,6 +148,13 @@ grep -qE "^class Game.Player [0-9a-f]+ 3 hp,gold,instances$" <<<"$cl" || { echo 
 
 # Busca em grupo: hp (99.5) e gold (4321) do mesmo objeto, a 4 bytes; distância curta demais não acha; um valor só vira busca normal
 grp=$(printf '%s\n' "attach $pid" "group i32,f32 4321;99.5 16" "list 10" "group i32,f32 4321;99.5 2" "group i32 4321 16" "group i32 4321;1 0" | "$out/tinkerd")
+# itens repetidos: 4321;4321 precisa de dois 4321 perto (só há um) → 0; item que nenhum tipo entende (abc) não é exigido
+dup=$(printf '%s\n' "attach $pid" "group i32 4321;4321 16" "group i32,f32 4321;99.5;abc 16" | "$out/tinkerd" | grep '^ok [0-9]')
+[ "$dup" = "$(printf 'ok 0\nok 2')" ] || { echo "FALHOU: grupo com itens repetidos ($dup)"; exit 1; }
+# e com dois iguais perto (vida e vida máxima) o grupo acha os dois
+i8=$(printf '%x' $((0x$iaddr + 4)))
+two=$(printf '%s\n' "attach $pid" "write $iaddr i32 777001" "write $i8 i32 777001" "group i32 777001;777001 8" "write $i8 i32 555" | "$out/tinkerd" | grep '^ok [0-9]')
+[ "$two" = "ok 2" ] || { echo "FALHOU: grupo com dois iguais ($two)"; exit 1; }
 echo "$grp"
 mapfile -t g < <(grep -E '^(ok|err)' <<<"$grp")
 [ "${g[2]}" = "ok 2" ] && grep -qE "^$(printf '%x' $((0x$oaddr + 0x14))) i32 (Ch|A) 4321$" <<<"$grp" && grep -qE "^$(printf '%x' $((0x$oaddr + 0x10))) f32 (Ch|A) 99.5$" <<<"$grp" \

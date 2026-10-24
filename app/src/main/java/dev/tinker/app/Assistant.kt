@@ -17,6 +17,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import kotlinx.coroutines.ensureActive
 
 /** Conversa com a IA: guarda as mensagens para "Continuar" seguir de onde parou (só cresce, nunca reescreve). */
 class AiChat {
@@ -82,7 +83,8 @@ jogo abrir, use propor_receita com os salvos."""
         val shown = t.params.keys.mapNotNull { k -> args.optString(k).takeIf { it.isNotEmpty() } }.joinToString(" ")
         onStep("🔧 $name $shown".trim())
         Diag.add("Assistente usou $name $shown")
-        return runCatching { t.run(args) }.getOrElse { "Erro: ${it.message}" }.take(20_000)
+        // cancelado (a pessoa saiu da tela): para a conversa, em vez de mandar "erro" para a API até o limite de rodadas
+        return runCatching { t.run(args) }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }.getOrElse { "Erro: ${it.message}" }.take(20_000)
     }
 
     /** Claude pelo SDK oficial, com as ferramentas; erros viram texto para a tela (chave errada, sem internet, limite). */
@@ -102,6 +104,7 @@ jogo abrir, use propor_receita com os salvos."""
         messages += BetaMessageParam.builder().role(BetaMessageParam.Role.USER).content(prompt).build()
         return try {
             repeat(MAX_ROUNDS) {
+                kotlin.coroutines.coroutineContext.ensureActive()
                 val params = MessageCreateParams.builder()
                     .model("claude-opus-5-5")
                     .maxTokens(16000L)
@@ -115,7 +118,10 @@ jogo abrir, use propor_receita com os salvos."""
                     .putAdditionalBodyProperty("fallbacks", JsonValue.from("default"))
                     .build()
                 val r = client.beta().messages().create(params)
-                if (r.stopReason().orElse(null) == BetaStopReason.REFUSAL) return "O assistente não respondeu essa pergunta."
+                if (r.stopReason().orElse(null) == BetaStopReason.REFUSAL) {
+                    while (messages.size > before) messages.removeAt(messages.lastIndex)  // a pergunta recusada não fica na conversa
+                    return "O assistente não respondeu essa pergunta."
+                }
                 messages += r.toParam()
                 val uses = r.content().mapNotNull { it.toolUse().orElse(null) }
                 if (uses.isEmpty() || r.stopReason().orElse(null) != BetaStopReason.TOOL_USE) {
@@ -164,6 +170,7 @@ jogo abrir, use propor_receita com os salvos."""
         fun drop() { while (contents.length() > before) contents.remove(contents.length() - 1) }  // pergunta que falhou sai da conversa
         return try {
             repeat(MAX_ROUNDS) {
+                kotlin.coroutines.coroutineContext.ensureActive()
                 val body = JSONObject()
                     .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", SYSTEM))))
                     .put("contents", contents)

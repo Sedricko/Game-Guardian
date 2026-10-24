@@ -73,6 +73,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
@@ -83,6 +84,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -1024,20 +1026,23 @@ private fun FichaView(engine: Engine, center: String, run: (suspend () -> String
         if (center != "0") FichaBody(engine, center, run)
         return
     }
-    if (center == "0") {
-        // sem objeto aberto não há a lista da ficha: a tela inteira rola (lista de classes e resposta da IA não ficam cortadas)
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            ClassOpener(engine)
-            Text("Digite o nome de uma classe ou de um campo do jogo (ex.: PlayerData, gold) ou abra a ficha de um salvo (Salvos → Explorar ficha).",
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        return
-    }
-    // objeto aberto: trocar de classe fica recolhido, a ficha fica com a tela
+    // ClassOpener num lugar só: assim abrir um objeto não apaga o filtro, a lista, os outros objetos e a conversa com a IA
+    val none = center == "0"
     var switching by remember { mutableStateOf(false) }
-    TextButton(onClick = { switching = !switching }) { Text((if (switching) "▾ " else "▸ ") + "Trocar objeto / classe") }
-    if (switching) TopArea { ClassOpener(engine) }
-    FichaBody(engine, center, run)
+    if (!none) TextButton(onClick = { switching = !switching }) { Text((if (switching) "▾ " else "▸ ") + "Trocar objeto / classe") }
+    // sem objeto aberto a tela inteira rola; com objeto, a parte de cima fica limitada e a ficha fica com o resto
+    // recolhido = altura 0, mas continua na tela (sem perder o que tinha dentro)
+    val max = when {
+        none -> Dp.Unspecified
+        switching -> (LocalConfiguration.current.screenHeightDp * 0.45f).dp
+        else -> 0.dp
+    }
+    Column(Modifier.fillMaxWidth().heightIn(max = max).clipToBounds().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        ClassOpener(engine)
+        if (none) Text("Digite o nome de uma classe ou de um campo do jogo (ex.: PlayerData, gold) ou abra a ficha de um salvo (Salvos → Explorar ficha).",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    if (!none) FichaBody(engine, center, run)
 }
 
 /** "Abrir objeto pelo nome": digita a classe (PlayerData) e a ficha abre com todos os valores, sem buscar número nenhum. */

@@ -86,7 +86,7 @@ fun AiBox(
         }
         // a conversa rola dentro da própria caixa: em telas sem rolagem (Memória → Ficha) o texto ficava cortado
         val talk = rememberScrollState()
-        LaunchedEffect(turns.size) { talk.animateScrollTo(talk.maxValue) }
+        LaunchedEffect(turns) { talk.animateScrollTo(talk.maxValue) }  // a lista guarda só as 6 últimas: o tamanho para de mudar
         if (turns.isNotEmpty()) Column(Modifier.fillMaxWidth().heightIn(max = 320.dp).verticalScroll(talk), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         turns.forEachIndexed { i, (q, a) ->
             Text("Você: $q", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)

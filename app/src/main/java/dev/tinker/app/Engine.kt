@@ -127,13 +127,17 @@ data class FichaRow(val addr: String, val off: Long, val type: String, val label
 data class Recent(val types: Set<String>, val value: String)
 
 /** Edição sugerida pela IA: só acontece quando você toca em Aplicar. recipe: ids dos salvos (sugestão de receita, não de edição). */
+// pid: a vez do jogo em que o endereço vale; em outra (jogo reabriu), escrever ali pode derrubar o jogo
 data class AiProposal(
     val addr: String, val type: String, val value: String, val freeze: Boolean, val label: String, val why: String,
-    val recipe: List<String> = emptyList(),
+    val recipe: List<String> = emptyList(), val pid: Int = 0,
 )
 
-/** O que a IA aplicou, para desfazer: valor de antes e o salvo que a edição criou (sai junto). */
-data class AiUndo(val addr: String, val type: String, val old: String, val label: String, val savedId: String?)
+/** O que a IA aplicou, para desfazer: valor de antes, o salvo que a edição criou (sai junto) e como um salvo que já existia estava. */
+data class AiUndo(
+    val addr: String, val type: String, val old: String, val label: String, val savedId: String?, val pid: Int,
+    val before: SavedItem? = null,
+)
 
 /**
  * Busca que deu 0: outras tentativas, em ordem — todos os tipos com cifrados; depois o número como faixa (a tela
@@ -474,6 +478,8 @@ class Engine private constructor(private val app: Context) {
         Session.paused = false
         Session.canUndo = false
         switchSaved(p.pkg)
+        Session.aiProposals.clear()  // endereços da vez anterior do jogo
+        Session.aiUndo.clear()
         Session.engine = detectEngine(p.pkg)?.also { Diag.add("Motor do jogo: $it") }
         // a restauração roda em segundo plano (a cada 3 s): aqui ela segurava a escolha do jogo por até 45 s
         Session.restoreInfo = if (Session.saved.any(::stale)) "Procurando os salvos da última vez…" else ""
@@ -734,6 +740,13 @@ class Engine private constructor(private val app: Context) {
     }
 
 
+    /** Busca feita pela IA: espera a sua terminar e trava os botões e as rotinas de fundo enquanto roda, como uma busca sua. */
+    private suspend fun aiBusy(work: suspend () -> String): String {
+        while (Session.busy) delay(200)
+        withContext(Dispatchers.Main) { Session.busy = true }
+        return try { work() } finally { withContext(Dispatchers.Main) { Session.busy = false } }
+    }
+
     /** Busca/refino feitos pela IA aparecem na aba Busca, como se fossem seus. */
     private suspend fun resultsText(status: String): String {
         val (count, hits) = list()
@@ -813,10 +826,10 @@ class Engine private constructor(private val app: Context) {
             mapOf("valor" to "número, faixa (100~200), vários com ; (100;250) ou grupo (100;250;7::128)", "tipos" to "opcional: i32,f32,i64,f64 separados por vírgula; vazio = Auto"),
             listOf("valor")) { a ->
             val types = a.optString("tipos").split(',').map { it.trim() }.filter { it in TYPE_SIZES && !it.startsWith("x") }.toSet()
-            resultsText(search(types, a.optString("valor")))
+            aiBusy { resultsText(search(types, a.optString("valor"))) }
         },
         AiTool("refinar", "Refina os resultados atuais pelo valor novo (depois que a pessoa mudou o valor no jogo).",
-            mapOf("valor" to "o valor de agora"), listOf("valor")) { a -> resultsText(refine(a.optString("valor"))) },
+            mapOf("valor" to "o valor de agora"), listOf("valor")) { a -> aiBusy { resultsText(refine(a.optString("valor"))) } },
         AiTool("propor_edicao", "Sugere à pessoa uma edição (aparece um botão Aplicar; nada muda sem ela tocar). Use o endereço exato " +
             "que você viu numa ficha ou nos resultados, com o tipo dele.",
             mapOf("endereco" to "endereço em hexadecimal", "tipo" to "i32, f32, i64, f64, xi32 ou xf32 (o tipo que a ficha ou o resultado mostrou)",
@@ -828,19 +841,19 @@ class Engine private constructor(private val app: Context) {
             val value = normalizeNumbers(a.optString("valor"))
             if (type !in TYPE_SIZES) return@AiTool "Tipo inválido: use i32, f32, i64, f64, xi32 ou xf32."
             if (!Regex("""-?[0-9.eE+-]{1,40}""").matches(value)) return@AiTool "Valor inválido: um número só."
-            val p = AiProposal(addr, type, value, a.optString("congelar").trim().lowercase().startsWith("s"), a.optString("nome").take(40), a.optString("motivo").take(200))
+            val p = AiProposal(addr, type, value, a.optString("congelar").trim().lowercase().startsWith("s"), a.optString("nome").take(40), a.optString("motivo").take(200), pid = currentPid)
             withContext(Dispatchers.Main) { Session.aiProposals.add(p) }
             "Sugestão mostrada para a pessoa com o botão Aplicar."
         },
         AiTool("busca_sem_valor", "Começa uma busca sem saber o número (barra de vida, energia): guarda a memória para comparar depois com comparar.",
             mapOf("tipo" to "i32 (inteiro) ou f32 (decimal; barras costumam ser f32)"), emptyList()) { a ->
             val t = a.optString("tipo").trim().takeIf { it in TYPE_SIZES && !it.startsWith("x") }
-            resultsText(startUnknown(setOfNotNull(t)))
+            aiBusy { resultsText(startUnknown(setOfNotNull(t))) }
         },
         AiTool("comparar", "Refina a busca pelo jeito que o valor mudou desde a última busca ou comparação (depois que a pessoa mexeu no jogo).",
             mapOf("como" to "aumentou, diminuiu, igual ou mudou", "quanto" to "opcional: quanto aumentou ou diminuiu (ex.: 10)"), listOf("como")) { a ->
             val op = compareOp(a.optString("como"), a.optString("quanto")) ?: return@AiTool "Use aumentou, diminuiu, igual ou mudou."
-            resultsText(compare(op, a.optString("quanto")))
+            aiBusy { resultsText(compare(op, a.optString("quanto"))) }
         },
         AiTool("ver_salvos", "Mostra os salvos (com ponteiro, assinatura, histórico e se voltaram ao reabrir) e as receitas.", emptyMap(), emptyList()) { savedContext() },
         AiTool("propor_receita", "Sugere criar uma receita com salvos (aplica tudo de uma vez, e sozinha ao abrir o jogo). Aparece um botão para a pessoa.",
@@ -884,19 +897,25 @@ class Engine private constructor(private val app: Context) {
         if (p.recipe.isNotEmpty()) {
             val items = Session.saved.filter { it.id in p.recipe }
             if (items.isEmpty()) return "Os salvos dessa receita não existem mais."
+            val count = Session.recipes.size
             val msg = createRecipe(items, p.label)
+            // não criou (salvos sem classe, ponteiro ou assinatura ainda): a sugestão fica, e nenhuma receita sua vira "ao abrir"
+            if (Session.recipes.size == count) return msg
             if (p.freeze) Session.recipes.lastOrNull()?.let { updateRecipe(it.copy(auto = true)) }
             Session.aiProposals.remove(p)
             Diag.add("Receita sugerida pela IA criada: ${p.label} (${items.size} salvos)")
             return msg
         }
+        if (p.pid != currentPid) { Session.aiProposals.remove(p); return "O jogo reabriu depois dessa sugestão: o endereço mudou. Pergunte de novo." }
         val old = call { d -> runCatching { d.send("read ${p.addr} ${p.type}", quiet = true).status }.getOrDefault("?") }
         write(p.addr, p.type, p.value)
-        val existed = Session.saved.any { it.addr == p.addr && it.type == p.type }
+        val before = Session.saved.firstOrNull { it.addr == p.addr && it.type == p.type }
         addSaved(listOf(Hit(p.addr, p.type, "?", p.value)), frozen = p.freeze)
         val i = Session.saved.indexOfFirst { it.addr == p.addr && it.type == p.type }
-        if (i >= 0 && p.label.isNotBlank()) Session.saved[i] = Session.saved[i].copy(name = Session.saved[i].name.ifEmpty { p.label })
-        if (old != "?") Session.aiUndo.add(0, AiUndo(p.addr, p.type, old, p.label.ifEmpty { "0x" + p.addr }, if (existed) null else Session.saved.getOrNull(i)?.id))
+        // salvo que já existia: o valor novo entra nele, senão o congelamento voltaria o valor antigo em 200 ms
+        if (i >= 0) Session.saved[i] = Session.saved[i].copy(value = p.value, name = Session.saved[i].name.ifEmpty { p.label })
+        if (old != "?") Session.aiUndo.add(0, AiUndo(p.addr, p.type, old, p.label.ifEmpty { "0x" + p.addr },
+            if (before == null) Session.saved.getOrNull(i)?.id else null, currentPid, before))
         while (Session.aiUndo.size > 10) Session.aiUndo.removeAt(Session.aiUndo.lastIndex)
         storeSaved()
         Session.aiProposals.remove(p)
@@ -906,11 +925,13 @@ class Engine private constructor(private val app: Context) {
 
     /** Volta o valor de antes da edição da IA; o salvo que ela criou sai junto (e para de congelar). */
     suspend fun undoAi(u: AiUndo): String {
+        Session.aiUndo.remove(u)
+        if (u.pid != currentPid) return "O jogo reabriu depois dessa edição: não dá para desfazer no endereço antigo."
         u.savedId?.let { id -> Session.saved.removeAll { it.id == id } }
-        Session.saved.replaceAll { if (it.addr == u.addr && it.type == u.type) it.copy(frozen = false) else it }
+        // salvo que já existia volta como estava (congelado ou não, com o valor dele)
+        if (u.before != null) Session.saved.replaceAll { if (it.id == u.before.id) it.copy(frozen = u.before.frozen, value = u.before.value) else it }
         write(u.addr, u.type, u.old)
         storeSaved()
-        Session.aiUndo.remove(u)
         Diag.add("Desfeita a edição da IA em ${u.label}: voltou para ${u.old}")
         return "${u.label} voltou para ${u.old}."
     }

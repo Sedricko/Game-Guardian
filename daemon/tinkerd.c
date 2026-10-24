@@ -500,7 +500,23 @@ static void cmd_group(const char *types, const char *value, const char *range) {
     int nv = count_items(value);
     if (nv > MAXV) { printf("err valor inválido: %s\n", value); return; }
     if (run_search(types, value, &sc, 1)) return;
-    if (nv < 2) { printf("ok %zu\n", nres); return; }
+    // itens iguais (100;100: vida e vida máxima) contam como um valor que precisa aparecer duas vezes; item que nenhum tipo
+    // entendeu não é exigido (senão o grupo nunca fecha e dá 0 calado)
+    char items[MAXV][64], buf[256], *save = NULL;
+    int canon[MAXV], need[MAXV] = {0}, parsed[MAXV] = {0}, k = 0;
+    snprintf(buf, sizeof buf, "%s", value);
+    for (char *tok = strtok_r(buf, ";", &save); tok && k < MAXV; tok = strtok_r(NULL, ";", &save), k++) snprintf(items[k], sizeof items[k], "%s", tok);
+    for (int t = 0; t < sc.ntypes; t++) for (int j = 0; j < sc.v[B(sc.types[t])].n; j++) parsed[sc.v[B(sc.types[t])].idx[j]] = 1;
+    nv = 0;
+    int total = 0;
+    for (int j = 0; j < k; j++) {
+        canon[j] = j;
+        for (int i = 0; i < j; i++) if (!strcmp(items[i], items[j])) { canon[j] = i; break; }
+        if (!parsed[j]) continue;
+        if (need[canon[j]]++ == 0) nv++;
+        total++;
+    }
+    if (total < 2) { printf("ok %zu\n", nres); return; }
     qsort(res, nres, sizeof *res, cmp_hit);
     // qual dos valores cada resultado é (o primeiro que casar)
     uint8_t *which = malloc(nres + 1);
@@ -510,15 +526,15 @@ static void cmd_group(const char *types, const char *value, const char *range) {
         const vset_t *v = &sc.v[B(res[i].type)];
         which[i] = 0xff;
         for (int j = 0; j < v->n; j++)
-            if (matches(B(res[i].type), (const unsigned char *)&res[i].old, &v->v[j])) { which[i] = v->idx[j]; break; }
+            if (matches(B(res[i].type), (const unsigned char *)&res[i].old, &v->v[j])) { which[i] = (uint8_t)canon[v->idx[j]]; break; }
     }
     // janela deslizante: para cada começo l vai até onde cabe; com todos os valores dentro, marca [l, r) por diferenças
     int cnt[MAXV] = {0}, have = 0;
     size_t r = 0;
     for (size_t l = 0; l < nres; l++) {
-        while (r < nres && res[r].addr - res[l].addr <= win) { if (which[r] < MAXV && cnt[which[r]]++ == 0) have++; r++; }
+        while (r < nres && res[r].addr - res[l].addr <= win) { if (which[r] < MAXV && ++cnt[which[r]] == need[which[r]]) have++; r++; }
         if (have == nv) { mark[l]++; mark[r]--; }
-        if (which[l] < MAXV && --cnt[which[l]] == 0) have--;
+        if (which[l] < MAXV && cnt[which[l]]-- == need[which[l]]) have--;
     }
     size_t n = 0;
     int on = 0;
