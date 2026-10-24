@@ -424,7 +424,7 @@ class Engine private constructor(private val app: Context) {
         addRecent(Recent(types, value.trim()))
         inFile = false
         step(true, value.trim(), n)
-        if (n == "0") "Nada encontrado. Dicas: use Auto; se o número da tela é arredondado (1.2K), busque uma faixa como 1150~1250; ou marque mais regiões em Ajustes."
+        if (n == "0") "Nada encontrado. Dicas: use Auto; se o número da tela é arredondado (1.2K), busque uma faixa como 1150~1250; ou marque mais regiões em Ajustes." + byName
         else "$n encontrados. Mude o valor no jogo e refine."
     }
 
@@ -434,7 +434,7 @@ class Engine private constructor(private val app: Context) {
         Session.canUndo = true
         step(false, value.trim(), n)
         when {
-            n == "0" -> "Nenhum restou. O valor pode ter mudado de novo antes do refino: toque em Desfazer e refine com o valor atual."
+            n == "0" -> "Nenhum restou. O valor pode ter mudado de novo antes do refino: toque em Desfazer e refine com o valor atual." + byName
             // refinar com o mesmo número não filtra nada: o valor precisa mudar no jogo antes
             n == before?.toString() -> "Continuam $n: nenhum mudou. Faça o valor mudar no jogo (gaste ou ganhe) e refine com o número novo."
             else -> "$n restantes."
@@ -464,7 +464,7 @@ class Engine private constructor(private val app: Context) {
         inFile = inFile && n.toLong() > 2_000_000
         step(false, COMPARE_NAMES.getValue(op) + if (value.isBlank()) "" else " $value", n)
         when {
-            n == "0" -> "Nenhum restou. Toque em Desfazer, ou comece de novo sem valor."
+            n == "0" -> "Nenhum restou. Toque em Desfazer, ou comece de novo sem valor." + byName
             n.toLong() > 2_000_000 -> "$n candidatos. Continue: mude o valor no jogo e compare de novo."
             // os que sobram não mudam com "não mudou": o valor precisa mudar no jogo antes
             n == before?.toString() && op == "same" -> "Continuam $n. \"Não mudou\" não tira mais nenhum: faça o valor mudar no jogo e toque em Aumentou ou Diminuiu."
@@ -472,6 +472,10 @@ class Engine private constructor(private val app: Context) {
             else -> "$n restantes."
         }
     }
+
+    // Unity IL2CPP: o valor pode estar guardado de outro jeito (casas decimais, número grande dividido); pelo nome sempre acha
+    private val byName get() = if (Session.engine?.il2cpp == true)
+        " Ou ache pelo nome: Memória → Ficha → Ver todas as classes do jogo, filtre por gold, coin, money ou o nome do recurso." else ""
 
     private fun step(new: Boolean, what: String, n: String) {
         steps = if (new) 1 else steps + 1

@@ -10,8 +10,8 @@ android {
         applicationId = "dev.tinker.app"
         minSdk = 26
         targetSdk = 37
-        versionCode = 44
-        versionName = "2.1.1"
+        versionCode = 45
+        versionName = "2.1.2"
         ndk { abiFilters += "arm64-v8a" }
     }
     // chave fixa: sem ela cada build do CI assina diferente e o Android não deixa atualizar por cima
