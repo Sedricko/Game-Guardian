@@ -11,11 +11,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Versões (temporário)
-        run: |
-          for g in androidx/activity/activity-compose; do
-            echo "$g $(curl -s https://dl.google.com/dl/android/maven2/$g/maven-metadata.xml | grep -o '<version>[0-9.]*</version>' | tail -3 | tr -d '\n')"
-          done
 
       - name: Testa o daemon
         run: sudo tests/daemon_test.sh
@@ -30,6 +25,8 @@ jobs:
         with:
           distribution: temurin
           java-version: 25
+          # bibliotecas ficam em cache: o build não depende dos servidores estarem no ar
+          cache: gradle
 
       - name: Gera o APK
         run: ./gradlew --no-daemon assembleDebug

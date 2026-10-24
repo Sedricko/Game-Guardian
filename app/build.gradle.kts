@@ -26,6 +26,5 @@ android {
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2026.09.00"))
     implementation("androidx.compose.material3:material3")
-    // shortcut: faixa até achar a última estável; fixar a versão no próximo commit
-    implementation("androidx.activity:activity-compose:[1.10,1.14.0-alpha01)")
+    implementation("androidx.activity:activity-compose:1.13.0")
 }
