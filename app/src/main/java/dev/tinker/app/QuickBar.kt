@@ -29,6 +29,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
@@ -56,6 +62,10 @@ fun QuickBar(engine: Engine, onDrag: (Float, Float) -> Unit, onKeyboard: (Boolea
     }
     Column(
         Modifier.widthIn(max = 440.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp))
+            // Voltar com o teclado já fechado: devolve as teclas para o jogo
+            .onPreviewKeyEvent { e ->
+                if (e.key == Key.Back && e.type == KeyEventType.KeyUp) { focus.clearFocus(); onKeyboard(false); true } else false
+            }
             .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)).padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -68,7 +78,9 @@ fun QuickBar(engine: Engine, onDrag: (Float, Float) -> Unit, onKeyboard: (Boolea
                 s.value, { s.value = it }, singleLine = true, placeholder = { Text("Valor") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
                 // pede o teclado no primeiro toque, antes do campo tentar pegar o foco
-                modifier = Modifier.weight(1f).pointerInput(Unit) { awaitEachGesture { awaitFirstDown(pass = PointerEventPass.Initial); onKeyboard(true) } },
+                modifier = Modifier.weight(1f).pointerInput(Unit) { awaitEachGesture { awaitFirstDown(pass = PointerEventPass.Initial); onKeyboard(true) } }
+                    // saiu do campo (tocou fora, fechou o teclado): o jogo volta a receber as teclas
+                    .onFocusChanged { if (!it.isFocused) onKeyboard(false) },
             )
             if (n > 0) FilledTonalButton(onClick = { act { engine.refine(s.value) } }, enabled = enabled && s.value.isNotBlank(), contentPadding = small) { Text("Refinar") }
             else Button(onClick = { act { engine.search(s.types, s.value) } }, enabled = enabled && s.value.isNotBlank(), contentPadding = small) { Text("Buscar") }
