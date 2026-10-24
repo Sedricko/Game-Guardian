@@ -7,21 +7,38 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.Drawable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
 import java.io.IOException
 
-val TYPES = listOf("i32" to "Dword", "f32" to "Float", "i64" to "Qword", "f64" to "Double", "i16" to "Word", "i8" to "Byte")
+val TYPES = listOf("auto" to "Auto", "i32" to "Dword", "f32" to "Float", "i64" to "Qword", "f64" to "Double", "i16" to "Word", "i8" to "Byte")
+val TYPE_NAMES = TYPES.toMap()
+
+val REGION_NAMES = mapOf(
+    "Jh" to "Java heap", "J" to "Java", "Ch" to "C++ heap", "Ca" to "C++ alloc", "Cd" to "C++ .data",
+    "Cb" to "C++ .bss", "A" to "Anônima", "S" to "Pilha", "As" to "Ashmem", "O" to "Outras", "V" to "Vídeo (pode travar o jogo)",
+)
 
 data class GameProcess(val pid: Int, val pkg: String, val label: String, val icon: ImageBitmap?)
-data class Hit(val addr: String, val value: String)
+data class Hit(val addr: String, val type: String, val region: String, val value: String)
+data class Region(val code: String, val count: Long, val bytes: Long, val enabled: Boolean)
+data class SavedItem(val addr: String, val type: String, val region: String, val value: String, val frozen: Boolean = false)
 
-/** Estado da tela; fica fora da Activity para sobreviver a rotação e troca de tema. */
+/** Estado da tela; fica fora da Activity para a janela flutuante e a Activity verem o mesmo. */
 object Session {
     var process by mutableStateOf<GameProcess?>(null)
     var type by mutableIntStateOf(0)
@@ -29,26 +46,76 @@ object Session {
     var status by mutableStateOf("Escolha o jogo para começar.")
     var count by mutableStateOf<Long?>(null)
     var results by mutableStateOf(listOf<Hit>())
+    var regions by mutableStateOf(listOf<Region>())
     var busy by mutableStateOf(false)
+    var paused by mutableStateOf(false)
+    var alpha by mutableFloatStateOf(0.92f)
+    val saved = mutableStateListOf<SavedItem>()
 }
 
-/** Ponte entre a tela e o daemon; tudo roda fora da thread de UI. */
-class Engine(private val app: Context) {
-    private var daemon: Daemon? = null
+/** Ponte entre a tela e o daemon; tudo roda fora da thread de UI. Uma instância por processo. */
+class Engine private constructor(private val app: Context) {
+    companion object {
+        @Volatile private var instance: Engine? = null
+        fun get(c: Context) = instance ?: synchronized(this) { instance ?: Engine(c.applicationContext).also { instance = it } }
+    }
 
-    private suspend fun <T> call(work: (Daemon) -> T): T = withContext(Dispatchers.IO) {
-        val d = daemon ?: Daemon(app.applicationInfo.nativeLibraryDir + "/libtinkerd.so").also { daemon = it }
+    private var daemon: Daemon? = null
+    private var closedPid = 0
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val savedFile = File(app.filesDir, "saved.json")
+
+    init {
+        loadSaved()
+        scope.launch { freezeLoop() }
+    }
+
+    private fun Daemon.send(command: String, quiet: Boolean = false): Daemon.Reply {
+        if (!quiet) Diag.add("> $command")
         try {
-            work(d)
+            val r = call(command)
+            if (!quiet) Diag.add("< ok ${r.status}".trimEnd())
+            return r
         } catch (e: IOException) {
-            if (e.message == "O daemon fechou.") daemon = null
+            Diag.add("< erro: ${e.message} (comando: $command)")
             throw e
         }
     }
 
+    private suspend fun <T> call(work: (Daemon) -> T): T = withContext(Dispatchers.IO) {
+        val d = daemon ?: try {
+            Daemon(app.applicationInfo.nativeLibraryDir + "/libtinkerd.so").also { daemon = it; Diag.add("Daemon iniciado com root") }
+        } catch (e: IOException) {
+            Diag.add("Falha ao iniciar o daemon: ${e.message}")
+            throw e
+        }
+        try {
+            work(d)
+        } catch (e: IOException) {
+            if (e.message == "O daemon fechou.") daemon = null
+            if (e.message == "o jogo fechou") gameClosed(d)
+            throw e
+        }
+    }
+
+    /** Guarda no registro o motivo da queda, uma vez por jogo. */
+    private fun gameClosed(d: Daemon) {
+        val p = Session.process ?: return
+        if (closedPid == p.pid) return
+        closedPid = p.pid
+        Session.paused = false
+        Session.saved.replaceAll { it.copy(frozen = false) }
+        Session.status = "O jogo fechou. Veja a aba Registro para o motivo."
+        Diag.add("=== O jogo ${p.label} (PID ${p.pid}) fechou. Falhas registradas pelo Android: ===")
+        runCatching { d.call("crashlog").lines.forEach { Diag.add(it.removePrefix("| ")) } }
+        Diag.add("=== Últimas linhas do logcat do jogo ===")
+        runCatching { d.call("logs").lines.forEach { Diag.add(it.removePrefix("| ")) } }
+        Diag.add("=== Fim do relatório da queda ===")
+    }
+
     suspend fun apps(): List<GameProcess> = call { d ->
         val pm = app.packageManager
-        d.call("ps").lines.mapNotNull { line ->
+        d.send("ps", quiet = true).lines.mapNotNull { line ->
             val pid = line.substringBefore(' ').toIntOrNull() ?: return@mapNotNull null
             val pkg = line.substringAfter(' ')
             // só o processo principal de apps instalados pelo usuário
@@ -64,29 +131,141 @@ class Engine(private val app: Context) {
     }
 
     suspend fun attach(p: GameProcess): String = call { d ->
-        d.call("attach ${p.pid}")
+        Diag.add("Jogo escolhido: ${p.label} (${p.pkg}, PID ${p.pid})")
+        d.send("attach ${p.pid}")
+        Session.process = p
+        Session.paused = false
         "Pronto. Digite um valor que você vê no jogo e toque em Nova busca."
     }
 
     suspend fun search(type: Int, value: String): String = call { d ->
-        "${d.call("search ${TYPES[type].first} ${value.ifBlank { "x" }}").status} encontrados. Mude o valor no jogo e refine."
+        "${d.send("search ${TYPES[type].first} ${value.arg()}").status} encontrados. Mude o valor no jogo e refine."
     }
 
-    suspend fun refine(value: String): String = call { d -> "${d.call("refine ${value.ifBlank { "x" }}").status} restantes." }
+    suspend fun refine(value: String): String = call { d -> "${d.send("refine ${value.arg()}").status} restantes." }
 
-    suspend fun write(addr: String, value: String): String = call { d -> d.call("write $addr ${value.ifBlank { "x" }}"); "Valor alterado." }
+    suspend fun write(addr: String, type: String, value: String): String = call { d ->
+        d.send("write $addr $type ${value.arg()}")
+        "Valor alterado."
+    }
 
     suspend fun writeAll(value: String): String = call { d ->
-        val (ok, fail) = d.call("writeall ${value.ifBlank { "x" }}").status.split(" ")
-        if (fail == "0") "$ok valores alterados." else "$ok alterados, $fail falharam."
+        val (ok, fail) = d.send("writeall ${value.arg()}").status.split(" ")
+        if (fail == "0") "$ok valores alterados." else "$ok alterados, $fail não couberam no tipo ou falharam."
     }
 
     suspend fun list(): Pair<Long?, List<Hit>> = call { d ->
         if (!d.isAttached) return@call null to emptyList()
-        val r = d.call("list 200")
-        r.status.toLongOrNull() to r.lines.map { Hit(it.substringBefore(' '), it.substringAfter(' ')) }
+        val r = d.send("list 200", quiet = true)
+        r.status.toLongOrNull() to r.lines.map {
+            val f = it.split(" ", limit = 4)
+            Hit(f[0], f[1], f[2], f[3])
+        }
+    }
+
+    suspend fun regions(): List<Region> = call { d ->
+        d.send("regions", quiet = true).lines.map {
+            val f = it.split(" ")
+            Region(f[0], f[1].toLong(), f[2].toLong(), f[3] == "1")
+        }
+    }
+
+    suspend fun setRegion(code: String, enabled: Boolean): List<Region> = call { d ->
+        val on = Session.regions.filter { if (it.code == code) enabled else it.enabled }.map { it.code }
+        d.send("ranges ${on.joinToString(",")}")
+        Session.regions.map { if (it.code == code) it.copy(enabled = enabled) else it }
+    }
+
+    suspend fun pause(): String = call { d -> d.send("pause"); Session.paused = true; "Jogo pausado." }
+    suspend fun resume(): String = call { d -> d.send("resume"); Session.paused = false; "Jogo continuando." }
+    suspend fun killGame(): String = call { d ->
+        d.send("kill")
+        closedPid = Session.process?.pid ?: 0  // fechado de propósito: não é queda
+        Session.paused = false
+        "Jogo fechado."
+    }
+
+    suspend fun crashLog() = call { d ->
+        Diag.add("=== Falhas registradas pelo Android (buffer crash) ===")
+        d.send("crashlog", quiet = true).lines.forEach { Diag.add(it.removePrefix("| ")) }
+        Diag.add("=== Fim ===")
+    }
+
+    suspend fun gameLog() = call { d ->
+        Diag.add("=== Logcat do jogo ===")
+        d.send("logs", quiet = true).lines.forEach { Diag.add(it.removePrefix("| ")) }
+        Diag.add("=== Fim ===")
+    }
+
+    // Lista de salvos
+
+    fun addSaved(hit: Hit) {
+        if (Session.saved.none { it.addr == hit.addr && it.type == hit.type }) Session.saved.add(SavedItem(hit.addr, hit.type, hit.region, hit.value))
+        storeSaved()
+    }
+
+    fun removeSaved(item: SavedItem) {
+        Session.saved.remove(item)
+        storeSaved()
+    }
+
+    suspend fun setSaved(item: SavedItem, value: String) {
+        write(item.addr, item.type, value)
+        replace(item) { it.copy(value = value) }
+    }
+
+    fun setFrozen(item: SavedItem, frozen: Boolean) {
+        Diag.add("${if (frozen) "Congelado" else "Descongelado"}: 0x${item.addr} = ${item.value}")
+        replace(item) { it.copy(frozen = frozen) }
+    }
+
+    suspend fun refreshSaved() = call { d ->
+        if (!d.isAttached) return@call
+        Session.saved.toList().forEach { item ->
+            if (item.frozen) return@forEach
+            val v = runCatching { d.send("read ${item.addr} ${item.type}", quiet = true).status }.getOrDefault("?")
+            if (v != item.value) replace(item) { it.copy(value = v) }
+        }
+    }
+
+    private fun replace(item: SavedItem, change: (SavedItem) -> SavedItem) {
+        val i = Session.saved.indexOfFirst { it.addr == item.addr && it.type == item.type }
+        if (i >= 0) Session.saved[i] = change(Session.saved[i])
+        storeSaved()
+    }
+
+    // Congelar = reescrever o valor a cada 200 ms, como o GameGuardian.
+    private suspend fun freezeLoop() {
+        while (true) {
+            delay(200)
+            val frozen = Session.saved.filter { it.frozen }
+            val d = daemon
+            if (frozen.isEmpty() || d == null || !d.isAttached) continue
+            try {
+                frozen.forEach { d.send("write ${it.addr} ${it.type} ${it.value}", quiet = true) }
+            } catch (e: IOException) {
+                if (e.message == "o jogo fechou") gameClosed(d)
+            }
+        }
+    }
+
+    private fun loadSaved() = runCatching {
+        if (!savedFile.exists()) return@runCatching
+        val a = JSONArray(savedFile.readText())
+        for (i in 0 until a.length()) {
+            val o = a.getJSONObject(i)
+            Session.saved.add(SavedItem(o.getString("addr"), o.getString("type"), o.getString("region"), o.getString("value")))
+        }
+    }
+
+    private fun storeSaved() = runCatching {
+        val a = JSONArray()
+        Session.saved.forEach { a.put(JSONObject().put("addr", it.addr).put("type", it.type).put("region", it.region).put("value", it.value)) }
+        savedFile.writeText(a.toString())
     }
 }
+
+private fun String.arg() = trim().ifBlank { "x" }
 
 private fun Drawable.toImageBitmap(): ImageBitmap {
     val bitmap = Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888)
