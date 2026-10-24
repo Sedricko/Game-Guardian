@@ -167,7 +167,7 @@ object Session {
     var busy by mutableStateOf(false)
     var paused by mutableStateOf(false)
     var alpha by mutableFloatStateOf(0.92f)
-    var panelSize by mutableIntStateOf(1)  // índice em PANEL_SIZES
+    var panelSize by mutableIntStateOf(2)  // índice em PANEL_SIZES; padrão: tela cheia
     var peek by mutableStateOf(false)
     var autoPause by mutableStateOf(true)
     var findEncrypted by mutableStateOf(true)
@@ -226,7 +226,7 @@ class Engine private constructor(private val app: Context) {
     fun saveSettings() {
         prefs.edit().putBoolean("autoPause", Session.autoPause).putBoolean("findEncrypted", Session.findEncrypted)
             .putBoolean("autoPointers", Session.autoPointers).putBoolean("gameLibsOnly", Session.gameLibsOnly)
-            .putBoolean("autoOverlay", Session.autoOverlay).putBoolean("ownKeypad", Session.ownKeypad).putFloat("alpha", Session.alpha).putInt("panelSize", Session.panelSize)
+            .putBoolean("autoOverlay", Session.autoOverlay).putBoolean("ownKeypad", Session.ownKeypad).putFloat("alpha", Session.alpha).putInt("panelSize2", Session.panelSize)
             .putString("aiKey", Session.aiKey).putString("aiProvider", Session.aiProvider).putString("geminiKey", Session.geminiKey)
             .putString("geminiModel", Session.geminiModel).apply()
     }
@@ -246,7 +246,7 @@ class Engine private constructor(private val app: Context) {
         Session.geminiKey = prefs.getString("geminiKey", "").orEmpty()
         Session.geminiModel = prefs.getString("geminiModel", Session.geminiModel).orEmpty().ifBlank { "gemini-2.5-flash" }
         Session.alpha = prefs.getFloat("alpha", Session.alpha)
-        Session.panelSize = prefs.getInt("panelSize", Session.panelSize).coerceIn(0, PANEL_SIZES.lastIndex)
+        Session.panelSize = prefs.getInt("panelSize2", Session.panelSize).coerceIn(0, PANEL_SIZES.lastIndex)  // chave nova: quem já usava volta uma vez para tela cheia, o novo padrão
         loadSaved()
         loadHistory()
         scope.launch { freezeLoop() }
