@@ -195,10 +195,15 @@ class Engine private constructor(private val app: Context) {
     }
 
     suspend fun refine(value: String): String = call { d ->
+        val before = Session.count
         val n = d.frozenGame { d.send("refine ${value.arg()}") }.status
         Session.canUndo = true
-        if (n == "0") "Nenhum restou. O valor pode ter mudado de novo antes do refino: toque em Desfazer e refine com o valor atual."
-        else "$n restantes."
+        when {
+            n == "0" -> "Nenhum restou. O valor pode ter mudado de novo antes do refino: toque em Desfazer e refine com o valor atual."
+            // refinar com o mesmo número não filtra nada: o valor precisa mudar no jogo antes
+            n == before?.toString() -> "Continuam $n: nenhum mudou. Faça o valor mudar no jogo (gaste ou ganhe) e refine com o número novo."
+            else -> "$n restantes."
+        }
     }
 
     /** Volta ao resultado de antes do último refino; tocar de novo refaz. */
