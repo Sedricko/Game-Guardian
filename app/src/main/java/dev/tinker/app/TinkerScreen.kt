@@ -424,6 +424,7 @@ private fun PointerPanel(engine: Engine, item: SavedItem, run: (suspend () -> St
     val s = Session
     var maxOff by remember { mutableStateOf("4096") }
     var levels by remember { mutableStateOf("4") }
+    var now by remember { mutableStateOf("") }
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -447,6 +448,16 @@ private fun PointerPanel(engine: Engine, item: SavedItem, run: (suspend () -> St
             // a lista é de outra vez do jogo (outro endereço): filtra pelo endereço novo do mesmo valor
             if (s.pointers.isNotEmpty() && s.pointersFor != item.addr) {
                 OutlinedButton(onClick = { run { engine.filterPointers(item.addr) } }, enabled = !s.busy && s.process != null) { Text("Filtrar ${s.pointers.size} por este endereço") }
+            }
+        }
+        if (s.pointers.isNotEmpty()) {
+            // depois de reiniciar o jogo: não precisa buscar o valor de novo, só dizer quanto ele vale agora
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(now, { now = it }, label = { Text("Valor agora no jogo") }, singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii), modifier = Modifier.weight(1f))
+                FilledTonalButton(onClick = { run { engine.filterPointersByValue(item.type, now) } }, enabled = !s.busy && s.process != null && now.isNotBlank()) {
+                    Text("Filtrar pelo valor")
+                }
             }
         }
         if (s.pointerInfo.isNotEmpty()) Text(s.pointerInfo, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -856,8 +867,8 @@ private val HELP = listOf(
         "Faça a barra mudar e toque em Aumentou ou Diminuiu; sem mudar nada, toque em Não mudou. Repita até sobrar pouco. " +
         "Com um número no campo dá para dizer quanto mudou (Diminuiu 10).",
     "Endereços mudaram" to "Quando o jogo reinicia, os endereços mudam. Para um salvo continuar valendo, use um ponteiro (abaixo).",
-    "Ponteiros" to "Como no Cheat Engine. 1. Abra o salvo e toque em Buscar ponteiros. 2. Feche e abra o jogo, ache o mesmo valor de novo " +
-        "e salve. 3. Nesse novo salvo, toque em Filtrar: ficam só os caminhos que continuam certos. 4. Toque em Usar. " +
+    "Ponteiros" to "Como no Cheat Engine. 1. Abra o salvo e toque em Buscar ponteiros. 2. Feche e abra o jogo e abra o mesmo salvo. " +
+        "3. Digite o valor que o jogo mostra agora e toque em Filtrar pelo valor (repita mudando o valor se sobrar muitos). 4. Toque em Usar. " +
         "Daí em diante o Tinker acha o endereço sozinho toda vez que o jogo abrir. Sem resultado? Aumente os níveis ou a distância.",
     "Reportar um problema" to "Na aba Registro, toque em Compartilhar relatório e envie o arquivo .txt. Ele tem tudo que é preciso para investigar.",
 )

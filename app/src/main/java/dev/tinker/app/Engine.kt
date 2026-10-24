@@ -284,7 +284,7 @@ class Engine private constructor(private val app: Context) {
         Session.pointerInfo = when {
             r.lines.isEmpty() -> "Nenhum caminho. Tente mais níveis ou uma distância maior."
             else -> "$n caminhos${if (limited) " (há mais; mostrando os melhores)" else ""}. Para achar o certo: feche e abra o jogo, " +
-                "ache o valor de novo, salve e toque em \"Filtrar\" nesse salvo."
+                "abra este salvo, digite o valor que aparece agora e toque em Filtrar pelo valor."
         }
         Session.pointerInfo
     }
@@ -299,6 +299,24 @@ class Engine private constructor(private val app: Context) {
         Diag.add("Ponteiros filtrados por 0x$addr: ${Session.pointers.size} de $before")
         Session.pointerInfo = if (Session.pointers.isEmpty()) "Nenhum caminho continuou certo. Busque ponteiros de novo com mais níveis."
         else "${Session.pointers.size} de $before continuam certos. Toque em Usar num deles (o primeiro costuma ser o melhor)."
+        Session.pointerInfo
+    }
+
+    /** Depois de reiniciar, sem buscar de novo: fica quem chega num endereço com o valor que o jogo mostra agora. */
+    suspend fun filterPointersByValue(type: String, values: String): String = call { d ->
+        val wanted = parseValues(values)
+        val before = Session.pointers.size
+        Session.pointers = Session.pointers.filter { c ->
+            val a = runCatching { d.send("resolve $c", quiet = true).status }.getOrNull() ?: return@filter false
+            matchesAny(runCatching { d.send("read $a $type", quiet = true).status }.getOrDefault("?"), type, wanted)
+        }
+        storePointers()
+        Diag.add("Ponteiros filtrados pelo valor $values (${TYPE_NAMES[type]}): ${Session.pointers.size} de $before")
+        Session.pointerInfo = when {
+            Session.pointers.isEmpty() -> "Nenhum caminho chega nesse valor. Confira o número, ou busque ponteiros de novo com mais níveis."
+            Session.pointers.size > 3 -> "${Session.pointers.size} de $before chegam nesse valor. Mude o valor no jogo e filtre de novo."
+            else -> "${Session.pointers.size} de $before chegam nesse valor. Toque em Usar."
+        }
         Session.pointerInfo
     }
 

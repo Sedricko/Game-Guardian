@@ -60,9 +60,11 @@ Quando o jogo reinicia, os endereços mudam. Um ponteiro é um caminho fixo até
 por exemplo `[[libil2cpp.so+1A2B30]+18]+40`, que o Tinker segue sozinho toda vez.
 
 1. Na aba **Salvos**, abra o valor e toque em **Buscar ponteiros**.
-2. Feche e abra o jogo, ache o mesmo valor de novo e salve.
-3. Nesse novo salvo, toque em **Filtrar por este endereço**: ficam só os caminhos certos.
+2. Feche e abra o jogo e abra o mesmo salvo.
+3. Digite o valor que o jogo mostra agora e toque em **Filtrar pelo valor**. Sobrou muito? Mude o valor no jogo e filtre de novo.
 4. Toque em **Usar**. O salvo passa a mostrar 🔗 e vale em todas as próximas vezes.
+
+Também dá para achar o valor de novo, salvar e tocar em **Filtrar por este endereço** no novo salvo.
 
 Sem resultado? Aumente **Níveis** (até 7) ou **Distância máx.** Jogos 32 bits são reconhecidos sozinhos.
 
