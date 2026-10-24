@@ -65,6 +65,12 @@ auto=$(printf 'attach %s\nsearch auto 555\nlist 10\n' "$pid" | "$out/tinkerd")
 echo "$auto"
 grep -qx "ok 1" <<<"$auto" && grep -qE " i32 (Ch|A) 555$" <<<"$auto" || { echo "FALHOU: Auto duplicou o endereço"; exit 1; }
 
+# Vários valores com ";": acha os dois, refina para um; um item que não é inteiro invalida o Dword
+multi=$(printf 'attach %s\nsearch i32 555;987654321\nrefine 555\nsearch i32 555;1.5\n' "$pid" | "$out/tinkerd")
+echo "$multi"
+[ "$(sed -n 3p <<<"$multi")" = "ok 2" ] && [ "$(sed -n 4p <<<"$multi")" = "ok 1" ] && grep -qx "err valor inválido: 555;1.5" <<<"$multi" \
+    || { echo "FALHOU: vários valores"; exit 1; }
+
 # Desfazer: faixa acha vários, refino diminui, desfazer volta exatamente ao anterior
 und=$(printf 'attach %s\nsearch i32 0~1000\nrefine 555\nundo\nundo\n' "$pid" | "$out/tinkerd" | grep '^ok [0-9]')
 echo "$und"

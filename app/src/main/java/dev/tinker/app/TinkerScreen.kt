@@ -14,6 +14,8 @@ import androidx.core.content.FileProvider
 import java.io.File
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
@@ -26,6 +28,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -46,11 +49,9 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -97,7 +98,8 @@ fun TinkerPanel(engine: Engine, overlay: Boolean, onMinimize: () -> Unit = {}, o
                 s.count = count
                 s.results = hits
             } catch (e: Exception) {
-                error = e.message ?: "Erro desconhecido"
+                val msg = e.message ?: "Erro desconhecido"
+                error = if (msg.startsWith("valor inválido")) "$msg. Use um número (20000 ou 20.000), uma faixa (100~200) ou vários com ; (20000;50000)." else msg
             } finally {
                 s.busy = false
             }
@@ -115,11 +117,7 @@ fun TinkerPanel(engine: Engine, overlay: Boolean, onMinimize: () -> Unit = {}, o
                     run { engine.attach(p) }
                 }
             } else {
-                PrimaryTabRow(selectedTabIndex = s.tab, containerColor = MaterialTheme.colorScheme.background) {
-                    TABS.forEachIndexed { i, title ->
-                        Tab(selected = s.tab == i, onClick = { s.tab = i }, text = { Text(title, style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false) })
-                    }
-                }
+                TabBar()
                 when (s.tab) {
                     0 -> SearchTab(engine, run)
                     1 -> SavedTab(engine, overlay, onMinimize, run)
@@ -128,6 +126,40 @@ fun TinkerPanel(engine: Engine, overlay: Boolean, onMinimize: () -> Unit = {}, o
                     else -> SettingsTab(engine, overlay, onResize, run) { error = it }
                 }
             }
+        }
+    }
+}
+
+/** Abas do Tinker: o Tab do Material tem padding fixo e cortava "Memória" e "Registro" em telas estreitas. */
+@Composable
+private fun TabBar() {
+    val s = Session
+    val primary = MaterialTheme.colorScheme.primary
+    Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+        TABS.forEachIndexed { i, title ->
+            val on = s.tab == i
+            Box(
+                Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable { s.tab = i }.padding(vertical = 10.dp, horizontal = 2.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                BasicText(
+                    title,
+                    maxLines = 1,
+                    softWrap = false,
+                    autoSize = TextAutoSize.StepBased(minFontSize = 9.sp, maxFontSize = 14.sp),
+                    style = MaterialTheme.typography.labelLarge.copy(
+                        color = if (on) primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = if (on) FontWeight.Bold else FontWeight.Normal,
+                    ),
+                )
+            }
+        }
+    }
+    // indicador da aba ativa
+    Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+        TABS.indices.forEach { i ->
+            Box(Modifier.weight(1f).padding(horizontal = 14.dp).fillMaxWidth().height(3.dp)
+                .background(if (s.tab == i) primary else MaterialTheme.colorScheme.background, RoundedCornerShape(2.dp)))
         }
     }
 }

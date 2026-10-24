@@ -99,6 +99,28 @@ static int parse_one(int t, const char *s, value_t *v) {
     return end != s && (*end == 0 || *end == '\n');
 }
 
+// Vários valores/faixas separados por ";" (ex.: 20000;50000 ou 100;200~300): casa se qualquer um casar.
+#define MAXV 16
+typedef struct { value_t v[MAXV]; int n; } vset_t;
+
+static int matches(int t, const unsigned char *p, const value_t *v);
+
+static int parse_set(int t, const char *s, vset_t *set) {
+    char buf[256], *save = NULL;
+    snprintf(buf, sizeof buf, "%s", s);
+    set->n = 0;
+    for (char *tok = strtok_r(buf, ";", &save); tok; tok = strtok_r(NULL, ";", &save)) {
+        if (set->n == MAXV || !parse_value(t, tok, &set->v[set->n])) return 0;  // um item que não serve no tipo exclui o tipo
+        set->n++;
+    }
+    return set->n > 0;
+}
+
+static int matches_set(int t, const unsigned char *p, const vset_t *set) {
+    for (int i = 0; i < set->n; i++) if (matches(t, p, &set->v[i])) return 1;
+    return 0;
+}
+
 static int matches(int t, const unsigned char *p, const value_t *v) {
     if (v->range) {
         if (t == T_F32) { float x; memcpy(&x, p, 4); return x >= v->lo && x <= v->hi; }
@@ -212,7 +234,7 @@ static int set_ranges(const char *list) {
     return 1;
 }
 
-typedef struct { int types[NTYPES], ntypes, step; value_t v[NTYPES]; unsigned char *buf; } scan_t;
+typedef struct { int types[NTYPES], ntypes, step; vset_t v[NTYPES]; unsigned char *buf; } scan_t;
 
 static void scan_region(uint64_t s, uint64_t e, int region, void *ctx) {
     scan_t *sc = ctx;
@@ -227,7 +249,7 @@ static void scan_region(uint64_t s, uint64_t e, int region, void *ctx) {
             for (int k = 0; k < sc->ntypes; k++) {
                 int t = sc->types[k], sz = TYPES[t].size;
                 if (i % sz || i + sz > n) continue;
-                if (matches(t, sc->buf + i, &sc->v[t])) { push(a + i, t, region); break; }
+                if (matches_set(t, sc->buf + i, &sc->v[t])) { push(a + i, t, region); break; }
             }
     }
 }
@@ -240,7 +262,7 @@ static void cmd_search(const char *tname, const char *value) {
     for (char *tok = strtok_r(list, ",", &save); tok; tok = strtok_r(NULL, ",", &save)) {
         int t = find_type(tok);
         if (t < 0) { printf("err tipo inválido: %s\n", tok); return; }
-        if (!parse_value(t, value, &sc.v[t])) continue;  // ex.: 1.5 não entra como Dword
+        if (!parse_set(t, value, &sc.v[t])) continue;  // ex.: 1.5 não entra como Dword
         // menores primeiro: no mesmo endereço ganha o tipo menor, que não invade bytes vizinhos
         int k = sc.ntypes++;
         while (k > 0 && TYPES[sc.types[k - 1]].size > TYPES[t].size) { sc.types[k] = sc.types[k - 1]; k--; }
@@ -259,9 +281,9 @@ static void cmd_search(const char *tname, const char *value) {
 }
 
 static void cmd_refine(const char *value) {
-    value_t v[NTYPES];
+    vset_t v[NTYPES];
     int ok[NTYPES];
-    for (int t = 0; t < NTYPES; t++) ok[t] = parse_value(t, value, &v[t]);
+    for (int t = 0; t < NTYPES; t++) ok[t] = parse_set(t, value, &v[t]);
     if (nres > capprev) {
         capprev = nres;
         prev = realloc(prev, capprev * sizeof *prev);
@@ -274,7 +296,7 @@ static void cmd_refine(const char *value) {
     unsigned char b[8];
     for (size_t i = 0; i < nres; i++) {
         int t = res[i].type;
-        if (ok[t] && !read_mem(res[i].addr, b, TYPES[t].size) && matches(t, b, &v[t])) res[k++] = res[i];
+        if (ok[t] && !read_mem(res[i].addr, b, TYPES[t].size) && matches_set(t, b, &v[t])) res[k++] = res[i];
     }
     nres = k;
     printf("ok %zu\n", nres);

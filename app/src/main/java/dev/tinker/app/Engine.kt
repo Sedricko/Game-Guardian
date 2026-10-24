@@ -279,7 +279,8 @@ class Engine private constructor(private val app: Context) {
             val log = Diag.export().lines()
             val problems = log.filter { l ->
                 val msg = l.substringAfter(' ').substringAfter(' ')  // tira data e hora do registro
-                !msg.startsWith("===") && !LOGCAT_PREFIX.containsMatchIn(msg) && PROBLEM_WORDS.any { msg.contains(it, ignoreCase = true) }
+                // linhas com "| " vêm do logcat (do jogo ou do Android), não são problemas do Tinker
+                !msg.startsWith("===") && !msg.startsWith("|") && PROBLEM_WORDS.any { msg.contains(it, ignoreCase = true) }
             }
             appendLine()
             appendLine("=== Resumo de problemas (${problems.size}) ===")
@@ -485,7 +486,24 @@ class Engine private constructor(private val app: Context) {
     }
 }
 
-private fun String.arg() = trim().ifBlank { "x" }
+private fun String.arg() = normalizeNumbers(this).ifBlank { "x" }
+
+/**
+ * Aceita números como o jogo mostra: "20.000" é 20000 e "1,5" é 1.5 (padrão brasileiro).
+ * Vários valores vão separados por ";" e faixas por "~"; espaços somem.
+ */
+internal fun normalizeNumbers(input: String): String =
+    input.split(';').map { part ->
+        part.split('~').joinToString("~") { n ->
+            val x = n.replace(" ", "").trim()
+            when {
+                '.' in x && ',' in x -> x.replace(".", "").replace(',', '.')  // 1.234,5
+                Regex("""-?\d{1,3}(\.\d{3})+""").matches(x) -> x.replace(".", "")  // 20.000
+                ',' in x -> x.replace(',', '.')  // 1,5
+                else -> x
+            }
+        }
+    }.filter { it.isNotEmpty() }.joinToString(";")
 
 private fun SavedItem.toJson() = JSONObject().put("addr", addr).put("type", type).put("region", region).put("value", value).put("name", name).put("frozen", frozen)
 
@@ -499,7 +517,7 @@ private fun JSONObject.toSaved(): SavedItem {
 
 /** "50;75" ou "100~200" ou misturado ("50;100~200"); cada item vira uma faixa (um número é a faixa dele mesmo). */
 internal fun parseValues(values: String): List<ClosedFloatingPointRange<Double>> =
-    values.split(';', ',', ' ').mapNotNull { part ->
+    normalizeNumbers(values).split(';').mapNotNull { part ->
         val p = part.trim()
         if ('~' in p) {
             val a = p.substringBefore('~').trim().toDoubleOrNull() ?: return@mapNotNull null
@@ -522,7 +540,7 @@ private val LOGCAT_PREFIX = Regex("""^\S+ \S+\s+\d+\s+\d+ """)
 /** Tira o "| " do protocolo e corta linhas repetidas (ex.: o SDK de anúncios do jogo tentando conectar sem parar). */
 private fun dedupe(lines: List<String>): List<String> {
     val seen = HashSet<String>()
-    val out = lines.map { it.removePrefix("| ") }.filter { seen.add(it.replace(LOGCAT_PREFIX, "")) }
+    val out = lines.map { "| " + it.removePrefix("| ") }.filter { seen.add(it.removePrefix("| ").replace(LOGCAT_PREFIX, "")) }
     return if (out.size < lines.size) out + "(${lines.size - out.size} linhas repetidas omitidas)" else out
 }
 
