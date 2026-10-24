@@ -54,6 +54,7 @@ object Session {
     var alpha by mutableFloatStateOf(0.92f)
     var panelSize by mutableIntStateOf(1)  // índice em PANEL_SIZES
     var peek by mutableStateOf(false)
+    var autoPause by mutableStateOf(true)  // pausa o jogo durante busca/refino, para o valor não mudar no meio
     var view by mutableStateOf<Pair<String, String>?>(null)  // visualizador de memória: endereço e tipo  // segurando o "olho": painel quase invisível
     val saved = mutableStateListOf<SavedItem>()
 }
@@ -157,13 +158,24 @@ class Engine private constructor(private val app: Context) {
         "Pronto. Digite um valor que você vê no jogo e toque em Nova busca."
     }
 
+    /** Roda work com o jogo pausado (se a opção estiver ligada) e sempre continua o jogo depois. */
+    private fun <T> Daemon.frozenGame(work: () -> T): T {
+        val auto = Session.autoPause && !Session.paused
+        if (auto) send("pause", quiet = true)
+        try {
+            return work()
+        } finally {
+            if (auto) runCatching { send("resume", quiet = true) }
+        }
+    }
+
     /** types vazio = Auto. */
     suspend fun search(types: Set<String>, value: String): String = call { d ->
         val list = TYPES.map { it.first }.filter { it in types }.joinToString(",").ifEmpty { "auto" }
-        "${d.send("search $list ${value.arg()}").status} encontrados. Mude o valor no jogo e refine."
+        "${d.frozenGame { d.send("search $list ${value.arg()}") }.status} encontrados. Mude o valor no jogo e refine."
     }
 
-    suspend fun refine(value: String): String = call { d -> "${d.send("refine ${value.arg()}").status} restantes." }
+    suspend fun refine(value: String): String = call { d -> "${d.frozenGame { d.send("refine ${value.arg()}") }.status} restantes." }
 
     suspend fun write(addr: String, type: String, value: String): String = call { d ->
         d.send("write $addr $type ${value.arg()}")
@@ -266,22 +278,30 @@ class Engine private constructor(private val app: Context) {
      * no tipo dado. Ex.: achou o ouro, procura a prata ali do lado.
      */
     suspend fun searchNear(addr: String, type: String, radius: Int, values: String): List<Hit> = call { d ->
-        val wanted = values.split(';', ',', ' ').mapNotNull { it.trim().toDoubleOrNull() }
-        require(wanted.isNotEmpty()) { "Digite um ou mais valores, separados por ;" }
+        val wanted = parseValues(values)
         val size = TYPE_SIZES.getValue(type)
         val r = radius.coerceIn(1, 10000)
         val center = addr.toLong(16) / size * size
         val start = (center - r.toLong() * size).coerceAtLeast(0)
-        val float = type.startsWith("f")
-        val hits = d.send("dump ${start.toString(16)} $type ${2 * r + 1}", quiet = true).lines.mapNotNull {
+        val hits = d.frozenGame { d.send("dump ${start.toString(16)} $type ${2 * r + 1}", quiet = true) }.lines.mapNotNull {
             val (a, v) = it.split(" ", limit = 2)
-            val x = v.toDoubleOrNull() ?: return@mapNotNull null
-            // float guardado nunca é exato: 1.1 digitado vira 1.10000002 na memória
-            val ok = wanted.any { w -> if (float) kotlin.math.abs(x - w) <= 1e-4 * maxOf(1.0, kotlin.math.abs(w)) else x == w }
-            if (ok && a.toLong(16) != center) Hit(a, type, "", v) else null
+            if (matchesAny(v, type, wanted) && a.toLong(16) != center) Hit(a, type, "", v) else null
         }
         Diag.add("Busca perto de 0x$addr (±$r ${TYPE_NAMES[type]}): $values → ${hits.size} achados")
         hits
+    }
+
+    /** Refino da busca perto: o valor mudou no jogo, fica só quem tem o valor novo. */
+    suspend fun refineNear(hits: List<Hit>, values: String): List<Hit> = call { d ->
+        val wanted = parseValues(values)
+        val kept = d.frozenGame {
+            hits.mapNotNull { h ->
+                val v = runCatching { d.send("read ${h.addr} ${h.type}", quiet = true).status }.getOrNull() ?: return@mapNotNull null
+                if (matchesAny(v, h.type, wanted)) h.copy(value = v) else null
+            }
+        }
+        Diag.add("Refino perto: $values → ${kept.size} de ${hits.size}")
+        kept
     }
 
     /** "Pegar Double e salvar em Float": muda o tipo de um salvo, mesmo endereço. */
@@ -374,6 +394,16 @@ class Engine private constructor(private val app: Context) {
 }
 
 private fun String.arg() = trim().ifBlank { "x" }
+
+private fun parseValues(values: String): List<Double> =
+    values.split(';', ',', ' ').mapNotNull { it.trim().toDoubleOrNull() }
+        .also { require(it.isNotEmpty()) { "Digite um ou mais valores, separados por ;" } }
+
+private fun matchesAny(value: String, type: String, wanted: List<Double>): Boolean {
+    val x = value.toDoubleOrNull() ?: return false
+    // float guardado nunca é exato: 1.1 digitado vira 1.10000002 na memória
+    return wanted.any { w -> if (type.startsWith("f")) kotlin.math.abs(x - w) <= 1e-4 * maxOf(1.0, kotlin.math.abs(w)) else x == w }
+}
 
 private val LOGCAT_PREFIX = Regex("""^\S+ \S+\s+\d+\s+\d+ """)
 

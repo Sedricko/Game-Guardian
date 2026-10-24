@@ -298,6 +298,10 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                     ) { Text("Refinar") }
                 }
                 Text(s.status, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Pausar o jogo durante a busca", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                    Switch(checked = s.autoPause, onCheckedChange = { s.autoPause = it })
+                }
                 TextButton(onClick = { s.view = "0" to "i32" }, enabled = s.process != null) { Text("Ir para endereço…") }
             }
         }
@@ -561,6 +565,10 @@ private fun NearSearch(engine: Engine, center: String, type: String, onError: (S
                         .onFailure { onError(it.message ?: "Erro") }
                 }
             }, enabled = values.isNotBlank()) { Text("Buscar ${TYPE_NAMES[type]}") }
+            if (!found.isNullOrEmpty()) FilledTonalButton(onClick = {
+                // o valor mudou no jogo: digite o novo e a lista diminui
+                scope.launch { runCatching { found = engine.refineNear(found.orEmpty(), values) }.onFailure { onError(it.message ?: "Erro") } }
+            }, enabled = values.isNotBlank()) { Text("Refinar") }
             if (found != null) TextButton(onClick = { found = null }) { Text("Limpar") }
         }
         found?.let { list ->
