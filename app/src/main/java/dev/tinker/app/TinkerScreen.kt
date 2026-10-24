@@ -1408,7 +1408,7 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                     OutlinedTextField(
                         if (gemini) s.geminiKey else s.aiKey,
                         { if (gemini) s.geminiKey = it.trim() else s.aiKey = it.trim(); engine.saveSettings() },
-                        label = { Text(if (gemini) "Chave do Gemini" else "Chave do Claude") }, placeholder = { Text(if (gemini) "AIza…" else "sk-ant-…") },
+                        label = { Text(if (gemini) "Chave do Gemini" else "Chave do Claude") }, placeholder = { Text(if (gemini) "AIza… ou AQ.…" else "sk-ant-…") },
                         singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.weight(1f),
                     )
                     // no menu flutuante o Android não mostra "Colar" ao segurar o campo: o botão lê a área de transferência direto
@@ -1420,8 +1420,8 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                             else -> {
                                 if (gemini) s.geminiKey = text else s.aiKey = text
                                 engine.saveSettings()
-                                val ok = if (gemini) text.startsWith("AIza") else text.startsWith("sk-ant-")
-                                if (ok) "Chave colada." else "Colado, mas não parece uma chave do ${if (gemini) "Gemini (começa com AIza)" else "Claude (começa com sk-ant-)"}."
+                                val ok = if (gemini) text.startsWith("AIza") || text.startsWith("AQ.") else text.startsWith("sk-ant-")  // AQ.: formato novo do Google
+                                if (ok) "Chave colada." else "Colado, mas não parece uma chave do ${if (gemini) "Gemini (começa com AIza ou AQ.)" else "Claude (começa com sk-ant-)"}."
                             }
                         }
                     }) { Text("Colar") }
