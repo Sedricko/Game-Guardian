@@ -70,6 +70,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -222,48 +224,54 @@ private fun Header(
     val s = Session
     val engine = Engine.get(LocalContext.current)
     val p = s.process
-    val small = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-    Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            AppIcon(p, 32)
-            Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
-                Text(p?.label ?: "Tinker", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    // uma linha só, como no GameGuardian: o resto da tela fica para a lista; tocar no nome troca o jogo
+    Row(Modifier.padding(horizontal = 8.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).clickable(enabled = !s.busy, onClick = onPick).padding(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AppIcon(p, 30)
+            Column(Modifier.padding(horizontal = 8.dp)) {
+                Text(p?.label ?: "Escolher jogo ▾", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
                     when {
-                        p == null -> "Nenhum jogo escolhido"
-                        s.paused -> "PID ${p.pid} · pausado"
-                        else -> "PID ${p.pid}"
+                        p == null -> "toque para escolher"
+                        s.paused -> "pausado · toque para trocar"
+                        else -> "PID ${p.pid} · toque para trocar"
                     },
                     style = MaterialTheme.typography.labelSmall,
                     color = if (s.paused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
             }
-            // a linha 1 só tem o nome e Minimizar: botões aqui espremiam o nome em uma letra por linha
-            if (overlay) TextButton(onClick = onMinimize, contentPadding = small) { Text("Minimizar") }
-            TextButton(onClick = onExit, contentPadding = small) { Text("Sair", color = MaterialTheme.colorScheme.error) }
         }
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            if (overlay) {
-                // como o olho do GameGuardian: segure para ver o jogo, solte para voltar
-                Box(
-                    Modifier.clip(RoundedCornerShape(50)).background(MaterialTheme.colorScheme.secondaryContainer)
-                        .pointerInput(Unit) { detectTapGestures(onPress = { s.peek = true; tryAwaitRelease(); s.peek = false }) }
-                        .padding(horizontal = 14.dp, vertical = 8.dp),
-                ) { Text("👁 Espiar", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSecondaryContainer, maxLines = 1) }
-            }
-            FilledTonalButton(onClick = onPick, enabled = !s.busy, contentPadding = small) { Text(if (p == null) "Escolher jogo" else "Trocar jogo", maxLines = 1) }
-            if (p != null) {
-                OutlinedButton(onClick = { run { if (s.paused) engine.resume() else engine.pause() } }, enabled = !s.busy, contentPadding = small) {
-                    Text(if (s.paused) "Continuar" else "Pausar", maxLines = 1)
-                }
-            }
-            if (!overlay) Button(onClick = onOpenOverlay, contentPadding = small) { Text("Menu flutuante", maxLines = 1) }
-            // painel pequeno sobre o jogo: refinar sem abrir tudo
-            if (onQuickBar != null) OutlinedButton(onClick = onQuickBar, contentPadding = small) { Text("Barra rápida", maxLines = 1) }
+        if (overlay) {
+            // como o olho do GameGuardian: segure para ver o jogo, solte para voltar
+            HeaderButton("👁", "Espiar (segure)", Modifier.pointerInput(Unit) { detectTapGestures(onPress = { s.peek = true; tryAwaitRelease(); s.peek = false }) })
         }
+        if (p != null) HeaderButton(if (s.paused) "▶" else "⏸", if (s.paused) "Continuar o jogo" else "Pausar o jogo", enabled = !s.busy) {
+            run { if (s.paused) engine.resume() else engine.pause() }
+        }
+        // barra pequena sobre o jogo: refinar sem abrir tudo
+        if (onQuickBar != null) HeaderButton("⚡", "Barra rápida", onClick = onQuickBar)
+        if (!overlay) HeaderButton("⧉", "Menu flutuante", onClick = onOpenOverlay)
+        if (overlay) HeaderButton("—", "Minimizar", onClick = onMinimize)
+        HeaderButton("✕", "Sair", color = MaterialTheme.colorScheme.error, onClick = onExit)
     }
+}
+
+/** Botão pequeno do cabeçalho: símbolo grande, nome para leitor de tela. */
+@Composable
+private fun HeaderButton(
+    symbol: String, description: String, modifier: Modifier = Modifier, enabled: Boolean = true,
+    color: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.primary, onClick: (() -> Unit)? = null,
+) {
+    Box(
+        modifier.size(42.dp).clip(RoundedCornerShape(50))
+            .then(if (onClick != null) Modifier.clickable(enabled = enabled, onClick = onClick) else Modifier)
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
+    ) { Text(symbol, fontSize = 20.sp, color = if (enabled) color else MaterialTheme.colorScheme.onSurfaceVariant) }
 }
 
 @Composable
@@ -336,6 +344,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
     var selected by remember { mutableStateOf(setOf<String>()) }
     var nearOpen by remember { mutableStateOf(false) }
     var names by remember { mutableStateOf(mapOf<String, String>()) }
+    var more by remember { mutableStateOf(false) }
     val enabled = s.process != null && !s.busy
     // valores ao vivo, como no Cheat Engine: relê os resultados mostrados a cada segundo
     LaunchedEffect(Unit) {
@@ -382,10 +391,16 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                     ) { Text("Refinar") }
                 }
                 if (s.canUndo) TextButton(onClick = { run { engine.undo() } }, enabled = enabled) { Text("↶ Desfazer último refino") }
-                UnknownSearch(engine, enabled, run)
-                AobSearch(engine, enabled, run)
+                // com resultados: refinar pelo jeito que mudou, sem precisar do número
+                if ((s.count ?: 0) > 0) CompareButtons(engine, enabled, run)
                 Text(s.status, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                TextButton(onClick = { s.view = null; s.tab = TAB_MEMORY }, enabled = s.process != null) { Text("Ir para endereço…") }
+                // o resto fica recolhido: a tela pequena do menu flutuante sobra para os resultados
+                TextButton(onClick = { more = !more }) { Text((if (more) "▾ " else "▸ ") + "Mais formas de buscar") }
+                if (more) {
+                    UnknownSearch(engine, enabled, run)
+                    AobSearch(engine, enabled, run)
+                    TextButton(onClick = { s.view = null; s.tab = TAB_MEMORY }, enabled = s.process != null) { Text("Ir para endereço…") }
+                }
             }
         }
         val count = s.count ?: return@LazyColumn
@@ -469,18 +484,23 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
 @Composable
 private fun UnknownSearch(engine: Engine, enabled: Boolean, run: (suspend () -> String) -> Unit) {
     val s = Session
-    Text("Não sabe o número? (barra de vida, energia…)", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        OutlinedButton(onClick = { run { engine.startUnknown(s.types) } }, enabled = enabled) { Text("Começar sem valor") }
-        if ((s.count ?: 0) > 0) {
-            listOf("inc" to "↑ Aumentou", "dec" to "↓ Diminuiu", "changed" to "≠ Mudou", "same" to "= Não mudou").forEach { (op, label) ->
-                FilledTonalButton(onClick = { run { engine.compare(op) } }, enabled = enabled) { Text(label) }
-            }
-            // com um número no campo: quanto mudou (ex.: perdeu 10 de vida → Diminuiu 10)
-            if (s.value.isNotBlank()) {
-                OutlinedButton(onClick = { run { engine.compare("incby", s.value) } }, enabled = enabled) { Text("Aumentou ${s.value}", maxLines = 1) }
-                OutlinedButton(onClick = { run { engine.compare("decby", s.value) } }, enabled = enabled) { Text("Diminuiu ${s.value}", maxLines = 1) }
-            }
+    Text("Não sabe o número? (barra de vida, energia…) Comece sem valor e depois diga como ele mudou.",
+        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    OutlinedButton(onClick = { run { engine.startUnknown(s.types) } }, enabled = enabled) { Text("Começar sem valor") }
+}
+
+/** Refinar pelo jeito que o valor mudou: ↑ ↓ = ≠ e, com um número no campo, quanto mudou. */
+@Composable
+private fun CompareButtons(engine: Engine, enabled: Boolean, run: (suspend () -> String) -> Unit) {
+    val s = Session
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        listOf("inc" to "↑ Aumentou", "dec" to "↓ Diminuiu", "changed" to "≠ Mudou", "same" to "= Não mudou").forEach { (op, label) ->
+            FilledTonalButton(onClick = { run { engine.compare(op) } }, enabled = enabled, contentPadding = PaddingValues(horizontal = 10.dp)) { Text(label, maxLines = 1) }
+        }
+        // com um número no campo: quanto mudou (ex.: perdeu 10 de vida → Diminuiu 10)
+        if (s.value.isNotBlank()) {
+            OutlinedButton(onClick = { run { engine.compare("incby", s.value) } }, enabled = enabled) { Text("+${s.value}", maxLines = 1) }
+            OutlinedButton(onClick = { run { engine.compare("decby", s.value) } }, enabled = enabled) { Text("−${s.value}", maxLines = 1) }
         }
     }
 }
@@ -781,6 +801,7 @@ private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
     var editing by remember { mutableStateOf<String?>(null) }
     var goTo by remember(center) { mutableStateOf(if (center == "0") "" else center) }
     var error by remember { mutableStateOf<String?>(null) }
+    var near by remember { mutableStateOf(false) }
     // o que mudou desde a leitura anterior fica destacado por 3 s: ajuda a ver o que reage ao que você faz no jogo
     val changed = remember(center, type) { mutableStateMapOf<String, Long>() }
     val last = remember(center, type) { HashMap<String, String>() }
@@ -815,24 +836,26 @@ private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp),
             )
         }
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        // endereço, Ir e ▲▼ numa linha; Buscar perto recolhido: a lista fica com o resto da tela
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             OutlinedTextField(
-                value = goTo, onValueChange = { goTo = it.removePrefix("0x").trim() }, label = { Text("Endereço (ex.: 7a0010 ou 7a0010+8)") },
+                value = goTo, onValueChange = { goTo = it.removePrefix("0x").trim() }, label = { Text("Endereço (7a0010+8)") },
                 singleLine = true, modifier = Modifier.weight(1f),
             )
             Button(onClick = {
                 val a = parseAddress(goTo)
                 if (a != null) s.view = a to type else error = "Endereço inválido: $goTo"
-            }) { Text("Ir") }
+            }, contentPadding = PaddingValues(horizontal = 12.dp)) { Text("Ir") }
+            if (center != "0") {
+                HeaderButton("▲", "Anteriores") { shift-- }
+                HeaderButton("▼", "Seguintes") { shift++ }
+            }
         }
         TypeChips(type) { t -> s.view = center to t }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        if (center != "0") NearSearch(engine, listOf(center), type, chooseType = false, onError = { error = it })
         if (center != "0") {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { shift-- }) { Text("▲ Anteriores") }
-                OutlinedButton(onClick = { shift++ }) { Text("▼ Seguintes") }
-            }
+            TextButton(onClick = { near = !near }) { Text((if (near) "▾ " else "▸ ") + "Buscar perto deste endereço") }
+            if (near) NearSearch(engine, listOf(center), type, chooseType = false, onError = { error = it })
         }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             items(rows, key = { it.addr }) { row ->
@@ -1152,7 +1175,8 @@ private val HELP = listOf(
         "esses valores sozinha e mostra o número real com 🔒. Ao editar ou congelar um 🔒, o Tinker tranca o valor novo com a mesma chave, " +
         "como o jogo faria. Se aparecer o mesmo número normal e com 🔒, edite o 🔒: o normal costuma ser só uma cópia (às vezes uma isca do antitrapaça).",
     "Menu flutuante" to "Abrir o Tinker já abre a bolinha sobre o jogo e tira o app da frente, como no GameGuardian (dá para desligar em " +
-        "Ajustes). Toque na bolinha para abrir o painel; Minimizar volta para a bolinha. Os ajustes ficam guardados.",
+        "Ajustes). Toque na bolinha para abrir o painel. No topo: toque no nome do jogo para trocar; 👁 (segure) espia o jogo; ⏸/▶ pausa; " +
+        "⚡ barra rápida; — minimiza; ✕ sai. Os ajustes ficam guardados.",
     "Barra rápida" to "No menu flutuante, toque em Barra rápida: uma barra pequena fica sobre o jogo, com o campo de valor, Refinar e ↑ ↓ = ≠ " +
         "(aumentou, diminuiu, não mudou, mudou). Arraste pelo ⠿. ▢ abre o painel completo para editar e congelar; – volta para a bolinha, " +
         "e a bolinha passa a abrir a barra.",

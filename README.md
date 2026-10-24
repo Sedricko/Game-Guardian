@@ -34,7 +34,9 @@ Cada versão instala por cima da anterior, sem perder os salvos.
 | **Registro** | Tudo o que o Tinker fez, falhas do Android e logcat do jogo. **Compartilhar relatório** gera um .txt completo. |
 | **Ajustes** | Por assunto: menu flutuante, busca, ponteiros e restauração, jogo, regiões de memória (Jh, Ch, Ca, Cd, Cb, A…) e, no fim, a Ajuda. |
 
-No menu flutuante, segure **👁 Espiar** para ver o jogo através do painel.
+O cabeçalho é uma linha só: toque no nome do jogo para trocar; **👁** (segure) espia o jogo através do painel,
+**⏸/▶** pausa e continua, **⚡** abre a barra rápida, **—** minimiza e **✕** sai.
+Opções menos usadas ficam recolhidas (**Mais formas de buscar**, **Buscar perto**), para a lista ter espaço.
 **Barra rápida**: uma barra pequena sobre o jogo com valor, **Refinar** e **↑ ↓ = ≠**, para refinar sem abrir o painel; **▢** abre o painel completo.
 
 ## Passo a passo: achar um valor
