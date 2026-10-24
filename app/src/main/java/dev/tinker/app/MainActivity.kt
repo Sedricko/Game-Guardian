@@ -19,6 +19,11 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val engine = Engine.get(this)
+        // como o GameGuardian: abrir o app já abre o menu flutuante e sai da frente (a permissão é pedida só na primeira vez)
+        if (savedInstanceState == null && Session.autoOverlay) {
+            if (Settings.canDrawOverlays(this)) openOverlay()
+            else if (engine.firstOverlayAsk()) { waitingPermission = true; openOverlay() }
+        }
         setContent {
             TinkerTheme {
                 Box(Modifier.fillMaxSize().safeDrawingPadding()) { TinkerPanel(engine, overlay = false, onOpenOverlay = ::openOverlay, onExit = {
@@ -30,10 +35,22 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private var waitingPermission = false
+
+    // voltou da tela de permissão já com ela dada: abre o menu flutuante sozinho
+    override fun onResume() {
+        super.onResume()
+        if (waitingPermission && Settings.canDrawOverlays(this)) {
+            waitingPermission = false
+            openOverlay()
+        }
+    }
+
     private fun openOverlay() {
         if (!Settings.canDrawOverlays(this)) {
             Diag.add("Pedindo permissão de sobreposição")
             startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+            waitingPermission = true
             return
         }
         if (Build.VERSION.SDK_INT >= 33) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 0)

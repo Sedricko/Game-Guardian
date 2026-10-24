@@ -898,8 +898,16 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
             Panel {
                 Text("Busca", style = MaterialTheme.typography.titleSmall)
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Abrir o menu flutuante ao iniciar", style = MaterialTheme.typography.bodyMedium)
+                        Text("Como o GameGuardian: abrir o Tinker já deixa a bolinha sobre o jogo.",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(checked = s.autoOverlay, onCheckedChange = { s.autoOverlay = it; engine.saveSettings() })
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Pausar o jogo durante a busca e o refino", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                    Switch(checked = s.autoPause, onCheckedChange = { s.autoPause = it })
+                    Switch(checked = s.autoPause, onCheckedChange = { s.autoPause = it; engine.saveSettings() })
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
@@ -907,7 +915,7 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                         Text("Acha moedas e vida protegidas com chave (comum em jogos Unity). Deixa a busca um pouco mais lenta.",
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    Switch(checked = s.findEncrypted, onCheckedChange = { s.findEncrypted = it })
+                    Switch(checked = s.findEncrypted, onCheckedChange = { s.findEncrypted = it; engine.saveSettings() })
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
@@ -915,7 +923,7 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                         Text("Para o salvo voltar sozinho quando o jogo reabrir. Pausa o jogo alguns segundos depois de salvar.",
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    Switch(checked = s.autoPointers, onCheckedChange = { s.autoPointers = it })
+                    Switch(checked = s.autoPointers, onCheckedChange = { s.autoPointers = it; engine.saveSettings() })
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
@@ -923,7 +931,7 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                         Text("Base em libil2cpp, libunity e outras do jogo; as do sistema costumam dar caminhos que quebram.",
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    Switch(checked = s.gameLibsOnly, onCheckedChange = { s.gameLibsOnly = it })
+                    Switch(checked = s.gameLibsOnly, onCheckedChange = { s.gameLibsOnly = it; engine.saveSettings() })
                 }
             }
         }
@@ -936,7 +944,7 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                         OutlinedButton(onClick = onResize) { Text("Trocar") }
                     }
                     Text("Transparência", style = MaterialTheme.typography.bodyMedium)
-                    Slider(value = s.alpha, onValueChange = { s.alpha = it }, valueRange = 0.35f..1f)
+                    Slider(value = s.alpha, onValueChange = { s.alpha = it }, onValueChangeFinished = engine::saveSettings, valueRange = 0.35f..1f)
                 }
             }
         }
@@ -1000,6 +1008,8 @@ private val HELP = listOf(
     "Valores cifrados (🔒)" to "Muitos jogos guardam moedas e vida trancadas com uma chave, para ninguém achar o número. A busca já procura " +
         "esses valores sozinha e mostra o número real com 🔒. Ao editar ou congelar um 🔒, o Tinker tranca o valor novo com a mesma chave, " +
         "como o jogo faria. Se aparecer o mesmo número normal e com 🔒, edite o 🔒: o normal costuma ser só uma cópia (às vezes uma isca do antitrapaça).",
+    "Menu flutuante" to "Abrir o Tinker já abre a bolinha sobre o jogo e tira o app da frente, como no GameGuardian (dá para desligar em " +
+        "Ajustes). Toque na bolinha para abrir o painel; Minimizar volta para a bolinha. Os ajustes ficam guardados.",
     "Barra rápida" to "No menu flutuante, toque em Barra rápida: uma barra pequena fica sobre o jogo, com o campo de valor, Refinar e ↑ ↓ = ≠ " +
         "(aumentou, diminuiu, não mudou, mudou). Arraste pelo ⠿. ▢ abre o painel completo para editar e congelar; – volta para a bolinha, " +
         "e a bolinha passa a abrir a barra.",

@@ -81,6 +81,7 @@ object Session {
     var autoPause by mutableStateOf(true)
     var findEncrypted by mutableStateOf(true)
     var useBar by mutableStateOf(false)
+    var autoOverlay by mutableStateOf(true)  // ao abrir o app, já abre o menu flutuante e sai da frente (como o GameGuardian)
     var update by mutableStateOf<Pair<String, String>?>(null)
     var gameGone by mutableStateOf<GameProcess?>(null)  // o jogo fechou sozinho (não pelo Tinker): pergunta se reabre  // versão nova na página de releases: nome e link do APK  // a bolinha abre a barra rápida em vez do painel  // a busca também procura valores cifrados (🔒)
     var canUndo by mutableStateOf(false)  // há um refino para desfazer  // pausa o jogo durante busca/refino, para o valor não mudar no meio
@@ -113,7 +114,26 @@ class Engine private constructor(private val app: Context) {
     private var inFile = false  // busca desconhecida ainda no arquivo do daemon
     private var steps = 0  // etapas da busca atual, para o registro
 
+    private val prefs = app.getSharedPreferences("tinker", Context.MODE_PRIVATE)
+
+    /** Ajustes ficam guardados: antes voltavam ao padrão toda vez que o app abria. */
+    fun saveSettings() {
+        prefs.edit().putBoolean("autoPause", Session.autoPause).putBoolean("findEncrypted", Session.findEncrypted)
+            .putBoolean("autoPointers", Session.autoPointers).putBoolean("gameLibsOnly", Session.gameLibsOnly)
+            .putBoolean("autoOverlay", Session.autoOverlay).putFloat("alpha", Session.alpha).putInt("panelSize", Session.panelSize).apply()
+    }
+
+    /** Pede a permissão de sobreposição sozinho só na primeira vez; recusou, o app abre normal nas próximas. */
+    fun firstOverlayAsk(): Boolean = !prefs.getBoolean("askedOverlay", false).also { prefs.edit().putBoolean("askedOverlay", true).apply() }
+
     init {
+        Session.autoPause = prefs.getBoolean("autoPause", true)
+        Session.findEncrypted = prefs.getBoolean("findEncrypted", true)
+        Session.autoPointers = prefs.getBoolean("autoPointers", true)
+        Session.gameLibsOnly = prefs.getBoolean("gameLibsOnly", true)
+        Session.autoOverlay = prefs.getBoolean("autoOverlay", true)
+        Session.alpha = prefs.getFloat("alpha", Session.alpha)
+        Session.panelSize = prefs.getInt("panelSize", Session.panelSize).coerceIn(0, PANEL_SIZES.lastIndex)
         loadSaved()
         loadHistory()
         scope.launch { freezeLoop() }

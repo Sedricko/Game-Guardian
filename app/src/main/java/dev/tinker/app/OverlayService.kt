@@ -197,6 +197,7 @@ class OverlayService : Service() {
 
     private fun resizePanel() {
         Session.panelSize = (Session.panelSize + 1) % PANEL_SIZES.size
+        Engine.get(this).saveSettings()
         val view = panel ?: return
         val params = panelParams ?: return
         params.height = panelHeight()

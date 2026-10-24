@@ -21,7 +21,8 @@ Cada versão instala por cima da anterior, sem perder os salvos.
 1. Ligue o root nas configurações da máquina virtual.
 2. Instale o APK **dentro** da máquina virtual e instale o jogo lá também.
 3. Abra o Tinker e toque em **Escolher jogo**; autorize o root quando pedir.
-4. Para o menu flutuante, toque em **Menu flutuante** e permita "Sobrepor a outros apps".
+4. Na primeira vez, permita "Sobrepor a outros apps". Daí em diante, abrir o Tinker já abre o menu flutuante
+   (a bolinha sobre o jogo), como no GameGuardian. Dá para desligar em **Ajustes**; os ajustes ficam guardados.
 
 ## Abas
 
