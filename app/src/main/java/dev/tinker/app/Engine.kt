@@ -703,6 +703,9 @@ class Engine private constructor(private val app: Context) {
         if (!IL2.matches(tag)) return
         if (item.name.isEmpty()) Diag.add("Salvo 0x${item.addr} é o campo $name (IL2CPP)")
         replace(item) { it.copy(name = it.name.ifEmpty { name }, il2 = tag) }
+        // a IA fica sabendo nas próximas conversas, sem depender dela lembrar de anotar
+        val field = "${c.name.substringAfterLast('.')}.${f.name.removePrefix("<").substringBefore(">k__BackingField")}"
+        notesFile?.let { appendNote(it, "Salvo ${item.name.ifEmpty { field }} = $field (${item.type})", 8000) }
     }
 
     /**
@@ -742,7 +745,30 @@ class Engine private constructor(private val app: Context) {
      */
     suspend fun listClasses(): List<GameClass> {
         classCache?.takeIf { it.first == currentPid && System.currentTimeMillis() - it.second < 600_000 }?.let { return it.third }
-        return readClasses().also { classCache = Triple(currentPid, System.currentTimeMillis(), it) }
+        // primeira vez nesta abertura do jogo: vale a lista guardada da mesma versão do jogo (ler da memória leva 8 a 33 s)
+        if (classCache?.first != currentPid) classesFromDisk()?.let { classCache = Triple(currentPid, System.currentTimeMillis(), it); return it }
+        return readClasses().also { classCache = Triple(currentPid, System.currentTimeMillis(), it); classesToDisk(it) }
+    }
+
+    private val classesFile get() = savedPkg?.let { File(app.filesDir, "classes-$it.txt") }
+    private fun gameVersion() = savedPkg?.let { p -> runCatching { app.packageManager.getPackageInfo(p, 0).longVersionCode }.getOrNull() }
+
+    /** Lista guardada: primeira linha é a versão do jogo (atualizou, a lista muda e é lida de novo). */
+    private fun classesFromDisk(): List<GameClass>? = runCatching {
+        val f = classesFile?.takeIf { it.exists() } ?: return null
+        val v = gameVersion() ?: return null
+        val lines = f.readLines()
+        if (lines.firstOrNull() != "v$v") return null
+        lines.drop(1).mapNotNull { l ->
+            val p = l.split('\t')
+            if (p.size < 2) null else GameClass(p[0], p[1].toIntOrNull() ?: 0, p.getOrNull(2)?.split(',')?.filter { it.isNotEmpty() }.orEmpty())
+        }.takeIf { it.isNotEmpty() }
+    }.getOrNull()
+
+    private fun classesToDisk(list: List<GameClass>) {
+        val f = classesFile ?: return
+        val v = gameVersion() ?: return
+        runCatching { f.writeText("v$v\n" + list.joinToString("\n") { "${it.name}\t${it.fields}\t${it.fieldNames.joinToString(",")}" }) }
     }
 
     private suspend fun readClasses(): List<GameClass> = call { d ->
@@ -968,6 +994,16 @@ class Engine private constructor(private val app: Context) {
     }
 
     private suspend fun objectText(center0: String): String {
+        val (c, center, rows) = objectRows(center0)
+        // sem as linhas "zero": metade da ficha era vazia e cada rodada reenviava tudo (estourou a cota do Gemini)
+        val useful = rows.filterNot { it.value == "0" && (it.label.startsWith("zero") || c == null) }
+        return (c?.let { "${it.name} em 0x${it.start}" } ?: "Sem classe IL2CPP em volta de 0x$center (tipos adivinhados)") +
+            useful.take(120).joinToString("") { "\n+${it.off.toString(16)} ${it.label} = ${it.value} (0x${it.addr})" } +
+            if (useful.size < rows.size) "\n(${rows.size - useful.size} campos com 0 omitidos)" else ""
+    }
+
+    /** Classe IL2CPP em volta do endereço (se houver), o endereço usado e os campos com o valor de agora. */
+    private suspend fun objectRows(center0: String): Triple<Il2Class?, String, List<FichaRow>> {
         // o começo do objeto nem sempre cai dentro de um campo (primeiro campo em +0x18…): tenta alguns passos à frente
         var center = center0
         var found = il2cpp(center)
@@ -980,11 +1016,7 @@ class Engine private constructor(private val app: Context) {
         val c = found
         val rows = if (c != null) ficha(c.start, ((c.fields.maxOfOrNull { it.offset } ?: 0) + 8).coerceIn(16, 0x400), c, center)
         else ficha((center.toLong(16) - 0x40).coerceAtLeast(0).toString(16), 0x80, null, center)
-        // sem as linhas "zero": metade da ficha era vazia e cada rodada reenviava tudo (estourou a cota do Gemini)
-        val useful = rows.filterNot { it.value == "0" && (it.label.startsWith("zero") || c == null) }
-        return (c?.let { "${it.name} em 0x${it.start}" } ?: "Sem classe IL2CPP em volta de 0x$center (tipos adivinhados)") +
-            useful.take(120).joinToString("") { "\n+${it.off.toString(16)} ${it.label} = ${it.value} (0x${it.addr})" } +
-            if (useful.size < rows.size) "\n(${rows.size - useful.size} campos com 0 omitidos)" else ""
+        return Triple(c, center, rows)
     }
 
     /** O que a IA pode fazer sozinha: só olhar e buscar; editar e congelar ficam com você. */
@@ -1035,6 +1067,22 @@ class Engine private constructor(private val app: Context) {
                 .mapNotNull { n -> known[n] ?: known.values.firstOrNull { it.name.substringAfterLast('.') == n } }.distinct().take(15)
             withContext(Dispatchers.Main) { Session.aiClasses.clear(); Session.aiClasses.addAll(picked) }
             if (picked.isEmpty()) "Nenhuma dessas classes existe; use os nomes que procurar_classes devolveu." else "Mostradas: ${picked.joinToString { it.name }}."
+        },
+        AiTool("o_que_muda", "Lê os campos de um objeto duas vezes, com um intervalo, e mostra só os que mudaram. Acha velocidade, tempo, " +
+            "distância e vida sem saber o valor: peça para a pessoa jogar durante a espera (correr, levar dano) ou toque no jogo antes.",
+            mapOf("endereco" to "endereço do objeto ou de um campo dele (ex.: de abrir_classe)", "classe" to "opcional, no lugar do endereço: usa o primeiro objeto da classe",
+                "segundos" to "intervalo entre as leituras, 1 a 30 (padrão 3)"), emptyList()) { a ->
+            val head = Session.engine?.header ?: 0x10L
+            val addr = parseAddress(a.optString("endereco"))
+                ?: a.optString("classe").takeIf { it.isNotBlank() }?.let { cls -> findObjects(cls).firstOrNull()?.let { (it.toLong(16) + head).toString(16) } }
+                ?: return@AiTool "Diga o endereço ou uma classe com objeto vivo."
+            val secs = (a.optString("segundos").toIntOrNull() ?: 3).coerceIn(1, 30)
+            val (c, center, before) = objectRows(addr)
+            delay(secs * 1000L)
+            val old = before.associateBy { it.addr }
+            val changed = objectRows(center).third.filter { r -> old[r.addr]?.let { it.value != r.value } == true }
+            (c?.let { "${it.name} em 0x${it.start}" } ?: "Sem classe IL2CPP em volta de 0x$center") + ": ${changed.size} de ${before.size} campos mudaram em $secs s" +
+                changed.take(60).joinToString("") { r -> "\n+${r.off.toString(16)} ${r.label}: ${old.getValue(r.addr).value} → ${r.value} (0x${r.addr})" }
         },
         AiTool("ver_endereco", "Mostra a ficha em volta de um endereço (de um resultado da busca): classe e campos com valores.",
             mapOf("endereco" to "endereço em hexadecimal, ex.: 7197b90978"), listOf("endereco")) { a ->

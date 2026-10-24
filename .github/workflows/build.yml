@@ -37,18 +37,12 @@ jobs:
           cache: gradle
 
       - name: Gera o APK
-        run: ./gradlew --no-daemon testDebugUnitTest assembleDebug assembleRelease
+        run: ./gradlew --no-daemon testDebugUnitTest assembleRelease  # sem o APK de depuração: metade dos minutos
 
       - uses: actions/upload-artifact@v7
         with:
           name: tinker-apk
           path: app/build/outputs/apk/release/app-release.apk
-
-      # versão de depuração, maior, só para investigar problemas da versão otimizada
-      - uses: actions/upload-artifact@v7
-        with:
-          name: tinker-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
 
       # página fixa de download: uma release por versão (versionName), atualizada a cada push
       - name: Publica na página de releases
