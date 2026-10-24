@@ -43,4 +43,16 @@ class ValuesTest {
         assertFalse(matchesAny("1.2", "f32", parseValues("1.1")))
         assertFalse(matchesAny("1.10000002", "i32", parseValues("1.1")))  // inteiro não tem folga
     }
+
+    @Test
+    fun readableDeixaDecimalLegivelETiraNaN() {
+        assertEquals("0.1", readable("0.10000000000000001", "f64"))
+        assertEquals("0.1", readable("0.100000001", "f32"))
+        assertEquals("10000000000", readable("10000000000", "f64"))
+        assertEquals("100", readable("100", "f64"))
+        assertEquals(null, readable("-nan", "f64"))
+        assertEquals(null, readable("inf", "f32"))
+        assertEquals("?", readable("?", "f64"))
+        assertEquals("123456789", readable("123456789", "i32"))
+    }
 }

@@ -39,7 +39,7 @@ val REGION_NAMES = mapOf(
 
 data class GameProcess(val pid: Int, val pkg: String, val label: String, val icon: ImageBitmap?)
 // base: na busca perto, o endereço de partida em volta do qual este foi achado
-data class Hit(val addr: String, val type: String, val region: String, val value: String, val base: String = "")
+data class Hit(val addr: String, val type: String, val region: String, val value: String, val base: String = "", val asDword: String = "")
 data class Region(val code: String, val count: Long, val bytes: Long, val enabled: Boolean)
 data class SavedItem(val addr: String, val type: String, val region: String, val value: String, val frozen: Boolean = false, val name: String = "")
 
@@ -311,9 +311,13 @@ class Engine private constructor(private val app: Context) {
         val size = TYPE_SIZES.getValue(type)
         val center = addr.toLong(16) / size * size  // alinhado ao tipo
         val start = (center + (shift * 48L - 24L) * size).coerceAtLeast(0)
-        d.send("dump ${start.toString(16)} $type 48", quiet = true).lines.map {
-            val (a, v) = it.split(" ", limit = 2)
-            Hit(a, type, "", v)
+        val rows = d.send("dump ${start.toString(16)} $type 48", quiet = true).lines.map { it.split(" ", limit = 2) }
+        // Float/Double com NaN: os bytes não são desse tipo; lê os mesmos bytes como Dword para mostrar o que são
+        val dwords = if (rows.none { readable(it[1], type) == null }) emptyMap()
+        else d.send("dump ${start.toString(16)} i32 ${48 * size / 4}", quiet = true).lines.associate { it.split(" ", limit = 2).let { (a, v) -> a.toLong(16) to v } }
+        rows.map { (a, v) ->
+            val dw = if (readable(v, type) == null) (0 until size / 4).mapNotNull { dwords[a.toLong(16) + it * 4] }.joinToString(" · ") else ""
+            Hit(a, type, "", v, asDword = dw)
         }
     }
 
@@ -536,6 +540,19 @@ internal fun matchesAny(value: String, type: String, wanted: List<ClosedFloating
     // float guardado nunca é exato: 1.1 digitado vira 1.10000002 na memória
     val slack = if (type.startsWith("f")) 1e-4 else 0.0
     return wanted.any { r -> x >= r.start - slack * maxOf(1.0, kotlin.math.abs(r.start)) && x <= r.endInclusive + slack * maxOf(1.0, kotlin.math.abs(r.endInclusive)) }
+}
+
+/**
+ * Valor para ler na tela: Float/Double sem casas de sobra (0.1, não 0.10000000000000001; 1e10 por extenso).
+ * null = NaN/infinito: esses bytes não guardam um número desse tipo.
+ */
+internal fun readable(value: String, type: String): String? {
+    if (type != "f32" && type != "f64") return value
+    if (value.contains("nan", true) || value.contains("inf", true)) return null
+    val d = value.toDoubleOrNull() ?: return value  // "?" = não deu para ler
+    val short = if (type == "f32") d.toFloat().toString() else d.toString()
+    val abs = kotlin.math.abs(d)
+    return if (abs == 0.0 || abs in 1e-6..1e15) java.math.BigDecimal(short).stripTrailingZeros().toPlainString() else short
 }
 
 private val PROBLEM_WORDS = listOf("erro", "falha", "aviso", "fechou", "exception")

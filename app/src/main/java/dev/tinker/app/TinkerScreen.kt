@@ -372,12 +372,12 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
             val key = hit.addr + hit.type
             val open = editing == key
             ResultCard(
-                hit.value, "0x${hit.addr}", "${TYPE_NAMES[hit.type]} · ${hit.region}",
+                shown(hit.value, hit.type), "0x${hit.addr}", "${TYPE_NAMES[hit.type]} · ${hit.region}",
                 onClick = { editing = if (open) null else key },
                 checked = key in selected, onCheck = { selected = if (it) selected + key else selected - key },
             ) {
                 if (open) {
-                    InlineEditor(hit.value, "Novo valor", onSave = { v -> editing = null; run { engine.write(hit.addr, hit.type, v) } }, onCancel = { editing = null }) {
+                    InlineEditor(readable(hit.value, hit.type) ?: "", "Novo valor", onSave = { v -> editing = null; run { engine.write(hit.addr, hit.type, v) } }, onCancel = { editing = null }) {
                         TextButton(onClick = { engine.addSaved(listOf(hit)); editing = null }) { Text("Salvar na lista") }
                         TextButton(onClick = { s.view = hit.addr to hit.type; s.tab = TAB_MEMORY; editing = null }) { Text("Ver próximos") }
                     }
@@ -498,7 +498,7 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
             val key = item.addr + item.type
             val open = editing == key
             ResultCard(
-                item.value, "0x${item.addr}", "${TYPE_NAMES[item.type]} · ${item.region}",
+                shown(item.value, item.type), "0x${item.addr}", "${TYPE_NAMES[item.type]} · ${item.region}",
                 onClick = { editing = if (open) null else key },
                 checked = key in selected, onCheck = { selected = if (it) selected + key else selected - key }, title = item.name,
                 trailing = {
@@ -509,7 +509,7 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
                 },
             ) {
                 if (open) {
-                    InlineEditor(item.value, "Novo valor", onSave = { v -> editing = null; run { engine.setSaved(listOf(item), v) } }, onCancel = { editing = null }) {
+                    InlineEditor(readable(item.value, item.type) ?: "", "Novo valor", onSave = { v -> editing = null; run { engine.setSaved(listOf(item), v) } }, onCancel = { editing = null }) {
                         TextButton(onClick = { engine.removeSaved(listOf(item)); editing = null }) { Text("Remover") }
                         TextButton(onClick = { s.view = item.addr to item.type; s.tab = TAB_MEMORY; editing = null }) { Text("Ver próximos") }
                     }
@@ -590,11 +590,17 @@ private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(row.addr, Modifier.weight(1f), fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-                        Text(row.value, fontFamily = FontFamily.Monospace, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(shown(row.value, type), fontFamily = FontFamily.Monospace, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    if (row.asDword.isNotEmpty()) {
+                        Text(
+                            "Não é ${TYPE_NAMES[type]}. Como Dword: ${row.asDword}", style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                     if (editing == row.addr) {
-                        InlineEditor(row.value, "Novo valor (${TYPE_NAMES[type]})", onSave = { v -> editing = null; run { engine.write(row.addr, type, v) } }, onCancel = { editing = null }) {
-                            TextButton(onClick = { engine.addSaved(listOf(row.copy(region = "?"))); editing = null }) { Text("Salvar") }
+                        InlineEditor(readable(row.value, type) ?: "", "Novo valor (${TYPE_NAMES[type]})", onSave = { v -> editing = null; run { engine.write(row.addr, type, v) } }, onCancel = { editing = null }) {
+                            TextButton(onClick = { engine.addSaved(listOf(row.copy(region = "?"))); editing = null }) { Text("Salvar na lista") }
                         }
                     }
                 }
@@ -666,7 +672,7 @@ private fun NearSearch(engine: Engine, centers: List<String>, initialType: Strin
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(hit.addr, Modifier.weight(1f), fontFamily = FontFamily.Monospace, fontSize = 13.sp, maxLines = 1)
-                        Text(hit.value, fontFamily = FontFamily.Monospace, fontSize = 14.sp, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(shown(hit.value, hit.type), fontFamily = FontFamily.Monospace, fontSize = 14.sp, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     Text(
                         "${if (d > 0) "+" else ""}$d linhas" + if (centers.size > 1) " de 0x${hit.base}" else "",
@@ -911,3 +917,6 @@ private fun Picker(engine: Engine, onBack: () -> Unit, onPick: (GameProcess) -> 
         }
     }
 }
+
+/** Valor como aparece na tela; NaN vira texto claro em vez do "-nan" cru. */
+private fun shown(value: String, type: String) = readable(value, type) ?: "NaN (não é ${TYPE_NAMES[type]})"
