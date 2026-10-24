@@ -26,8 +26,12 @@ import java.io.File
 import java.io.IOException
 
 val TYPES = listOf("auto" to "Auto", "i32" to "Dword", "f32" to "Float", "i64" to "Qword", "f64" to "Double", "i16" to "Word", "i8" to "Byte")
-val TYPE_NAMES = TYPES.toMap()
-val TYPE_SIZES = mapOf("i8" to 1, "i16" to 2, "i32" to 4, "i64" to 8, "f32" to 4, "f64" to 8)
+// xi32/xf32: valor cifrado com a chave do lado (Anti-Cheat Toolkit do Unity); o daemon decifra ao ler e cifra ao escrever
+val TYPE_NAMES = TYPES.toMap() + mapOf("xi32" to "Dword 🔒", "xf32" to "Float 🔒")
+val TYPE_SIZES = mapOf("i8" to 1, "i16" to 2, "i32" to 4, "i64" to 8, "f32" to 4, "f64" to 8, "xi32" to 4, "xf32" to 4)
+
+/** Tipo base: Dword 🔒 → Dword (a aba Memória mostra os bytes como estão). */
+fun plain(type: String) = type.removePrefix("x")
 val TABS = listOf("Busca", "Salvos", "Memória", "Registro", "Ajustes")
 const val TAB_MEMORY = 2
 val PANEL_SIZES = listOf(0.5f to "Metade", 0.85f to "Grande", 1f to "Tela cheia")
@@ -60,6 +64,7 @@ object Session {
     var panelSize by mutableIntStateOf(1)  // índice em PANEL_SIZES
     var peek by mutableStateOf(false)
     var autoPause by mutableStateOf(true)
+    var findEncrypted by mutableStateOf(true)  // a busca também procura valores cifrados (🔒)
     var canUndo by mutableStateOf(false)  // há um refino para desfazer  // pausa o jogo durante busca/refino, para o valor não mudar no meio
     var view by mutableStateOf<Pair<String, String>?>(null)
     var tab by mutableIntStateOf(0)  // índice em TABS  // visualizador de memória: endereço e tipo  // segurando o "olho": painel quase invisível
@@ -199,7 +204,9 @@ class Engine private constructor(private val app: Context) {
 
     /** types vazio = Auto. */
     suspend fun search(types: Set<String>, value: String): String = call { d ->
-        val list = TYPES.map { it.first }.filter { it in types }.joinToString(",").ifEmpty { "auto" }
+        val base = TYPES.map { it.first }.filter { it in types }.ifEmpty { listOf("i32", "f32", "i64", "f64") }
+        // cifrados junto, sem o usuário precisar saber: Dword 🔒 quando busca Dword, Float 🔒 quando busca Float
+        val list = (base + if (Session.findEncrypted) base.filter { it == "i32" || it == "f32" }.map { "x$it" } else emptyList()).joinToString(",")
         val n = d.frozenGame { d.send("search $list ${value.arg()}") }.status
         Session.canUndo = false
         addRecent(Recent(types, value.trim()))
@@ -694,7 +701,7 @@ internal fun parseValues(values: String): List<ClosedFloatingPointRange<Double>>
 internal fun matchesAny(value: String, type: String, wanted: List<ClosedFloatingPointRange<Double>>): Boolean {
     val x = value.toDoubleOrNull() ?: return false
     // float guardado nunca é exato: 1.1 digitado vira 1.10000002 na memória
-    val slack = if (type.startsWith("f")) 1e-4 else 0.0
+    val slack = if (plain(type).startsWith("f")) 1e-4 else 0.0
     return wanted.any { r -> x >= r.start - slack * maxOf(1.0, kotlin.math.abs(r.start)) && x <= r.endInclusive + slack * maxOf(1.0, kotlin.math.abs(r.endInclusive)) }
 }
 
@@ -702,7 +709,8 @@ internal fun matchesAny(value: String, type: String, wanted: List<ClosedFloating
  * Valor para ler na tela: Float/Double sem casas de sobra (0.1, não 0.10000000000000001; 1e10 por extenso).
  * null = NaN/infinito: esses bytes não guardam um número desse tipo.
  */
-internal fun readable(value: String, type: String): String? {
+internal fun readable(value: String, cipherType: String): String? {
+    val type = plain(cipherType)
     if (type != "f32" && type != "f64") return value
     if (value.contains("nan", true) || value.contains("inf", true)) return null
     val d = value.toDoubleOrNull() ?: return value  // "?" = não deu para ler

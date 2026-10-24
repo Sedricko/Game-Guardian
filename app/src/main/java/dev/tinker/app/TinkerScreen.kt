@@ -362,7 +362,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
         if (nearOpen && targets.isNotEmpty()) {
             item {
                 // procura em volta de cada resultado escolhido (ou de todos os mostrados)
-                NearSearch(engine, targets.map { it.addr }, targets.first().type, chooseType = true, onError = { s.status = it })
+                NearSearch(engine, targets.map { it.addr }, plain(targets.first().type), chooseType = true, onError = { s.status = it })
             }
         }
         if (editingAll) {
@@ -390,7 +390,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                 if (open) {
                     InlineEditor(readable(hit.value, hit.type) ?: "", "Novo valor", onSave = { v -> editing = null; run { engine.write(hit.addr, hit.type, v) } }, onCancel = { editing = null }) {
                         TextButton(onClick = { engine.addSaved(listOf(hit)); editing = null }) { Text("Salvar na lista") }
-                        TextButton(onClick = { s.view = hit.addr to hit.type; s.tab = TAB_MEMORY; editing = null }) { Text("Ver próximos") }
+                        TextButton(onClick = { s.view = hit.addr to plain(hit.type); s.tab = TAB_MEMORY; editing = null }) { Text("Ver próximos") }
                     }
                 }
             }
@@ -597,7 +597,7 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
                 if (open) {
                     InlineEditor(readable(item.value, item.type) ?: "", "Novo valor", onSave = { v -> editing = null; run { engine.setSaved(listOf(item), v) } }, onCancel = { editing = null }) {
                         TextButton(onClick = { engine.removeSaved(listOf(item)); editing = null }) { Text("Remover") }
-                        TextButton(onClick = { s.view = item.addr to item.type; s.tab = TAB_MEMORY; editing = null }) { Text("Ver próximos") }
+                        TextButton(onClick = { s.view = item.addr to plain(item.type); s.tab = TAB_MEMORY; editing = null }) { Text("Ver próximos") }
                     }
                     NameEditor(item.name) { engine.rename(item, it) }
                     Text("Ler como outro tipo:", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -794,6 +794,14 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                     Text("Pausar o jogo durante a busca e o refino", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                     Switch(checked = s.autoPause, onCheckedChange = { s.autoPause = it })
                 }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Procurar valores cifrados (🔒)", style = MaterialTheme.typography.bodyMedium)
+                        Text("Acha moedas e vida protegidas com chave (comum em jogos Unity). Deixa a busca um pouco mais lenta.",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(checked = s.findEncrypted, onCheckedChange = { s.findEncrypted = it })
+                }
             }
         }
         if (overlay) {
@@ -866,6 +874,9 @@ private val HELP = listOf(
     "Valor desconhecido" to "Para barras sem número (vida, energia): escolha o tipo (barra costuma ser Float) e toque em Começar sem valor. " +
         "Faça a barra mudar e toque em Aumentou ou Diminuiu; sem mudar nada, toque em Não mudou. Repita até sobrar pouco. " +
         "Com um número no campo dá para dizer quanto mudou (Diminuiu 10).",
+    "Valores cifrados (🔒)" to "Muitos jogos guardam moedas e vida trancadas com uma chave, para ninguém achar o número. A busca já procura " +
+        "esses valores sozinha e mostra o número real com 🔒. Ao editar ou congelar um 🔒, o Tinker tranca o valor novo com a mesma chave, " +
+        "como o jogo faria. Se aparecer o mesmo número normal e com 🔒, edite o 🔒: o normal costuma ser só uma cópia (às vezes uma isca do antitrapaça).",
     "Endereços mudaram" to "Quando o jogo reinicia, os endereços mudam. Para um salvo continuar valendo, use um ponteiro (abaixo).",
     "Ponteiros" to "Como no Cheat Engine. 1. Abra o salvo e toque em Buscar ponteiros. 2. Feche e abra o jogo e abra o mesmo salvo. " +
         "3. Digite o valor que o jogo mostra agora e toque em Filtrar pelo valor (repita mudando o valor se sobrar muitos). 4. Toque em Usar. " +

@@ -48,6 +48,12 @@ Dicas:
 - Achou o ouro e quer a prata? Marque o ouro → **Buscar perto**.
 - O jogo fechou depois de editar? O endereço não era o certo; refine mais antes de editar.
 
+## Valores cifrados (🔒)
+
+Muitos jogos Unity guardam moedas e vida trancadas com uma chave ao lado (Anti-Cheat Toolkit).
+A busca já procura esses valores sozinha e mostra o número real com **🔒**; editar ou congelar tranca o valor novo com a mesma chave.
+Se o mesmo número aparecer normal e com 🔒, edite o 🔒. Dá para desligar em **Ajustes → Procurar valores cifrados**.
+
 ## Valor sem número (barra de vida)
 
 1. Escolha o tipo (barra costuma ser **Float**) e toque em **Começar sem valor**.

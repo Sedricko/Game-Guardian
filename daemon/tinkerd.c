@@ -63,10 +63,22 @@ static int write_mem(uint64_t addr, const void *buf, size_t len) {
     return memfd >= 0 && pwrite(memfd, buf, len, (off_t)addr) == (ssize_t)len ? 0 : -1;
 }
 
+// Cifrado (xi32/xf32): como no Anti-Cheat Toolkit do Unity, a chave fica em addr e valor^chave em addr+4.
+// O tipo guarda a marca XOR por cima do tipo base (Dword ou Float).
+#define XOR 0x40
+#define B(t) ((t) & ~XOR)
+
 static int find_type(const char *s) {
+    if (!strcmp(s, "xi32")) return T_I32 | XOR;
+    if (!strcmp(s, "xf32")) return T_F32 | XOR;
     for (int i = 0; i < NTYPES; i++) if (!strcmp(s, TYPES[i].name)) return i;
     return -1;
 }
+
+static const char *tname(int t) { return t & XOR ? (B(t) == T_I32 ? "xi32" : "xf32") : TYPES[t].name; }
+
+// chave de verdade é um número sorteado, grande; 0 ou números pequenos dariam pares falsos o tempo todo
+static int xor_key(int32_t k) { return k >= 0x10000 || k <= -0x10000; }
 
 static int parse_one(int t, const char *s, value_t *v);
 
@@ -286,6 +298,26 @@ static int cread(uint64_t a, unsigned char *out, int sz) {
     return read_mem(a, out, sz);  // bloco cruza memória sem mapa, ou o valor passa do fim do bloco
 }
 
+// Lê o valor como o jogo vê (no cifrado: chave ^ valor guardado).
+static int load(uint64_t a, int t, unsigned char *out, int cached) {
+    if (!(t & XOR)) return cached ? cread(a, out, TYPES[t].size) : read_mem(a, out, TYPES[t].size);
+    uint32_t w[2];
+    if (cached ? cread(a, (unsigned char *)w, 8) : read_mem(a, w, 8)) return -1;
+    w[0] ^= w[1];
+    memcpy(out, w, 4);
+    return 0;
+}
+
+// Escreve como o jogo escreveria: no cifrado, tranca o valor novo com a chave atual.
+static int store(uint64_t a, int t, const unsigned char *val) {
+    if (!(t & XOR)) return write_mem(a, val, TYPES[t].size);
+    uint32_t key, v;
+    if (read_mem(a, &key, 4)) return -1;
+    memcpy(&v, val, 4);
+    v ^= key;
+    return write_mem(a + 4, &v, 4);
+}
+
 static void count_region(uint64_t s, uint64_t e, int region, void *ctx) {
     unsigned long long *c = ctx;
     c[region * 2]++;
@@ -315,7 +347,7 @@ static int set_ranges(const char *list) {
     return 1;
 }
 
-typedef struct { int types[NTYPES], ntypes, step; vset_t v[NTYPES]; chunks_t cs; hits_t *out; } scan_t;
+typedef struct { int types[2 * NTYPES], ntypes, step; vset_t v[NTYPES]; chunks_t cs; hits_t *out; } scan_t;
 
 static void scan_chunk(size_t ci, unsigned char *buf, void *ctx) {
     scan_t *sc = ctx;
@@ -325,10 +357,18 @@ static void scan_chunk(size_t ci, unsigned char *buf, void *ctx) {
     // senão o Qword no mesmo lugar sobrescreveria os 4 bytes vizinhos ao editar
     for (size_t i = 0; i + sc->step <= c->len; i += sc->step)
         for (int k = 0; k < sc->ntypes; k++) {
-            int t = sc->types[k], sz = TYPES[t].size;
-            if (i % sz || i + sz > c->len) continue;
-            if (matches_set(t, buf + i, &sc->v[t])) {
-                hpush(&sc->out[ci], (hit_t){c->addr + i, bits(buf + i, sz), (uint8_t)t, c->region});
+            int t = sc->types[k], sz = TYPES[B(t)].size;
+            if (i % sz || i + (t & XOR ? 8 : sz) > c->len) continue;
+            const unsigned char *p = buf + i;
+            uint32_t w[2];
+            if (t & XOR) {
+                memcpy(w, p, 8);
+                if (!xor_key((int32_t)w[0])) continue;
+                w[0] ^= w[1];
+                p = (const unsigned char *)w;
+            }
+            if (matches_set(B(t), p, &sc->v[B(t)])) {
+                hpush(&sc->out[ci], (hit_t){c->addr + i, bits(p, sz), (uint8_t)t, c->region});
                 break;
             }
         }
@@ -366,9 +406,9 @@ static void snap_chunk(size_t ci, unsigned char *buf, void *ctx) {
         memset(smask + c->off / sz / 8, 0, c->len / sz / 8);
 }
 
-static void cmd_snapshot(const char *tname) {
-    int t = find_type(tname);
-    if (t < 0) { printf("err tipo inválido: %s\n", tname); return; }
+static void cmd_snapshot(const char *name) {
+    int t = find_type(name);
+    if (t < 0 || (t & XOR)) { printf("err tipo inválido: %s\n", name); return; }
     drop_snap();
     nres = nprev = 0;
     snap.want = ranges;
@@ -394,23 +434,23 @@ static void cmd_snapshot(const char *tname) {
     printf("ok %zu\n", snapn);
 }
 
-static void cmd_search(const char *tname, const char *value) {
+static void cmd_search(const char *types, const char *value) {
     scan_t sc = {.ntypes = 0};
     // vários tipos separados por vírgula (ex.: f32,f64); "auto" = Dword, Float, Qword e Double, como no GG
-    char list[64], *save = NULL;
-    snprintf(list, sizeof list, "%s", strcmp(tname, "auto") ? tname : "i32,f32,i64,f64");
+    char list[128], *save = NULL;
+    snprintf(list, sizeof list, "%s", strcmp(types, "auto") ? types : "i32,f32,i64,f64");
     for (char *tok = strtok_r(list, ",", &save); tok; tok = strtok_r(NULL, ",", &save)) {
         int t = find_type(tok);
-        if (t < 0) { printf("err tipo inválido: %s\n", tok); return; }
-        if (!parse_set(t, value, &sc.v[t])) continue;  // ex.: 1.5 não entra como Dword
+        if (t < 0 || sc.ntypes == 2 * NTYPES) { printf("err tipo inválido: %s\n", tok); return; }
+        if (!parse_set(B(t), value, &sc.v[B(t)])) continue;  // ex.: 1.5 não entra como Dword
         // menores primeiro: no mesmo endereço ganha o tipo menor, que não invade bytes vizinhos
         int k = sc.ntypes++;
-        while (k > 0 && TYPES[sc.types[k - 1]].size > TYPES[t].size) { sc.types[k] = sc.types[k - 1]; k--; }
+        while (k > 0 && TYPES[B(sc.types[k - 1])].size > TYPES[B(t)].size) { sc.types[k] = sc.types[k - 1]; k--; }
         sc.types[k] = t;
     }
     if (!sc.ntypes) { printf("err valor inválido: %s\n", value); return; }
     sc.step = 8;
-    for (int k = 0; k < sc.ntypes; k++) if (TYPES[sc.types[k]].size < sc.step) sc.step = TYPES[sc.types[k]].size;
+    for (int k = 0; k < sc.ntypes; k++) if (TYPES[B(sc.types[k])].size < sc.step) sc.step = TYPES[B(sc.types[k])].size;
     drop_snap();
     nres = 0;
     nprev = 0;  // nova busca: não há refino para desfazer
@@ -521,9 +561,9 @@ static void cmd_compare(const char *opname, const char *value) {
     unsigned char cur[8], old[8];
     cbase = 1;  // a memória mudou desde a última leitura
     for (size_t i = 0; i < nres; i++) {
-        int t = res[i].type, sz = TYPES[t].size;
+        int t = res[i].type, b = B(t), sz = TYPES[b].size;
         memcpy(old, &res[i].old, 8);
-        if (ok[t] && !cread(res[i].addr, cur, sz) && keep(t, cur, old, op, &v[t])) {
+        if (ok[b] && !load(res[i].addr, t, cur, 1) && keep(b, cur, old, op, &v[b])) {
             res[k] = res[i];
             res[k++].old = bits(cur, sz);
         }
@@ -538,27 +578,27 @@ static void cmd_list(size_t n) {
     char out[64];
     for (size_t i = 0; i < nres && i < n; i++) {
         int t = res[i].type;
-        if (read_mem(res[i].addr, b, TYPES[t].size)) strcpy(out, "?");
-        else format(t, b, out);
-        printf("%" PRIx64 " %s %s %s\n", res[i].addr, TYPES[t].name, REGIONS[res[i].region], out);
+        if (load(res[i].addr, t, b, 0)) strcpy(out, "?");
+        else format(B(t), b, out);
+        printf("%" PRIx64 " %s %s %s\n", res[i].addr, tname(t), REGIONS[res[i].region], out);
     }
     printf("ok %zu\n", nres);
 }
 
-static void cmd_read(const char *addr, const char *tname) {
-    int t = find_type(tname);
+static void cmd_read(const char *addr, const char *name) {
+    int t = find_type(name);
     unsigned char b[8];
     char out[64];
-    if (t < 0) { printf("err tipo inválido: %s\n", tname); return; }
-    if (read_mem(strtoull(addr, NULL, 16), b, TYPES[t].size)) { printf("err não leu %s\n", addr); return; }
-    format(t, b, out);
+    if (t < 0) { printf("err tipo inválido: %s\n", name); return; }
+    if (load(strtoull(addr, NULL, 16), t, b, 0)) { printf("err não leu %s\n", addr); return; }
+    format(B(t), b, out);
     printf("ok %s\n", out);
 }
 
 // Lê COUNT valores seguidos a partir de ADDR: o visualizador de memória ("endereços próximos").
-static void cmd_dump(const char *addr, const char *tname, const char *count) {
-    int t = find_type(tname);
-    if (t < 0) { printf("err tipo inválido: %s\n", tname); return; }
+static void cmd_dump(const char *addr, const char *name, const char *count) {
+    int t = find_type(name);
+    if (t < 0 || (t & XOR)) { printf("err tipo inválido: %s\n", name); return; }
     size_t n = strtoul(count, NULL, 10), sz = TYPES[t].size;
     if (n < 1 || n > 20001) n = 64;  // até 10000 linhas para cada lado na busca perto
     uint64_t a = strtoull(addr, NULL, 16);
@@ -575,14 +615,14 @@ static void cmd_dump(const char *addr, const char *tname, const char *count) {
     puts("ok");
 }
 
-static void cmd_write(const char *addr, const char *tname, const char *value) {
-    int t = find_type(tname);
+static void cmd_write(const char *addr, const char *name, const char *value) {
+    int t = find_type(name);
     value_t v;
     unsigned char b[8];
-    if (t < 0) { printf("err tipo inválido: %s\n", tname); return; }
-    if (!parse_value(t, value, &v) || v.range) { printf("err valor inválido: %s\n", value); return; }
-    encode(t, &v, b);
-    if (write_mem(strtoull(addr, NULL, 16), b, TYPES[t].size)) printf("err falhou ao escrever: %s\n", strerror(errno));
+    if (t < 0) { printf("err tipo inválido: %s\n", name); return; }
+    if (!parse_value(B(t), value, &v) || v.range) { printf("err valor inválido: %s\n", value); return; }
+    encode(B(t), &v, b);
+    if (store(strtoull(addr, NULL, 16), t, b)) printf("err falhou ao escrever: %s\n", strerror(errno));
     else puts("ok");
 }
 
@@ -593,9 +633,9 @@ static void cmd_writeall(const char *value) {
         int t = res[i].type;
         value_t v;
         unsigned char b[8];
-        if (!parse_value(t, value, &v) || v.range) { skip++; continue; }  // ex.: "1.5" não vai para Dword
-        encode(t, &v, b);
-        fail += write_mem(res[i].addr, b, TYPES[t].size) != 0;
+        if (!parse_value(B(t), value, &v) || v.range) { skip++; continue; }  // ex.: "1.5" não vai para Dword
+        encode(B(t), &v, b);
+        fail += store(res[i].addr, t, b) != 0;
     }
     printf("ok %zu %zu\n", nres - fail - skip, fail + skip);
 }

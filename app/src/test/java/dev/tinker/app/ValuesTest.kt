@@ -61,4 +61,12 @@ class ValuesTest {
         assertEquals("[[libgame.so+1A2B30]+18]+40", pointerText("libgame.so+1a2b30 18 40"))
         assertEquals("base.apk@1f000+10", pointerText("base.apk@1f000+10"))
     }
+
+    @Test
+    fun cifradoUsaOTipoBase() {
+        assertEquals("0.1", readable("0.100000001", "xf32"))
+        assertEquals("777777", readable("777777", "xi32"))
+        assertTrue(matchesAny("1.10000002", "xf32", parseValues("1.1")))
+        assertEquals("i32", plain("xi32"))
+    }
 }

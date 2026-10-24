@@ -8,7 +8,7 @@ cc -O2 -Wall -Werror -pthread -o "$out/tinkerd" daemon/tinkerd.c -lm
 cc -O2 -o "$out/target" tests/target.c
 "$out/target" > "$out/info" & tpid=$!
 for _ in $(seq 50); do [ -s "$out/info" ] && break; sleep 0.1; done
-read -r pid iaddr faddr paddr < "$out/info"
+read -r pid iaddr faddr paddr xaddr < "$out/info"
 
 got=$("$out/tinkerd" <<CMDS
 search i32 1
@@ -91,6 +91,15 @@ grep -qE "^$iaddr i32 (Ch|A) 987654000$" <<<"$unk" && [ "${u[10]}" = "ok 1" ] &&
 # Depois de uma busca exata também dá para comparar com o valor anterior
 cmpx=$(printf '%s\n' "attach $pid" "search i32 987654000" "write $iaddr i32 987654001" "compare incby 1" | "$out/tinkerd")
 [ "$(tail -1 <<<"$cmpx")" = "ok 1" ] || { echo "FALHOU: comparar após busca exata"; echo "$cmpx"; exit 1; }
+
+# Cifrado (XOR): acha 777777 pela chave do lado, edita trancando com a mesma chave, a chave não muda
+xr=$(printf '%s\n' "attach $pid" "search i32,f32,xi32,xf32 777777" "list 20" "write $xaddr xi32 888888" "read $xaddr xi32" "read $xaddr i32" \
+    "refine 888888" "writeall 999999" "read $xaddr xi32" "dump $xaddr xi32 2" "snapshot xi32" | "$out/tinkerd")
+echo "$xr"
+grep -qE "^$xaddr xi32 (Ch|A) 777777$" <<<"$xr" || { echo "FALHOU: busca cifrada"; exit 1; }
+mapfile -t x < <(grep -E '^(ok|err)' <<<"$xr")
+[ "${x[5]}" = "ok 888888" ] && [ "${x[6]}" = "ok $((0x5A3C9D21))" ] && [ "${x[7]}" = "ok 1" ] && [ "${x[9]}" = "ok 999999" ] \
+    && [ "${x[10]}" = "err tipo inválido: xi32" ] && [ "${x[11]}" = "err tipo inválido: xi32" ] || { echo "FALHOU: edição cifrada"; exit 1; }
 
 # Ponteiros: acha root → +10 → +20 e o caminho volta a dar no mesmo endereço
 ptr=$(printf '%s\n' "attach $pid" "pointers $paddr 256 3" | "$out/tinkerd")

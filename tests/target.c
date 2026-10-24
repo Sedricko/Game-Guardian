@@ -19,7 +19,11 @@ int main(void) {
     root = a;
     volatile int *v = (int *)(b + 0x20);
     *v = 424242;
-    printf("%d %lx %lx %lx\n", getpid(), (unsigned long)&i[7], (unsigned long)&f[3], (unsigned long)v);
+    // como o ObscuredInt do Unity (Anti-Cheat Toolkit): chave sorteada e valor ^ chave lado a lado
+    volatile int *x = malloc(64);
+    x[0] = 0x5A3C9D21;
+    x[1] = 777777 ^ 0x5A3C9D21;
+    printf("%d %lx %lx %lx %lx\n", getpid(), (unsigned long)&i[7], (unsigned long)&f[3], (unsigned long)v, (unsigned long)x);
     fflush(stdout);
     pause();
     return 0;
