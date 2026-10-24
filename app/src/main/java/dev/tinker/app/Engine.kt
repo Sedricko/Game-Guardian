@@ -92,7 +92,7 @@ class Engine private constructor(private val app: Context) {
     private val pointersFile get() = File(app.filesDir, "pointers-${savedPkg ?: "sem-jogo"}.txt")
     private val historyFile get() = File(app.filesDir, "history.txt")
     private var inFile = false  // busca desconhecida ainda no arquivo do daemon
-    private val trail = mutableListOf<String>()  // etapas da busca atual, para o registro: 500 (1234) → 480 (12)
+    private var steps = 0  // etapas da busca atual, para o registro
 
     init {
         loadSaved()
@@ -245,6 +245,7 @@ class Engine private constructor(private val app: Context) {
 
     /** Refino comparando com o valor anterior: inc, dec, same, changed; incby/decby com quanto mudou. */
     suspend fun compare(op: String, value: String = ""): String = call { d ->
+        val before = Session.count
         val n = d.frozenGame { d.send("compare $op ${if (value.isBlank()) "" else value.arg()}".trimEnd()) }.status
         // enquanto os candidatos estão no arquivo do daemon (milhões) não há desfazer
         Session.canUndo = !inFile
@@ -253,14 +254,16 @@ class Engine private constructor(private val app: Context) {
         when {
             n == "0" -> "Nenhum restou. Toque em Desfazer, ou comece de novo sem valor."
             n.toLong() > 2_000_000 -> "$n candidatos. Continue: mude o valor no jogo e compare de novo."
+            // os que sobram não mudam com "não mudou": o valor precisa mudar no jogo antes
+            n == before?.toString() && op == "same" -> "Continuam $n. \"Não mudou\" não tira mais nenhum: faça o valor mudar no jogo e toque em Aumentou ou Diminuiu."
+            n == before?.toString() -> "Continuam $n: todos mudaram desse jeito. Mude o valor de novo, de outro jeito (ex.: gaste em vez de ganhar)."
             else -> "$n restantes."
         }
     }
 
     private fun step(new: Boolean, what: String, n: String) {
-        if (new) trail.clear()
-        trail += "$what ($n)"
-        if (trail.size > 1) Diag.add("Etapas da busca: ${trail.takeLast(12).joinToString(" → ")}")
+        steps = if (new) 1 else steps + 1
+        if (steps > 1) Diag.add("Etapa $steps da busca: $what → $n")
     }
 
     private fun addRecent(r: Recent) {
