@@ -191,6 +191,8 @@ static int region_of(const char *perms, const char *name) {
     return 9;                                                                                               // O
 }
 
+static int region_exec;  // 1: percorre o código (r-x) em vez das regiões graváveis, para a busca AOB no código
+
 // Chama fn para cada região gravável do alvo. Devolve -1 se não abriu o maps.
 static int each_region(void (*fn)(uint64_t s, uint64_t e, int region, void *ctx), void *ctx) {
     char path[64], line[1024];
@@ -202,7 +204,7 @@ static int each_region(void (*fn)(uint64_t s, uint64_t e, int region, void *ctx)
         char perms[8];
         int off = 0;
         if (sscanf(line, "%llx-%llx %7s %*s %*s %*s %n", &s, &e, perms, &off) < 3) continue;
-        if (perms[0] != 'r' || perms[1] != 'w') continue;
+        if (perms[0] != 'r' || (region_exec ? perms[2] != 'x' : perms[1] != 'w')) continue;
         char *name = off ? line + off : line + strlen(line);
         name[strcspn(name, "\n")] = 0;
         fn(s, e, region_of(perms, name), ctx);
@@ -773,7 +775,8 @@ static int cmp_tgt(const void *a, const void *b) {
 typedef struct { uint32_t id; int key; } found_t;
 static int cmp_found(const void *a, const void *b) { return ((const found_t *)a)->key - ((const found_t *)b)->key; }
 
-static void cmd_pointers(const char *addr, const char *maxoffs, const char *levels) {
+// only_game: base só em libs do jogo (/data/...); as do sistema (libc, linker) dão caminhos que quebram
+static void cmd_pointers(const char *addr, const char *maxoffs, const char *levels, int only_game) {
     uint64_t goal = strtoull(addr, NULL, 16), maxoff = strtoull(maxoffs, NULL, 0);
     int lv = atoi(levels);
     if (lv < 1 || lv > 7) lv = 4;
@@ -788,7 +791,8 @@ static void cmd_pointers(const char *addr, const char *maxoffs, const char *leve
     if (!found) { puts("err sem memória"); exit(1); }
     size_t nfound = 0, lstart = 0, lend = 1;
     int limited = 0;
-    if (static_of(goal) >= 0) found[nfound++] = (found_t){0, 0};
+    int gm = static_of(goal);
+    if (gm >= 0 && !(only_game && mods[gm].system)) found[nfound++] = (found_t){0, 0};
     for (int L = 1; L <= lv && lstart < lend && nfound < MAXFOUND; L++) {
         size_t nt = lend - lstart;
         tgt_t *t = malloc(nt * sizeof *t);
@@ -807,7 +811,7 @@ static void cmd_pointers(const char *addr, const char *maxoffs, const char *leve
                     if (nnodes - next >= MAXNODES) { limited = 1; break; }
                     uint32_t id = node_push(p, t[j].node, (uint32_t)(t[j].addr - v));
                     // caminhos pelas libs do jogo (/data) primeiro, depois os mais curtos
-                    if (m >= 0 && nfound < MAXFOUND) found[nfound++] = (found_t){id, mods[m].system * 100 + L};
+                    if (m >= 0 && !(only_game && mods[m].system) && nfound < MAXFOUND) found[nfound++] = (found_t){id, mods[m].system * 100 + L};
                 }
             }
             free(out[ci].h);
@@ -849,6 +853,75 @@ static void cmd_resolve(char *chain) {
         a = v + strtoull(tok, NULL, 16);
     }
     printf("ok %" PRIx64 "\n", a);
+}
+
+// AOB: sequência de bytes com curingas, ex.: "15CD5B07??020000". Cada ?? aceita qualquer byte.
+#define AOB_MAX 192
+typedef struct { unsigned char b[AOB_MAX], m[AOB_MAX]; int n, first; chunks_t cs; hits_t *out; } aob_t;
+
+static int parse_aob(const char *s, aob_t *p) {
+    p->n = 0;
+    for (; *s && *s != '\n'; s += 2) {
+        if (p->n == AOB_MAX || !s[1]) return 0;
+        if (s[0] == '?' && s[1] == '?') { p->m[p->n] = 0; p->b[p->n++] = 0; continue; }
+        char h[3] = {s[0], s[1], 0}, *e;
+        long v = strtol(h, &e, 16);
+        if (*e) return 0;
+        p->m[p->n] = 0xff;
+        p->b[p->n++] = (unsigned char)v;
+    }
+    p->first = -1;
+    for (int i = 0; i < p->n && p->first < 0; i++) if (p->m[i]) p->first = i;
+    return p->first >= 0;  // só curingas acharia a memória inteira
+}
+
+static void aob_chunk(size_t ci, unsigned char *buf, void *ctx) {
+    aob_t *p = ctx;
+    const chunk_t *c = &p->cs.c[ci];
+    if (read_mem(c->addr, buf, c->len)) return;
+    // shortcut: padrão que cruza a borda de um pedaço de 1 MB não é achado; raro com até 192 bytes
+    size_t tail = (size_t)(p->n - p->first);
+    for (size_t i = p->first; i + tail <= c->len; i++) {
+        unsigned char *q = memchr(buf + i, p->b[p->first], c->len - tail - i + 1);
+        if (!q) break;
+        i = (size_t)(q - buf);
+        size_t start = i - p->first;
+        int ok = 1;
+        for (int k = 0; k < p->n && ok; k++) ok = (buf[start + k] & p->m[k]) == p->b[k];
+        if (ok) hpush(&p->out[ci], (hit_t){c->addr + start, bits(buf + start, p->n < 4 ? p->n : 4), T_I32, c->region});
+    }
+}
+
+// keep=1: os achados viram os resultados (busca AOB do usuário, como Dword); keep=0: só lista até 50 endereços
+// (assinatura automática), sem mexer nos resultados. mode "code" procura no código (r-x) em vez dos dados.
+static void cmd_aob(const char *pat, const char *mode, int keep) {
+    aob_t *p = calloc(1, sizeof *p);
+    if (!p) { puts("err sem memória"); exit(1); }
+    if (!parse_aob(pat, p)) { printf("err padrão inválido: %s\n", pat); free(p); return; }
+    region_exec = !strcmp(mode, "code");
+    p->cs.want = keep && !region_exec ? ranges : ~(1u << R_V);
+    int r = each_region(add_chunks, &p->cs);
+    region_exec = 0;
+    if (r) { puts("err não leu o mapa de memória"); free(p->cs.c); free(p); return; }
+    p->out = calloc(p->cs.n ? p->cs.n : 1, sizeof *p->out);
+    if (!p->out) { puts("err sem memória"); exit(1); }
+    parallel(p->cs.n, aob_chunk, p);
+    if (keep) {
+        drop_snap();
+        nprev = 0;
+        collect(p->out, p->cs.n);
+        printf("ok %zu\n", nres);
+    } else {
+        size_t total = 0;
+        for (size_t ci = 0; ci < p->cs.n; ci++) {
+            for (size_t k = 0; k < p->out[ci].n; k++, total++) if (total < 50) printf("%" PRIx64 "\n", p->out[ci].h[k].addr);
+            free(p->out[ci].h);
+        }
+        free(p->out);
+        printf("ok %zu\n", total);
+    }
+    free(p->cs.c);
+    free(p);
 }
 
 // Roda um logcat (como root vê todos os apps) e repassa cada linha com "| ".
@@ -899,11 +972,11 @@ int main(void) {
     signal(SIGTERM, on_exit_signal);
     signal(SIGHUP, on_exit_signal);
     signal(SIGINT, on_exit_signal);
-    char line[512], cmd[32], a1[128], a2[128], a3[128];
+    char line[1024], cmd[32], a1[400], a2[128], a3[128], a4[128];
     puts("ok tinkerd 3");
     while (fgets(line, sizeof line, stdin)) {
-        a1[0] = a2[0] = a3[0] = 0;
-        if (sscanf(line, "%31s %127s %127s %127s", cmd, a1, a2, a3) < 1) continue;
+        a1[0] = a2[0] = a3[0] = a4[0] = 0;
+        if (sscanf(line, "%31s %399s %127s %127s %127s", cmd, a1, a2, a3, a4) < 1) continue;
         if (!strcmp(cmd, "ps")) { cmd_ps(); continue; }
         if (!strcmp(cmd, "info")) {
             // para o relatório: confirma root, kernel, tamanho de página e SELinux
@@ -946,7 +1019,9 @@ int main(void) {
         else if (!strcmp(cmd, "refine")) cmd_compare("eq", a1);
         else if (!strcmp(cmd, "compare")) cmd_compare(a1, a2);
         else if (!strcmp(cmd, "snapshot")) cmd_snapshot(a1);
-        else if (!strcmp(cmd, "pointers")) cmd_pointers(a1, a2, a3);
+        else if (!strcmp(cmd, "pointers")) cmd_pointers(a1, a2, a3, a4[0] == '1');
+        else if (!strcmp(cmd, "aob")) cmd_aob(a1, a2, 1);
+        else if (!strcmp(cmd, "aobfind")) cmd_aob(a1, "data", 0);
         else if (!strcmp(cmd, "resolve")) cmd_resolve(strstr(line, "resolve") + 7);
         else if (!strcmp(cmd, "list")) cmd_list(strtoul(a1, NULL, 10));
         else if (!strcmp(cmd, "read")) cmd_read(a1, a2);

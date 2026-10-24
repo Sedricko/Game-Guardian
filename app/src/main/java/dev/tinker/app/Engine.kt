@@ -50,7 +50,13 @@ data class Region(val code: String, val count: Long, val bytes: Long, val enable
 data class SavedItem(
     val addr: String, val type: String, val region: String, val value: String, val frozen: Boolean = false, val name: String = "", val pointer: String = "",
     val id: String = java.util.UUID.randomUUID().toString(), val anchor: String = "", val offset: Long = 0,
+    // pid: processo do jogo em que addr vale (0 = desconhecido, versões antigas); chains: caminhos de ponteiro candidatos;
+    // sig/sigOff: assinatura AOB dos bytes em volta (?? = muda) e onde o valor fica nela
+    val pid: Int = 0, val chains: List<String> = emptyList(), val sig: String = "", val sigOff: Int = 0,
 )
+
+const val MAX_CHAINS = 200
+const val SIG_SIDE = 40L  // bytes de cada lado do valor na assinatura
 
 /** Distância máxima para dois salvos serem da mesma "ficha" do jogo (estrutura/objeto). */
 const val SAME_STRUCT = 4096L
@@ -78,9 +84,10 @@ object Session {
     var tab by mutableIntStateOf(0)  // índice em TABS  // visualizador de memória: endereço e tipo  // segurando o "olho": painel quase invisível
     val saved = mutableStateListOf<SavedItem>()
     val history = mutableStateListOf<Recent>()  // últimas buscas, para repetir com um toque
-    var pointers by mutableStateOf(listOf<String>())  // caminhos da última busca de ponteiros deste jogo
-    var pointersFor by mutableStateOf("")  // endereço para o qual eles foram buscados
     var pointerInfo by mutableStateOf("")
+    var restoreInfo by mutableStateOf("")  // o que voltou sozinho ao escolher o jogo
+    var gameLibsOnly by mutableStateOf(true)  // ponteiros só com base nas libs do jogo
+    var autoPointers by mutableStateOf(true)  // ao salvar, já prepara os ponteiros
 }
 
 /** Ponte entre a tela e o daemon; tudo roda fora da thread de UI. Uma instância por processo. */
@@ -97,7 +104,6 @@ class Engine private constructor(private val app: Context) {
     // uma lista de salvos por jogo; "saved.json" é a lista de antes de escolher um jogo
     private var savedPkg: String? = null
     private val savedFile get() = File(app.filesDir, savedPkg?.let { "saved-$it.json" } ?: "saved.json")
-    private val pointersFile get() = File(app.filesDir, "pointers-${savedPkg ?: "sem-jogo"}.txt")
     private val historyFile get() = File(app.filesDir, "history.txt")
     private var inFile = false  // busca desconhecida ainda no arquivo do daemon
     private var steps = 0  // etapas da busca atual, para o registro
@@ -195,8 +201,8 @@ class Engine private constructor(private val app: Context) {
         Session.paused = false
         Session.canUndo = false
         switchSaved(p.pkg)
-        Session.saved.toList().forEach { d.resolve(it) }
-        "Pronto. Digite um valor que você vê no jogo e toque em Nova busca."
+        Session.restoreInfo = d.restoreAll(p.pid)
+        "Pronto. Digite um valor que você vê no jogo e toque em Nova busca." + if (Session.restoreInfo.isEmpty()) "" else " " + Session.restoreInfo
     }
 
     /** Roda work com o jogo pausado (se a opção estiver ligada) e sempre continua o jogo depois. */
@@ -290,101 +296,187 @@ class Engine private constructor(private val app: Context) {
         }.let(Session.history::addAll)
     }
 
-    // Ponteiros
+    // Ponteiros, offsets e assinatura: como um salvo volta a valer depois de reiniciar o jogo
 
-    /** Procura caminhos de ponteiro até addr, como o "Pointer scan" do Cheat Engine. */
-    suspend fun scanPointers(addr: String, maxOff: Int, levels: Int): String = call { d ->
-        val r = d.frozenGame { d.send("pointers $addr $maxOff $levels") }
-        val (n, limited) = r.status.split(" ").let { it[0] to (it.getOrNull(1) == "1") }
-        Session.pointers = r.lines
-        Session.pointersFor = addr
-        storePointers()
-        Session.pointerInfo = when {
-            r.lines.isEmpty() -> "Nenhum caminho. Tente mais níveis ou uma distância maior."
-            else -> "$n caminhos${if (limited) " (há mais; mostrando os melhores)" else ""}. Para achar o certo: feche e abra o jogo, " +
-                "abra este salvo, digite o valor que aparece agora e toque em Filtrar pelo valor."
-        }
+    private val currentPid get() = Session.process?.pid ?: 0
+
+    /** O endereço é de outra vez do jogo: ler ou escrever ali pode derrubar o jogo. */
+    fun stale(item: SavedItem) = item.pid != 0 && item.pid != currentPid
+
+    /** Procura caminhos de ponteiro até o salvo, como o "Pointer scan" do Cheat Engine; ficam guardados nele. */
+    suspend fun scanPointers(item: SavedItem, maxOff: Int = 4096, levels: Int = 4): String = call { d ->
+        val r = d.frozenGame { d.send("pointers ${item.addr} $maxOff $levels ${if (Session.gameLibsOnly) 1 else 0}") }
+        val limited = r.status.split(" ").getOrNull(1) == "1"
+        replace(item) { it.copy(chains = r.lines.take(MAX_CHAINS)) }
+        Session.pointerInfo = if (r.lines.isEmpty()) "Nenhum caminho. Tente mais níveis, uma distância maior, ou desligue \"Ponteiros só nas libs do jogo\" em Ajustes."
+        else "${minOf(r.lines.size, MAX_CHAINS)} caminhos${if (limited) " (há mais; guardados os melhores)" else ""}. Ao reabrir o jogo, o Tinker testa e escolhe sozinho."
         Session.pointerInfo
     }
 
-    /** Depois de reiniciar o jogo: fica só quem ainda chega no endereço novo do mesmo valor. */
-    suspend fun filterPointers(addr: String): String = call { d ->
-        val before = Session.pointers.size
-        val want = addr.toLong(16)
-        Session.pointers = Session.pointers.filter { c -> runCatching { d.send("resolve $c", quiet = true).status.toLong(16) }.getOrNull() == want }
-        Session.pointersFor = addr
-        storePointers()
-        Diag.add("Ponteiros filtrados por 0x$addr: ${Session.pointers.size} de $before")
-        Session.pointerInfo = if (Session.pointers.isEmpty()) "Nenhum caminho continuou certo. Busque ponteiros de novo com mais níveis."
-        else "${Session.pointers.size} de $before continuam certos. Toque em Usar num deles (o primeiro costuma ser o melhor)."
-        Session.pointerInfo
-    }
-
-    /** Depois de reiniciar, sem buscar de novo: fica quem chega num endereço com o valor que o jogo mostra agora. */
-    suspend fun filterPointersByValue(type: String, values: String): String = call { d ->
+    /** Fica quem chega num endereço com o valor que o jogo mostra agora; sobrando um, já passa a usá-lo. */
+    suspend fun filterPointersByValue(item: SavedItem, values: String): String = call { d ->
         val wanted = parseValues(values)
-        val before = Session.pointers.size
-        Session.pointers = Session.pointers.filter { c ->
-            val a = runCatching { d.send("resolve $c", quiet = true).status }.getOrNull() ?: return@filter false
-            matchesAny(runCatching { d.send("read $a $type", quiet = true).status }.getOrDefault("?"), type, wanted)
-        }
-        storePointers()
-        Diag.add("Ponteiros filtrados pelo valor $values (${TYPE_NAMES[type]}): ${Session.pointers.size} de $before")
+        val before = item.chains.size
+        val kept = d.matching(item.chains, item.type) { matchesAny(it, item.type, wanted) }
+        replace(item) { it.copy(chains = kept.map { it.first }) }
+        Diag.add("Ponteiros de ${label(item)} filtrados pelo valor $values: ${kept.size} de $before")
+        val one = kept.map { it.second }.distinct().size == 1
+        if (kept.isNotEmpty() && one) d.usePointer(item, kept.first().first)
         Session.pointerInfo = when {
-            Session.pointers.isEmpty() -> "Nenhum caminho chega nesse valor. Confira o número, ou busque ponteiros de novo com mais níveis."
-            Session.pointers.size > 3 -> "${Session.pointers.size} de $before chegam nesse valor. Mude o valor no jogo e filtre de novo."
-            else -> "${Session.pointers.size} de $before chegam nesse valor. Toque em Usar."
+            kept.isEmpty() -> "Nenhum caminho chega nesse valor. Confira o número, ou busque ponteiros de novo com mais níveis."
+            one -> "Pronto: ${label(item)} agora segue o ponteiro e volta sozinho quando o jogo reabrir."
+            else -> "${kept.size} de $before chegam nesse valor. Mude o valor no jogo e filtre de novo."
         }
         Session.pointerInfo
+    }
+
+    /** Caminhos (e o endereço onde cada um chega) cujo valor lido passa no teste. */
+    private fun Daemon.matching(chains: List<String>, type: String, ok: (String) -> Boolean): List<Pair<String, String>> = chains.mapNotNull { c ->
+        val a = runCatching { send("resolve $c", quiet = true).status }.getOrNull() ?: return@mapNotNull null
+        val v = runCatching { send("read $a $type", quiet = true).status }.getOrNull() ?: return@mapNotNull null
+        if (ok(v)) c to a else null
     }
 
     fun setPointer(item: SavedItem, chain: String) {
-        Diag.add("Salvo 0x${item.addr} ${if (chain.isEmpty()) "sem ponteiro" else "agora segue o ponteiro $chain"}")
+        Diag.add("Salvo ${label(item)} ${if (chain.isEmpty()) "sem ponteiro" else "agora segue o ponteiro $chain"}")
         replace(item) { it.copy(pointer = chain, anchor = "", offset = 0) }
         if (chain.isNotEmpty()) linkNear(item.copy(pointer = chain))
     }
 
-    /** Liga os salvos soltos perto de um com ponteiro (mesma ficha): eles passam a segui-lo pelo offset. */
+    private fun Daemon.usePointer(item: SavedItem, chain: String) {
+        setPointer(item, chain)
+        Session.saved.firstOrNull { it.id == item.id }?.let { resolve(it) }
+    }
+
+    private fun label(item: SavedItem) = item.name.ifEmpty { "0x" + item.addr }
+
+    /**
+     * Liga os salvos soltos perto de `anchor` (mesma ficha do jogo, mesmo processo): passam a segui-lo pelo offset.
+     * Só no mesmo processo: o offset entre dois endereços de outra vez do jogo não quer dizer nada.
+     */
     private fun linkNear(anchor: SavedItem) {
+        if (anchor.pid == 0 || anchor.anchor.isNotEmpty()) return
         val base = anchor.addr.toLong(16)
         val linked = Session.saved.filter {
-            it.id != anchor.id && it.pointer.isEmpty() && it.anchor.isEmpty() && kotlin.math.abs(it.addr.toLong(16) - base) <= SAME_STRUCT
+            it.id != anchor.id && it.pid == anchor.pid && it.pointer.isEmpty() && it.anchor.isEmpty() &&
+                Session.saved.none { f -> f.anchor == it.id } && kotlin.math.abs(it.addr.toLong(16) - base) <= SAME_STRUCT
         }
         linked.forEach { item -> replace(item) { it.copy(anchor = anchor.id, offset = it.addr.toLong(16) - base) } }
-        if (linked.isNotEmpty()) Diag.add("${linked.size} salvos agora seguem ${anchor.name.ifEmpty { "0x" + anchor.addr }}: " +
-            linked.joinToString { "${it.name.ifEmpty { "0x" + it.addr }} ${offsetText(it.addr.toLong(16) - base)}" })
+        if (linked.isNotEmpty()) Diag.add("${linked.size} salvos agora seguem ${label(anchor)}: " +
+            linked.joinToString { "${label(it)} ${offsetText(it.addr.toLong(16) - base)}" })
     }
 
     fun unlink(item: SavedItem) {
-        Diag.add("Salvo 0x${item.addr} não segue mais outro salvo")
+        Diag.add("Salvo ${label(item)} não segue mais outro salvo")
         replace(item) { it.copy(anchor = "", offset = 0) }
     }
 
-    /** Recalcula o endereço de um salvo com ponteiro; devolve o salvo atualizado. */
-    private fun Daemon.resolve(item: SavedItem): SavedItem {
-        if (!isAttached) return item
+    /** Recalcula o endereço de um salvo com ponteiro ou offset; devolve o salvo atualizado (pid = processo atual se deu certo). */
+    private fun Daemon.resolve(item: SavedItem, depth: Int = 0): SavedItem {
+        if (!isAttached || depth > 4) return item
         val a = if (item.anchor.isNotEmpty()) {
-            // resolve a âncora antes: depois de reiniciar, escrever no offset da âncora velha seria escrever em lugar errado
-            val anchor = Session.saved.firstOrNull { it.id == item.anchor }?.let { resolve(it) } ?: return item
+            // a âncora precisa valer neste processo: o offset da âncora velha cairia em lugar errado
+            val anchor = Session.saved.firstOrNull { it.id == item.anchor }?.let { resolve(it, depth + 1) } ?: return item
+            if (anchor.pid != currentPid) return item
             (anchor.addr.toLong(16) + item.offset).toString(16)
         } else {
             if (item.pointer.isEmpty()) return item
             runCatching { send("resolve ${item.pointer}", quiet = true).status }.getOrNull() ?: return item
         }
-        // outro salvo já está nesse endereço: não duplica (a lista usa endereço+tipo como chave)
-        if (a == item.addr || Session.saved.any { it.addr == a && it.type == item.type }) return item
-        Diag.add("${if (item.anchor.isNotEmpty()) "Offset" else "Ponteiro"} ${item.name.ifEmpty { item.pointer.ifEmpty { "0x" + item.addr } }}: 0x${item.addr} → 0x$a")
-        replace(item) { it.copy(addr = a) }
-        return item.copy(addr = a)
+        return moveTo(item, a, if (item.anchor.isNotEmpty()) "Offset" else "Ponteiro")
     }
 
-    private fun storePointers() = runCatching { pointersFile.writeText(Session.pointersFor + "\n" + Session.pointers.joinToString("\n")) }
+    /** Põe o salvo em addr neste processo; outro salvo do mesmo tipo já ali: não duplica. */
+    private fun moveTo(item: SavedItem, addr: String, how: String): SavedItem {
+        if (addr != item.addr && Session.saved.any { it.id != item.id && it.addr == addr && it.type == item.type }) return item
+        if (addr == item.addr && item.pid == currentPid) return item
+        if (addr != item.addr) Diag.add("$how ${label(item)}: 0x${item.addr} → 0x$addr")
+        val moved = item.copy(addr = addr, pid = currentPid)
+        replace(item) { it.copy(addr = addr, pid = currentPid) }
+        return moved
+    }
 
-    private fun loadPointers() {
-        val lines = runCatching { pointersFile.readLines() }.getOrDefault(emptyList())
-        Session.pointersFor = lines.firstOrNull().orEmpty()
-        Session.pointers = lines.drop(1).filter { POINTER.matches(it) }
-        Session.pointerInfo = ""
+    /**
+     * Ao escolher o jogo: cada salvo de outra vez do jogo tenta voltar sozinho, nesta ordem:
+     * ponteiro em uso → caminhos guardados (pelo último valor) → assinatura. Quem segue outro pelo offset vem por último.
+     */
+    private fun Daemon.restoreAll(pid: Int): String {
+        val back = mutableListOf<String>()
+        val lost = mutableListOf<String>()
+        Session.saved.toList().sortedBy { it.anchor.isNotEmpty() }.forEach { old ->
+            val item = Session.saved.firstOrNull { it.id == old.id } ?: return@forEach
+            if (item.pid == pid) return@forEach  // mesmo processo: o endereço ainda vale
+            val how = when {
+                item.pointer.isNotEmpty() -> "ponteiro".takeIf { resolve(item).pid == pid }
+                item.anchor.isNotEmpty() -> "offset".takeIf { resolve(item).pid == pid }
+                else -> null
+            } ?: fromChains(item, pid) ?: fromSignature(item, pid)
+            when {
+                how != null -> back += "${label(item)} ($how)"
+                item.pid != 0 || item.chains.isNotEmpty() || item.sig.isNotEmpty() -> lost += label(item)
+            }
+        }
+        if (back.isEmpty() && lost.isEmpty()) return ""
+        val msg = (if (back.isEmpty()) "" else "Voltaram sozinhos: ${back.joinToString()}. ") +
+            (if (lost.isEmpty()) "" else "Não achados (busque de novo): ${lost.joinToString()}.")
+        Diag.add("Restauração dos salvos: $msg")
+        return msg.trim()
+    }
+
+    /** Caminhos guardados: fica quem chega no último valor conhecido; se todos chegam no mesmo endereço, usa o melhor. */
+    private fun Daemon.fromChains(item: SavedItem, pid: Int): String? {
+        if (item.chains.isEmpty()) return null
+        val wanted = runCatching { parseValues(readable(item.value, item.type) ?: return null) }.getOrNull() ?: return null
+        val kept = matching(item.chains, item.type) { matchesAny(it, item.type, wanted) }
+        if (kept.isEmpty() || kept.map { it.second }.distinct().size != 1) {
+            if (kept.isNotEmpty()) replace(item) { it.copy(chains = kept.map { k -> k.first }) }
+            return null
+        }
+        usePointer(item, kept.first().first)
+        return "ponteiro".takeIf { Session.saved.firstOrNull { it.id == item.id }?.pid == pid }
+    }
+
+    /** Assinatura: procura os bytes em volta; vale se sobrar um lugar só (com o último valor, ou o único achado). */
+    private fun Daemon.fromSignature(item: SavedItem, pid: Int): String? {
+        if (!sigUseful(item.sig)) return null
+        val places = runCatching { send("aobfind ${item.sig}", quiet = true).lines }.getOrNull()
+            ?.map { (it.toLong(16) + item.sigOff).toString(16) } ?: return null
+        val wanted = runCatching { parseValues(readable(item.value, item.type) ?: "x") }.getOrNull()
+        val same = if (wanted == null) emptyList() else places.filter { a ->
+            matchesAny(runCatching { send("read $a ${item.type}", quiet = true).status }.getOrDefault("?"), item.type, wanted)
+        }
+        val addr = same.singleOrNull() ?: places.singleOrNull() ?: return null
+        return "assinatura".takeIf { moveTo(item, addr, "Assinatura").pid == pid }
+    }
+
+    /** Aprende a assinatura enquanto o jogo roda: bytes em volta que mudaram viram ??. */
+    private fun Daemon.learnSig(item: SavedItem) {
+        val vlen = if (item.type.startsWith("x")) 8 else TYPE_SIZES.getValue(item.type)  // cifrado: chave + valor
+        val a = item.addr.toLong(16)
+        val start = (a - SIG_SIDE).coerceAtLeast(0) / 8 * 8
+        val words = ((a + vlen + SIG_SIDE - start + 7) / 8).toInt()
+        val lines = runCatching { send("dump ${start.toString(16)} i64 $words", quiet = true).lines }.getOrNull() ?: return
+        val raw = ByteArray(words * 8)
+        if (lines.size != words) return
+        lines.forEachIndexed { i, l ->
+            val v = l.substringAfter(' ').toLongOrNull() ?: return  // "?" = parte sem mapa: tenta de novo depois
+            for (k in 0 until 8) raw[i * 8 + k] = (v shr (8 * k)).toByte()
+        }
+        val off = (a - start).toInt()
+        val fresh = signature(raw, off, vlen)
+        val merged = if (item.sig.length != fresh.length || item.sigOff != off) fresh else mergeSig(item.sig, fresh)
+        if (merged != item.sig || off != item.sigOff) replace(item) { it.copy(sig = merged, sigOff = off) }
+    }
+
+    /** Busca AOB do usuário: os achados viram resultados (como Dword) para ver, salvar e editar. */
+    suspend fun searchAob(pattern: String, code: Boolean): String = call { d ->
+        val p = pattern.replace(" ", "").lowercase()
+        require(AOB.matches(p) && p.chunked(2).any { it != "??" }) { "Padrão inválido: use pares hex e ?? (ex.: 1F 20 ?? D5)" }
+        val n = d.frozenGame { d.send("aob $p ${if (code) "code" else "data"}") }.status
+        Session.canUndo = false
+        inFile = false
+        step(true, "AOB $pattern", n)
+        if (n == "0") "Nenhum lugar com esses bytes${if (code) " no código" else ""}." else "$n lugares com esses bytes."
     }
 
     /** Volta ao resultado de antes do último refino; tocar de novo refaz. */
@@ -548,21 +640,34 @@ class Engine private constructor(private val app: Context) {
 
     /** Salva vários de uma vez; com frozen=true já entram congelados no valor atual. */
     fun addSaved(hits: List<Hit>, frozen: Boolean = false) {
+        val added = mutableListOf<SavedItem>()
         hits.forEach { hit ->
             val i = Session.saved.indexOfFirst { it.addr == hit.addr && it.type == hit.type }
-            if (i < 0) Session.saved.add(SavedItem(hit.addr, hit.type, hit.region, hit.value, frozen))
+            if (i < 0) SavedItem(hit.addr, hit.type, hit.region, hit.value, frozen, pid = currentPid).also { Session.saved.add(it); added += it }
             else if (frozen) Session.saved[i] = Session.saved[i].copy(frozen = true)
         }
-        // salvo novo perto de um com ponteiro: entra na mesma ficha sozinho
-        Session.saved.filter { it.pointer.isNotEmpty() }.forEach(::linkNear)
+        // mesma ficha: os salvos perto do primeiro (deste processo) passam a segui-lo pelo offset
+        added.forEach { new ->
+            val cur = Session.saved.firstOrNull { it.id == new.id } ?: return@forEach
+            if (cur.anchor.isNotEmpty()) return@forEach
+            Session.saved.firstOrNull {
+                it.id != cur.id && it.pid == cur.pid && it.anchor.isEmpty() && kotlin.math.abs(it.addr.toLong(16) - cur.addr.toLong(16)) <= SAME_STRUCT
+            }?.let(::linkNear)
+        }
+        // ponteiros já preparados para quando o jogo reabrir (pausa o jogo por alguns segundos)
+        if (Session.autoPointers && added.size in 1..3) scope.launch {
+            added.mapNotNull { a -> Session.saved.firstOrNull { it.id == a.id && it.anchor.isEmpty() } }.forEach { item ->
+                Session.pointerInfo = "Preparando ponteiros de ${label(item)}…"
+                runCatching { scanPointers(item) }.onFailure { Session.pointerInfo = "Ponteiros de ${label(item)}: ${it.message}" }
+            }
+        }
         Diag.add("${if (frozen) "Congelados" else "Salvos"} ${hits.size} endereços")
         storeSaved()
     }
 
     fun removeSaved(items: List<SavedItem>) {
-        val keys = items.map { it.addr + it.type }.toSet()
         val gone = items.map { it.id }.toSet()
-        Session.saved.removeAll { it.addr + it.type in keys }
+        Session.saved.removeAll { it.id in gone }
         // quem seguia um removido fica solto, no endereço atual
         Session.saved.replaceAll { if (it.anchor in gone) it.copy(anchor = "", offset = 0) else it }
         Diag.add("Removidos ${items.size} salvos")
@@ -577,9 +682,11 @@ class Engine private constructor(private val app: Context) {
     }
 
     suspend fun setSaved(items: List<SavedItem>, value: String): String {
-        val msg = writeMany(items.map { it.addr to it.type }, value)
-        items.forEach { item -> replace(item) { it.copy(value = value) } }
-        return msg
+        val live = items.filterNot(::stale)
+        if (live.isEmpty()) return "Esses salvos são de outra vez do jogo: busque o valor de novo (ou use ponteiro) antes de editar."
+        val msg = writeMany(live.map { it.addr to it.type }, value)
+        live.forEach { item -> replace(item) { it.copy(value = value) } }
+        return msg + if (live.size < items.size) " ${items.size - live.size} de outra vez do jogo ficaram de fora." else ""
     }
 
     fun rename(item: SavedItem, name: String) {
@@ -622,6 +729,8 @@ class Engine private constructor(private val app: Context) {
         if (!d.isAttached) return@call
         Session.saved.toList().forEach { old ->
             val item = d.resolve(old)
+            if (stale(item)) return@forEach  // endereço de outra vez do jogo: não lê lixo
+            if (item.pid == currentPid) d.learnSig(item)
             if (item.frozen) return@forEach
             val v = runCatching { d.send("read ${item.addr} ${item.type}", quiet = true).status }.getOrDefault("?")
             if (v != item.value) replace(item) { it.copy(value = v) }
@@ -629,7 +738,7 @@ class Engine private constructor(private val app: Context) {
     }
 
     private fun replace(item: SavedItem, change: (SavedItem) -> SavedItem) {
-        val i = Session.saved.indexOfFirst { it.addr == item.addr && it.type == item.type }
+        val i = Session.saved.indexOfFirst { it.id == item.id }
         if (i >= 0) Session.saved[i] = change(Session.saved[i])
         storeSaved()
     }
@@ -643,6 +752,7 @@ class Engine private constructor(private val app: Context) {
             if (frozen.isEmpty() || d == null || !d.isAttached) continue
             for (old in frozen) {
                 val item = d.resolve(old)
+                if (stale(item)) continue  // escrever no endereço velho pode derrubar o jogo
                 val key = item.addr + item.type
                 try {
                     d.send("write ${item.addr} ${item.type} ${item.value}", quiet = true)
@@ -667,7 +777,6 @@ class Engine private constructor(private val app: Context) {
             Session.saved.clear()
             loadSaved()
         }
-        loadPointers()
         Diag.add("Salvos do jogo $pkg: ${Session.saved.size}${if (adopt) " (lista anterior adotada)" else ""}")
     }
 
@@ -704,12 +813,35 @@ internal fun normalizeNumbers(input: String): String =
     }.filter { it.isNotEmpty() }.joinToString(";")
 
 private fun SavedItem.toJson() = JSONObject().put("addr", addr).put("type", type).put("region", region).put("value", value).put("name", name).put("frozen", frozen)
-    .put("pointer", pointer).put("id", id).put("anchor", anchor).put("offset", offset)
+    .put("pointer", pointer).put("id", id).put("anchor", anchor).put("offset", offset).put("pid", pid)
+    .put("chains", JSONArray(chains)).put("sig", sig).put("sigOff", sigOff)
+
+private val AOB = Regex("""([0-9a-f]{2}|\?\?){1,192}""")
 
 /** Caminho de ponteiro aceito: vai direto para o daemon, então nada de espaço extra, quebra de linha ou outro comando. */
 private val POINTER = Regex("""[^\s+]{1,100}\+[0-9a-f]{1,16}( [0-9a-f]{1,8}){0,7}""")
 
 val COMPARE_NAMES = mapOf("inc" to "aumentou", "dec" to "diminuiu", "same" to "não mudou", "changed" to "mudou", "incby" to "aumentou", "decby" to "diminuiu")
+
+/** Bytes em volta do valor → assinatura hex, com ?? no próprio valor e em tudo que parece ponteiro (muda a cada vez que o jogo abre). */
+internal fun signature(raw: ByteArray, off: Int, vlen: Int): String {
+    val wild = BooleanArray(raw.size) { it in off until off + vlen }
+    for (w in 0 until raw.size / 8) {
+        var q = 0L
+        for (k in 7 downTo 0) q = (q shl 8) or (raw[w * 8 + k].toLong() and 0xff)
+        if ((q and 0x00ffffffffffffffL) in 0x10000000L until 0x10000000000L) for (k in 0 until 8) wild[w * 8 + k] = true
+    }
+    return raw.indices.joinToString("") { if (wild[it]) "??" else "%02x".format(raw[it]) }
+}
+
+/** Junta duas leituras da assinatura: o byte que mudou vira ??. */
+internal fun mergeSig(old: String, new: String) = old.chunked(2).zip(new.chunked(2)).joinToString("") { (a, b) -> if (a == b) a else "??" }
+
+/** Assinatura que serve para achar de novo: bytes fixos suficientes, e não só zeros. */
+internal fun sigUseful(sig: String): Boolean {
+    val fixed = sig.chunked(2).filter { it != "??" }
+    return fixed.size >= 12 && fixed.count { it != "00" } >= 4
+}
 
 fun offsetText(o: Long) = (if (o < 0) "-0x" else "+0x") + kotlin.math.abs(o).toString(16).uppercase()
 
@@ -737,7 +869,12 @@ private fun JSONObject.toSaved(): SavedItem {
     val pointer = optString("pointer", "")
     require(pointer.isEmpty() || POINTER.matches(pointer)) { "Ponteiro inválido na lista: $pointer" }
     val base = SavedItem(addr, type, optString("region", "?"), optString("value", "?"), optBoolean("frozen", false), optString("name", ""), pointer)
-    return base.copy(id = optString("id", "").ifEmpty { base.id }, anchor = optString("anchor", ""), offset = optLong("offset", 0))
+    val chains = optJSONArray("chains")?.let { a -> List(a.length()) { a.getString(it) } }.orEmpty().filter { POINTER.matches(it) }.take(MAX_CHAINS)
+    val sig = optString("sig", "").takeIf { AOB.matches(it) }.orEmpty()  // vai direto para o daemon: só hex e ??
+    return base.copy(
+        id = optString("id", "").ifEmpty { base.id }, anchor = optString("anchor", ""), offset = optLong("offset", 0),
+        pid = optInt("pid", 0), chains = chains, sig = sig, sigOff = optInt("sigOff", 0).coerceIn(0, 191),
+    )
 }
 
 /** "50;75" ou "100~200" ou misturado ("50;100~200"); cada item vira uma faixa (um número é a faixa dele mesmo). */

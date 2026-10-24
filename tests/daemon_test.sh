@@ -111,6 +111,20 @@ mapfile -t r < <(sed 1,2d <<<"$res")
 [ "${r[0]}" = "ok $paddr" ] && [[ "${r[1]}" =~ ^ok\ [0-9a-f]+$ ]] && [ "${r[2]}" = "err módulo nada.so não carregado" ] \
     && [ "${r[3]}" = "err ponteiro inválido" ] || { echo "FALHOU: resolve"; exit 1; }
 
+# Ponteiros só em libs do jogo (/data/...): o alvo do teste está em /tmp, então nenhum caminho
+only=$(printf '%s\n' "attach $pid" "pointers $paddr 256 3 1" | "$out/tinkerd" | tail -1)
+[ "$only" = "ok 0 0" ] || { echo "FALHOU: só libs do jogo ($only)"; exit 1; }
+
+# AOB: qualquer Dword (curinga) seguido de 555 e 0; no código acha um "mov rbp, rsp" comum
+aob=$(printf '%s\n' "attach $pid" "aob ????????2b02000000000000 data" "list 50" "aobfind ????????2B02000000000000" "aob ZZ data" "aob ???? data" | "$out/tinkerd")
+echo "$aob"
+grep -qE "^$iaddr i32 (Ch|A) 987654001$" <<<"$aob" || { echo "FALHOU: aob na lista"; exit 1; }
+mapfile -t ab < <(grep -E '^(ok|err)' <<<"$aob")
+[[ "${ab[2]}" =~ ^ok\ [1-9] ]] && grep -qx "$iaddr" <<<"$aob" && [ "${ab[5]}" = "err padrão inválido: ZZ" ] && [ "${ab[6]}" = "err padrão inválido: ????" ] \
+    || { echo "FALHOU: aob"; exit 1; }
+code=$(printf '%s\n' "attach $pid" "aob 4889e5 code" | "$out/tinkerd" | tail -1)
+[[ "$code" =~ ^ok\ [1-9] ]] || { echo "FALHOU: aob no código ($code)"; exit 1; }
+
 # Daemon saindo com o jogo pausado (app caiu no meio da busca): o jogo tem que voltar a rodar
 printf '%s\n' "attach $pid" "pause" | "$out/tinkerd" >/dev/null
 grep -q '^State:.*S (sleeping)' /proc/$pid/status || { echo "FALHOU: jogo ficou pausado após EOF"; grep State /proc/$pid/status; exit 1; }

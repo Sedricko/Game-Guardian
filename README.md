@@ -61,22 +61,25 @@ Se o mesmo número aparecer normal e com 🔒, edite o 🔒. Dá para desligar e
 2. Perca vida e toque em **Diminuiu**; sem mudar nada, toque em **Não mudou**. Repita até sobrar pouco.
 3. Sabe quanto mudou? Digite o número e toque em **Diminuiu 10** / **Aumentou 10**.
 
-## Ponteiros (como no Cheat Engine)
+## Ponteiros, offsets e assinatura (automático)
 
-Quando o jogo reinicia, os endereços mudam. Um ponteiro é um caminho fixo até o valor,
-por exemplo `[[libil2cpp.so+1A2B30]+18]+40`, que o Tinker segue sozinho toda vez.
+Quando o jogo reinicia, os endereços mudam. O Tinker cuida disso sozinho:
 
-1. Na aba **Salvos**, abra o valor e toque em **Buscar ponteiros**.
-2. Feche e abra o jogo e abra o mesmo salvo.
-3. Digite o valor que o jogo mostra agora e toque em **Filtrar pelo valor**. Sobrou muito? Mude o valor no jogo e filtre de novo.
-4. Toque em **Usar**. O salvo passa a mostrar 🔗 e vale em todas as próximas vezes.
+1. **Ao salvar** um valor, ele já busca os ponteiros (como o Pointer scan do Cheat Engine, com base só nas libs do jogo)
+   e aprende a **assinatura**: os bytes em volta do valor que não mudam.
+2. Salvos perto um do outro (até 4 KB, a mesma "ficha": ouro, gema, energia) ficam ligados pelo **offset** (**↳ Ouro +0x8**).
+3. **Ao reabrir o jogo** e escolher ele no Tinker, cada salvo volta sozinho: ponteiro em uso → caminhos guardados
+   (testados com o último valor) → assinatura. Os da mesma ficha vêm junto. O resultado aparece no topo da aba Salvos.
+4. Sobrou dúvida entre vários caminhos? Abra o salvo, digite o valor que o jogo mostra e toque em **Filtrar pelo valor**.
 
-Também dá para achar o valor de novo, salvar e tocar em **Filtrar por este endereço** no novo salvo.
+Salvo com **⚠ de outra vez do jogo** não é lido nem escrito até voltar (escrever no endereço velho pode derrubar o jogo).
+Marque dois salvos para ver a distância entre eles; na aba Memória dá para ir a `7a0010+8`.
+Em **Ajustes**: "Preparar ponteiros ao salvar" e "Ponteiros só nas libs do jogo". Jogos 32 bits são reconhecidos sozinhos.
 
-Os outros salvos a até 4 KB do que ganhou ponteiro (a mesma "ficha": ouro, gema, energia) passam a segui-lo pelo offset (**↳ Ouro +0x8**):
-ao reabrir o jogo, achando um, os outros vêm juntos. Marque dois salvos para ver a distância; na aba Memória dá para ir a `7a0010+8`.
+## Busca por bytes (AOB)
 
-Sem resultado? Aumente **Níveis** (até 7) ou **Distância máx.** Jogos 32 bits são reconhecidos sozinhos.
+Aba **Busca → Busca por bytes**: pares hex com `??` como curinga, por exemplo `1F 20 03 D5 ?? ?? 00 B9`.
+**Dados** procura na memória do jogo; **Código** procura nas instruções. Os lugares achados viram resultados normais.
 
 ## Reportar um problema
 

@@ -90,4 +90,17 @@ class ValuesTest {
         assertEquals("+0x8", offsetText(8))
         assertEquals("-0x20", offsetText(-32))
     }
+
+    @Test
+    fun assinaturaTiraOValorEOsPonteiros() {
+        // 8 bytes fixos, o valor (4 bytes) e um ponteiro de heap (0xb400007a12345678, com a marca do arm64)
+        val raw = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8, 9, 9, 9, 9, 0, 0, 0, 0) +
+            byteArrayOf(0x78, 0x56, 0x34, 0x12, 0x7a, 0, 0, 0xb4.toByte())
+        val sig = signature(raw, off = 8, vlen = 4)
+        assertEquals("0102030405060708" + "????????" + "00000000" + "????????????????", sig)
+        assertEquals("01??03", mergeSig("010203", "01ff03"))
+        assertFalse(sigUseful("????????00000000"))
+        assertTrue(sigUseful("0102030405060708090a0b0c????"))
+        assertFalse(sigUseful("000000000000000000000000000001"))  // só zeros não identifica nada
+    }
 }

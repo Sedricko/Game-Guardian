@@ -47,6 +47,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -341,6 +342,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                 }
                 if (s.canUndo) TextButton(onClick = { run { engine.undo() } }, enabled = enabled) { Text("↶ Desfazer último refino") }
                 UnknownSearch(engine, enabled, run)
+                AobSearch(engine, enabled, run)
                 Text(s.status, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 TextButton(onClick = { s.view = null; s.tab = TAB_MEMORY }, enabled = s.process != null) { Text("Ir para endereço…") }
             }
@@ -431,6 +433,26 @@ private fun UnknownSearch(engine: Engine, enabled: Boolean, run: (suspend () -> 
     }
 }
 
+/** Busca por sequência de bytes (AOB), com ?? como curinga; nos dados ou no código do jogo. */
+@Composable
+private fun AobSearch(engine: Engine, enabled: Boolean, run: (suspend () -> String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    var pattern by remember { mutableStateOf("") }
+    var code by remember { mutableStateOf(false) }
+    TextButton(onClick = { open = !open }) { Text((if (open) "▾ " else "▸ ") + "Busca por bytes (AOB)") }
+    if (!open) return
+    OutlinedTextField(
+        pattern, { pattern = it }, label = { Text("Bytes (ex.: 1F 20 03 D5 ?? ?? 00 B9)") }, singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii), textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace),
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilterChip(selected = !code, onClick = { code = false }, label = { Text("Dados") })
+        FilterChip(selected = code, onClick = { code = true }, label = { Text("Código") })
+        Button(onClick = { run { engine.searchAob(pattern, code) } }, enabled = enabled && pattern.isNotBlank()) { Text("Buscar bytes") }
+    }
+}
+
 /** Ponteiros de um salvo, como o "Pointer scan" do Cheat Engine: o valor é achado de novo mesmo depois de reiniciar o jogo. */
 @Composable
 private fun PointerPanel(engine: Engine, item: SavedItem, run: (suspend () -> String) -> Unit) {
@@ -455,34 +477,37 @@ private fun PointerPanel(engine: Engine, item: SavedItem, run: (suspend () -> St
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(0.6f))
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilledTonalButton(onClick = { run { engine.scanPointers(item.addr, maxOff.toIntOrNull() ?: 4096, levels.toIntOrNull() ?: 4) } }, enabled = !s.busy && s.process != null) {
-                Text("Buscar ponteiros")
-            }
-            // a lista é de outra vez do jogo (outro endereço): filtra pelo endereço novo do mesmo valor
-            if (s.pointers.isNotEmpty() && s.pointersFor != item.addr) {
-                OutlinedButton(onClick = { run { engine.filterPointers(item.addr) } }, enabled = !s.busy && s.process != null) { Text("Filtrar ${s.pointers.size} por este endereço") }
+            FilledTonalButton(onClick = { run { engine.scanPointers(item, maxOff.toIntOrNull() ?: 4096, levels.toIntOrNull() ?: 4) } }, enabled = !s.busy && s.process != null) {
+                Text(if (item.chains.isEmpty()) "Buscar ponteiros" else "Buscar de novo")
             }
         }
-        if (s.pointers.isNotEmpty()) {
-            // depois de reiniciar o jogo: não precisa buscar o valor de novo, só dizer quanto ele vale agora
+        if (item.chains.isNotEmpty()) {
+            Text(
+                "${item.chains.size} caminhos guardados. Ao reabrir o jogo, o Tinker testa com o último valor e escolhe sozinho.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            // se sobrarem vários: diga o valor que o jogo mostra agora
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(now, { now = it }, label = { Text("Valor agora no jogo") }, singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii), modifier = Modifier.weight(1f))
-                FilledTonalButton(onClick = { run { engine.filterPointersByValue(item.type, now) } }, enabled = !s.busy && s.process != null && now.isNotBlank()) {
+                FilledTonalButton(onClick = { run { engine.filterPointersByValue(item, now) } }, enabled = !s.busy && s.process != null && now.isNotBlank()) {
                     Text("Filtrar pelo valor")
                 }
             }
         }
         if (s.pointerInfo.isNotEmpty()) Text(s.pointerInfo, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (s.pointersFor == item.addr) {
-            s.pointers.take(30).forEach { chain ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(pointerText(chain), Modifier.weight(1f), fontFamily = FontFamily.Monospace, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    TextButton(onClick = { engine.setPointer(item, chain) }, enabled = chain != item.pointer) { Text(if (chain == item.pointer) "Em uso" else "Usar") }
-                }
+        item.chains.take(20).forEach { chain ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(pointerText(chain), Modifier.weight(1f), fontFamily = FontFamily.Monospace, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                TextButton(onClick = { engine.setPointer(item, chain) }, enabled = chain != item.pointer) { Text(if (chain == item.pointer) "Em uso" else "Usar") }
             }
-            if (s.pointers.size > 30) Text("…e mais ${s.pointers.size - 30}. Filtre para sobrar menos.", style = MaterialTheme.typography.bodySmall)
         }
+        if (item.chains.size > 20) Text("…e mais ${item.chains.size - 20}. Filtre para sobrar menos.", style = MaterialTheme.typography.bodySmall)
+        Text(
+            if (sigUseful(item.sig)) "Assinatura pronta (${item.sig.length / 2} bytes): plano B se nenhum ponteiro servir."
+            else "Assinatura: aprendendo os bytes em volta enquanto o jogo roda (deixe a aba Salvos aberta um pouco).",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -535,8 +560,8 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
             delay(1000)
         }
     }
-    val all = s.saved.map { it.addr + it.type }.toSet()
-    val chosen = s.saved.filter { it.addr + it.type in selected }
+    val all = s.saved.map { it.id }.toSet()
+    val chosen = s.saved.filter { it.id in selected }
     val targets = chosen.ifEmpty { s.saved.toList() }
     val label = if (chosen.isEmpty()) "todos" else "${chosen.size}"
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -561,6 +586,7 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
                 if (openFile != null) OutlinedButton(onClick = { openFile.launch(arrayOf("application/json", "text/plain", "*/*")) }) { Text("Abrir arquivo") }
             }
             info?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 4.dp)) }
+            if (s.restoreInfo.isNotEmpty()) Text(s.restoreInfo, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 4.dp))
         }
         if (s.saved.isEmpty()) {
             item {
@@ -601,11 +627,13 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
                 }
             }
         }
-        items(s.saved, key = { it.addr + it.type }) { item ->
-            val key = item.addr + item.type
+        items(s.saved, key = { it.id }) { item ->
+            val key = item.id
+            val old = engine.stale(item)
             val open = editing == key
             ResultCard(
                 shown(item.value, item.type), "0x${item.addr}" + when {
+                    old -> " · ⚠ de outra vez do jogo"
                     item.pointer.isNotEmpty() -> " · 🔗 ponteiro"
                     item.anchor.isNotEmpty() -> " · ↳ " + (s.saved.firstOrNull { it.id == item.anchor }?.let { it.name.ifEmpty { "0x" + it.addr } } ?: "?") + " " + offsetText(item.offset)
                     else -> ""
@@ -614,7 +642,7 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
                 checked = key in selected, onCheck = { selected = if (it) selected + key else selected - key }, title = item.name,
                 trailing = {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(start = 12.dp)) {
-                        Switch(checked = item.frozen, onCheckedChange = { engine.setFrozen(listOf(item), it) })
+                        Switch(checked = item.frozen, onCheckedChange = { engine.setFrozen(listOf(item), it) }, enabled = !old)
                         Text("Congelar", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 },
@@ -685,7 +713,10 @@ private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
                 value = goTo, onValueChange = { goTo = it.removePrefix("0x").trim() }, label = { Text("Endereço (ex.: 7a0010 ou 7a0010+8)") },
                 singleLine = true, modifier = Modifier.weight(1f),
             )
-            Button(onClick = { parseAddress(goTo)?.let { s.view = it to type } ?: run { error = "Endereço inválido: $goTo" } }) { Text("Ir") }
+            Button(onClick = {
+                val a = parseAddress(goTo)
+                if (a != null) s.view = a to type else error = "Endereço inválido: $goTo"
+            }) { Text("Ir") }
         }
         TypeChips(type) { t -> s.view = center to t }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -831,6 +862,22 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                     }
                     Switch(checked = s.findEncrypted, onCheckedChange = { s.findEncrypted = it })
                 }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Preparar ponteiros ao salvar", style = MaterialTheme.typography.bodyMedium)
+                        Text("Para o salvo voltar sozinho quando o jogo reabrir. Pausa o jogo alguns segundos depois de salvar.",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(checked = s.autoPointers, onCheckedChange = { s.autoPointers = it })
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Ponteiros só nas libs do jogo", style = MaterialTheme.typography.bodyMedium)
+                        Text("Base em libil2cpp, libunity e outras do jogo; as do sistema costumam dar caminhos que quebram.",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(checked = s.gameLibsOnly, onCheckedChange = { s.gameLibsOnly = it })
+                }
             }
         }
         if (overlay) {
@@ -912,10 +959,14 @@ private val HELP = listOf(
     "Offset e ficha" to "Valores do mesmo objeto do jogo (ouro, gema, energia) ficam sempre à mesma distância (offset). Quando um salvo ganha " +
         "ponteiro, os salvos a até 4 KB dele passam a segui-lo sozinhos (↳ Ouro +0x8): ao reabrir o jogo, achando um, os outros vêm juntos. " +
         "Marque dois salvos para ver a distância entre eles. Na aba Memória dá para ir a 7a0010+8.",
+    "Busca por bytes (AOB)" to "Na aba Busca, abra Busca por bytes: digite pares hex com ?? como curinga (1F 20 ?? D5). Dados procura na memória " +
+        "do jogo; Código procura nas instruções. Os lugares achados viram resultados normais.",
     "Endereços mudaram" to "Quando o jogo reinicia, os endereços mudam. Para um salvo continuar valendo, use um ponteiro (abaixo).",
-    "Ponteiros" to "Como no Cheat Engine. 1. Abra o salvo e toque em Buscar ponteiros. 2. Feche e abra o jogo e abra o mesmo salvo. " +
-        "3. Digite o valor que o jogo mostra agora e toque em Filtrar pelo valor (repita mudando o valor se sobrar muitos). 4. Toque em Usar. " +
-        "Daí em diante o Tinker acha o endereço sozinho toda vez que o jogo abrir. Sem resultado? Aumente os níveis ou a distância.",
+    "Ponteiros" to "Como no Cheat Engine, mas sozinho: ao salvar, o Tinker já busca os ponteiros e aprende a assinatura (bytes em volta). " +
+        "Ao reabrir o jogo e escolher ele no Tinker, cada salvo volta sozinho (ponteiro → caminhos guardados → assinatura); os da mesma ficha " +
+        "vêm junto pelo offset. Sobrou dúvida entre vários caminhos? Abra o salvo, digite o valor que o jogo mostra e toque em Filtrar pelo valor. " +
+        "Salvo com ⚠ é de outra vez do jogo e não é lido nem escrito até voltar. " +
+        "Sem nenhum caminho? Aumente os níveis ou a distância, ou desligue \"Ponteiros só nas libs do jogo\" em Ajustes.",
     "Reportar um problema" to "Na aba Registro, toque em Compartilhar relatório e envie o arquivo .txt. Ele tem tudo que é preciso para investigar.",
 )
 
