@@ -32,6 +32,9 @@ val TYPE_SIZES = mapOf("i8" to 1, "i16" to 2, "i32" to 4, "i64" to 8, "f32" to 4
 
 /** Tipo base: Dword 🔒 → Dword (a aba Memória mostra os bytes como estão). */
 fun plain(type: String) = type.removePrefix("x")
+/** Chave do Gemini que já vem no app (repositório privado, só para uso próprio). */
+private const val DEFAULT_GEMINI_KEY = "AQ.Ab8RN6Lp5RV67fXUwyvpsSE88Wn1ccPWgRbNnFuX-dAdYg8CFA"
+
 val TABS = listOf("Busca", "Salvos", "Memória", "Registro", "Ajustes")
 const val TAB_MEMORY = 2
 val PANEL_SIZES = listOf(0.5f to "Metade", 0.85f to "Grande", 1f to "Tela cheia")
@@ -265,6 +268,11 @@ class Engine private constructor(private val app: Context) {
         Session.aiKey = prefs.getString("aiKey", "").orEmpty()
         Session.aiProvider = prefs.getString("aiProvider", "claude").orEmpty()
         Session.geminiKey = prefs.getString("geminiKey", "").orEmpty()
+        // chave pré-definida (repositório privado, uso pessoal): entra uma vez só; apagou ou trocou, não volta
+        if (!prefs.getBoolean("defaultKeyGiven", false)) {
+            if (Session.geminiKey.isBlank()) { Session.geminiKey = DEFAULT_GEMINI_KEY; Session.aiProvider = "gemini" }
+            prefs.edit().putBoolean("defaultKeyGiven", true).putString("geminiKey", Session.geminiKey).putString("aiProvider", Session.aiProvider).apply()
+        }
         Session.geminiModel = prefs.getString("geminiModel", Session.geminiModel).orEmpty().ifBlank { "gemini-2.5-flash" }
         Session.alpha = prefs.getFloat("alpha", Session.alpha)
         Session.panelSize = prefs.getInt("panelSize2", Session.panelSize).coerceIn(0, PANEL_SIZES.lastIndex)  // chave nova: quem já usava volta uma vez para tela cheia, o novo padrão
