@@ -152,37 +152,44 @@ private fun Header(overlay: Boolean, onPick: () -> Unit, onMinimize: () -> Unit,
                     },
                     style = MaterialTheme.typography.labelSmall,
                     color = if (s.paused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
+            // a linha 1 só tem o nome e Minimizar: botões aqui espremiam o nome em uma letra por linha
+            if (overlay) TextButton(onClick = onMinimize, contentPadding = small) { Text("Minimizar") }
+            TextButton(onClick = onExit, contentPadding = small) { Text("Sair", color = MaterialTheme.colorScheme.error) }
+        }
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
             if (overlay) {
                 // como o olho do GameGuardian: segure para ver o jogo, solte para voltar
                 Box(
-                    Modifier.padding(end = 6.dp).clip(RoundedCornerShape(50)).background(MaterialTheme.colorScheme.secondaryContainer)
+                    Modifier.clip(RoundedCornerShape(50)).background(MaterialTheme.colorScheme.secondaryContainer)
                         .pointerInput(Unit) { detectTapGestures(onPress = { s.peek = true; tryAwaitRelease(); s.peek = false }) }
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                ) { Text("👁 Espiar", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSecondaryContainer) }
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                ) { Text("👁 Espiar", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSecondaryContainer, maxLines = 1) }
             }
-            FilledTonalButton(onClick = onPick, enabled = !s.busy, contentPadding = small) { Text(if (p == null) "Escolher jogo" else "Trocar") }
-            if (overlay) TextButton(onClick = onMinimize, contentPadding = small) { Text("Minimizar") }
-        }
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            FilledTonalButton(onClick = onPick, enabled = !s.busy, contentPadding = small) { Text(if (p == null) "Escolher jogo" else "Trocar jogo", maxLines = 1) }
             if (p != null) {
                 OutlinedButton(onClick = { run { if (s.paused) engine.resume() else engine.pause() } }, enabled = !s.busy, contentPadding = small) {
-                    Text(if (s.paused) "Continuar" else "Pausar")
+                    Text(if (s.paused) "Continuar" else "Pausar", maxLines = 1)
                 }
                 OutlinedButton(onClick = {
                     if (confirmKill) run { engine.killGame() }
                     confirmKill = !confirmKill
-                }, enabled = !s.busy, contentPadding = small) { Text(if (confirmKill) "Confirmar" else "Fechar jogo") }
+                }, enabled = !s.busy, contentPadding = small) { Text(if (confirmKill) "Confirmar" else "Fechar jogo", maxLines = 1) }
             }
             if (overlay) {
-                OutlinedButton(onClick = onResize, contentPadding = small) { Text("Tamanho: ${PANEL_SIZES[s.panelSize].second}") }
-                Text("Transparência", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Slider(value = s.alpha, onValueChange = { s.alpha = it }, valueRange = 0.35f..1f, modifier = Modifier.width(140.dp))
+                OutlinedButton(onClick = onResize, contentPadding = small) { Text("Tamanho: ${PANEL_SIZES[s.panelSize].second}", maxLines = 1) }
             } else {
-                Button(onClick = onOpenOverlay, contentPadding = small) { Text("Menu flutuante") }
+                Button(onClick = onOpenOverlay, contentPadding = small) { Text("Menu flutuante", maxLines = 1) }
             }
-            TextButton(onClick = onExit, contentPadding = small) { Text("Sair", color = MaterialTheme.colorScheme.error) }
+        }
+        if (overlay) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Transparência", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                Slider(value = s.alpha, onValueChange = { s.alpha = it }, valueRange = 0.35f..1f, modifier = Modifier.padding(start = 12.dp).weight(1f))
+            }
         }
     }
 }
