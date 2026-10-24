@@ -122,6 +122,23 @@ fun TinkerPanel(
         Column {
             Header(overlay, onPick = { picking = true }, onMinimize = onMinimize, onOpenOverlay = onOpenOverlay, onExit = onExit, run = run, onQuickBar = onQuickBar)
             error?.let { Banner(it) { error = null } }
+            s.gameGone?.let { gone ->
+                // como o GameGuardian: o jogo fechou, pergunta se reabre
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                ) {
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                        Text("${gone.label} fechou. Reabrir o jogo?", color = MaterialTheme.colorScheme.onTertiaryContainer, style = MaterialTheme.typography.titleSmall)
+                        Text("O motivo da queda fica na aba Registro. Ao reabrir, os salvos voltam sozinhos.",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = { s.status = engine.relaunch(); if (overlay) onMinimize() }) { Text("Reabrir") }
+                            TextButton(onClick = { s.gameGone = null }) { Text("Agora não") }
+                        }
+                    }
+                }
+            }
             s.update?.let { (version, url) ->
                 val context = LocalContext.current
                 Card(
@@ -998,6 +1015,8 @@ private val HELP = listOf(
         "Salvo com ⚠ é de outra vez do jogo e não é lido nem escrito até voltar; se estava congelado, volta congelado. " +
         "Com o Tinker aberto, quando o jogo reabre ele é escolhido de novo sozinho; enquanto o jogo carrega, o Tinker tenta de novo por 5 minutos. " +
         "Sem nenhum caminho? Aumente os níveis ou a distância, ou desligue \"Ponteiros só nas libs do jogo\" em Ajustes.",
+    "O jogo fechou" to "Quando o jogo fecha sozinho (queda ou fechado pelo Android), o Tinker percebe em alguns segundos, abre o menu " +
+        "flutuante e pergunta se quer reabrir. Reabrindo, ele se liga ao jogo e os salvos voltam sozinhos. O motivo da queda fica na aba Registro.",
     "Reportar um problema" to "Na aba Registro, toque em Compartilhar relatório e envie o arquivo .txt. Ele tem tudo que é preciso para investigar.",
 )
 

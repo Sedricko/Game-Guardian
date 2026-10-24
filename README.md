@@ -85,6 +85,11 @@ Em **Ajustes**: "Preparar ponteiros ao salvar" e "Ponteiros só nas libs do jogo
 Aba **Busca → Busca por bytes**: pares hex com `??` como curinga, por exemplo `1F 20 03 D5 ?? ?? 00 B9`.
 **Dados** procura na memória do jogo; **Código** procura nas instruções. Os lugares achados viram resultados normais.
 
+## O jogo fechou
+
+Quando o jogo fecha sozinho, o Tinker percebe em alguns segundos, abre o menu flutuante e pergunta **"Reabrir o jogo?"**.
+Reabrindo, ele se liga ao jogo e os salvos voltam sozinhos. Fechar pelo botão do Tinker não pergunta.
+
 ## Versão nova
 
 Ao abrir, o Tinker olha a página de releases e mostra **"Tinker X disponível → Baixar"**. Sem internet, não aparece nada e tudo funciona igual.

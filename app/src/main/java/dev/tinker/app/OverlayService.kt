@@ -24,6 +24,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -68,7 +74,18 @@ class OverlayService : Service() {
         owner.start()
         showBubble()
         Diag.add("Menu flutuante aberto")
+        // o jogo fechou sozinho: abre o painel com a pergunta "Reabrir o jogo?", como o GameGuardian
+        watch.launch {
+            snapshotFlow { Session.gameGone }.collect { gone ->
+                if (gone != null && panel == null) {
+                    closeBar()
+                    openPanel()
+                }
+            }
+        }
     }
+
+    private val watch = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) stopSelf()
@@ -79,6 +96,7 @@ class OverlayService : Service() {
         bubble?.let(wm::removeView)
         panel?.let(wm::removeView)
         bar?.let(wm::removeView)
+        watch.cancel()
         owner.stop()
         Diag.add("Menu flutuante fechado")
         super.onDestroy()

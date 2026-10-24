@@ -81,7 +81,8 @@ object Session {
     var autoPause by mutableStateOf(true)
     var findEncrypted by mutableStateOf(true)
     var useBar by mutableStateOf(false)
-    var update by mutableStateOf<Pair<String, String>?>(null)  // versão nova na página de releases: nome e link do APK  // a bolinha abre a barra rápida em vez do painel  // a busca também procura valores cifrados (🔒)
+    var update by mutableStateOf<Pair<String, String>?>(null)
+    var gameGone by mutableStateOf<GameProcess?>(null)  // o jogo fechou sozinho (não pelo Tinker): pergunta se reabre  // versão nova na página de releases: nome e link do APK  // a bolinha abre a barra rápida em vez do painel  // a busca também procura valores cifrados (🔒)
     var canUndo by mutableStateOf(false)  // há um refino para desfazer  // pausa o jogo durante busca/refino, para o valor não mudar no meio
     var view by mutableStateOf<Pair<String, String>?>(null)
     var tab by mutableIntStateOf(0)  // índice em TABS  // visualizador de memória: endereço e tipo  // segurando o "olho": painel quase invisível
@@ -167,6 +168,7 @@ class Engine private constructor(private val app: Context) {
         if (closedPid == p.pid) return
         closedPid = p.pid
         Session.paused = false
+        Session.gameGone = p
         // salvos com pid continuam congelados: ficam parados até voltar sozinhos quando o jogo reabrir
         Session.saved.replaceAll { if (it.pid == 0) it.copy(frozen = false) else it }
         Session.status = "O jogo fechou. Veja a aba Registro para o motivo."
@@ -252,7 +254,10 @@ class Engine private constructor(private val app: Context) {
     private suspend fun followOnce(startDaemon: Boolean): String? {
         val pkg = Session.process?.pkg ?: runCatching { lastGameFile.readText().trim() }.getOrNull()?.takeIf { it.isNotEmpty() } ?: return null
         val pid = call(start = startDaemon) { d ->
-            d.send("ps", quiet = true).lines.firstNotNullOfOrNull { l -> l.substringBefore(' ').toIntOrNull()?.takeIf { l.substringAfter(' ') == pkg } }
+            val pid = d.send("ps", quiet = true).lines.firstNotNullOfOrNull { l -> l.substringBefore(' ').toIntOrNull()?.takeIf { l.substringAfter(' ') == pkg } }
+            // o jogo sumiu sem nenhum comando falhar (estava só aberto): percebe aqui e pergunta se reabre
+            if (pid == null && Session.process != null) gameClosed(d)
+            pid
         } ?: return null
         if (pid == Session.process?.pid) return null
         val pm = app.packageManager
@@ -264,8 +269,22 @@ class Engine private constructor(private val app: Context) {
         return msg
     }
 
+    /** Reabre o jogo que fechou; o laço de 3 s se liga a ele e os salvos voltam sozinhos. */
+    fun relaunch(): String {
+        val p = Session.gameGone ?: Session.process ?: return "Nenhum jogo para reabrir."
+        Session.gameGone = null
+        val intent = app.packageManager.getLaunchIntentForPackage(p.pkg) ?: return "Não achei como abrir ${p.label}."
+        // com a permissão de sobreposição o Android deixa abrir outro app mesmo do menu flutuante
+        return runCatching {
+            app.startActivity(intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+            Diag.add("Reabrindo ${p.label} pelo Tinker")
+            "Abrindo ${p.label}… os salvos voltam sozinhos."
+        }.getOrElse { "Não abriu ${p.label}: ${it.message}" }
+    }
+
     suspend fun attach(p: GameProcess): String = call { d ->
         Diag.add("Jogo escolhido: ${p.label} (${p.pkg}, PID ${p.pid})")
+        Session.gameGone = null
         runCatching { lastGameFile.writeText(p.pkg) }
         attachedAt = System.currentTimeMillis()
         retries = 0
