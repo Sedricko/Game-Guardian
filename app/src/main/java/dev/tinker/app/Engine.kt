@@ -53,6 +53,8 @@ data class SavedItem(
     // pid: processo do jogo em que addr vale (0 = desconhecido, versões antigas); chains: caminhos de ponteiro candidatos;
     // sig/sigOff: assinatura AOB dos bytes em volta (?? = muda) e onde o valor fica nela
     val pid: Int = 0, val chains: List<String> = emptyList(), val sig: String = "", val sigOff: Int = 0,
+    // verified=false: ponteiro escolhido sozinho, ainda não confirmado reabrindo o jogo; não é seguido na mesma vez do jogo
+    val verified: Boolean = true,
 )
 
 const val MAX_CHAINS = 200
@@ -337,9 +339,15 @@ class Engine private constructor(private val app: Context) {
     suspend fun scanPointers(item: SavedItem, maxOff: Int = 4096, levels: Int = 4): String = call { d ->
         val r = d.frozenGame { d.send("pointers ${item.addr} $maxOff $levels ${if (Session.gameLibsOnly) 1 else 0}") }
         val limited = r.status.split(" ").getOrNull(1) == "1"
-        replace(item) { it.copy(chains = r.lines.take(MAX_CHAINS)) }
+        val chains = r.lines.take(MAX_CHAINS)
+        // já escolhe o melhor (base na lib do jogo, caminho curto); os outros ficam de reserva
+        val cur = Session.saved.firstOrNull { it.id == item.id } ?: item
+        val pick = if (cur.pointer.isEmpty() || !cur.verified) chains.firstOrNull() else null
+        replace(item) { if (pick != null) it.copy(chains = chains, pointer = pick, verified = false) else it.copy(chains = chains) }
+        if (pick != null) Diag.add("Ponteiro de ${label(item)} escolhido sozinho: $pick (${chains.size} de reserva)")
         Session.pointerInfo = if (r.lines.isEmpty()) "Nenhum caminho. Tente mais níveis, uma distância maior, ou desligue \"Ponteiros só nas libs do jogo\" em Ajustes."
-        else "${minOf(r.lines.size, MAX_CHAINS)} caminhos${if (limited) " (há mais; guardados os melhores)" else ""}. Ao reabrir o jogo, o Tinker testa e escolhe sozinho."
+        else "Ponteiro guardado: ${pointerText(chains.first())} (+${chains.size - 1} de reserva${if (limited) ", há mais" else ""}). " +
+            "Enquanto você joga, o Tinker descarta os que erram; ao reabrir o jogo, ele confirma sozinho."
         Session.pointerInfo
     }
 
@@ -369,7 +377,7 @@ class Engine private constructor(private val app: Context) {
 
     fun setPointer(item: SavedItem, chain: String) {
         Diag.add("Salvo ${label(item)} ${if (chain.isEmpty()) "sem ponteiro" else "agora segue o ponteiro $chain"}")
-        replace(item) { it.copy(pointer = chain, anchor = "", offset = 0) }
+        replace(item) { it.copy(pointer = chain, anchor = "", offset = 0, verified = true) }
         if (chain.isNotEmpty()) linkNear(item.copy(pointer = chain))
     }
 
@@ -410,7 +418,8 @@ class Engine private constructor(private val app: Context) {
             if (anchor.pid != currentPid) return item
             (anchor.addr.toLong(16) + item.offset).toString(16)
         } else {
-            if (item.pointer.isEmpty()) return item
+            // ponteiro ainda não confirmado: na vez do jogo em que foi achado, o endereço achado é o certo
+            if (item.pointer.isEmpty() || (!item.verified && item.pid == currentPid)) return item
             runCatching { send("resolve ${item.pointer}", quiet = true).status }.getOrNull() ?: return item
         }
         return moveTo(item, a, if (item.anchor.isNotEmpty()) "Offset" else "Ponteiro")
@@ -437,7 +446,7 @@ class Engine private constructor(private val app: Context) {
             val item = Session.saved.firstOrNull { it.id == old.id } ?: return@forEach
             if (item.pid == pid) return@forEach  // mesmo processo: o endereço ainda vale
             val how = when {
-                item.pointer.isNotEmpty() -> "ponteiro".takeIf { resolve(item).pid == pid }
+                item.pointer.isNotEmpty() -> confirmPointer(item, pid)
                 item.anchor.isNotEmpty() -> "offset".takeIf { resolve(item).pid == pid }
                 else -> null
             } ?: fromChains(item, pid) ?: fromSignature(item, pid)
@@ -451,6 +460,28 @@ class Engine private constructor(private val app: Context) {
             (if (lost.isEmpty()) "" else "Não achados (busque de novo): ${lost.joinToString()}.")
         Diag.add("Restauração dos salvos: $msg")
         return msg.trim()
+    }
+
+    /** Ponteiro em uso ao reabrir: segue; se ainda não estava confirmado, só vale se chegar no último valor (aí fica confirmado). */
+    private fun Daemon.confirmPointer(item: SavedItem, pid: Int): String? {
+        if (item.verified) return "ponteiro".takeIf { resolve(item).pid == pid }
+        val wanted = runCatching { parseValues(readable(item.value, item.type) ?: return null) }.getOrNull() ?: return null
+        val a = runCatching { send("resolve ${item.pointer}", quiet = true).status }.getOrNull() ?: return null
+        if (!matchesAny(runCatching { send("read $a ${item.type}", quiet = true).status }.getOrDefault("?"), item.type, wanted)) return null
+        if (moveTo(item, a, "Ponteiro").pid != pid) return null
+        replace(item) { it.copy(verified = true) }
+        Diag.add("Ponteiro de ${label(item)} confirmado ao reabrir o jogo: ${item.pointer}")
+        return "ponteiro confirmado"
+    }
+
+    /** Na mesma vez do jogo: tira os caminhos que não chegam mais no salvo; o escolhido passa a ser o melhor que sobrou. */
+    private fun Daemon.pruneChains(item: SavedItem) {
+        val kept = item.chains.filter { c -> runCatching { send("resolve $c", quiet = true).status }.getOrNull() == item.addr }
+        if (kept.size == item.chains.size) return
+        val pick = if (item.verified && item.pointer.isNotEmpty()) item.pointer else kept.firstOrNull().orEmpty()
+        replace(item) { it.copy(chains = kept, pointer = pick) }
+        Diag.add("Ponteiros de ${label(item)}: ${item.chains.size - kept.size} pararam de chegar nele e saíram; sobraram ${kept.size}" +
+            if (pick != item.pointer) " (escolhido agora: ${pick.ifEmpty { "nenhum" }})" else "")
     }
 
     /** Caminhos guardados: fica quem chega no último valor conhecido; se todos chegam no mesmo endereço, usa o melhor. */
@@ -761,11 +792,20 @@ class Engine private constructor(private val app: Context) {
             val item = d.resolve(old)
             if (stale(item)) return@forEach  // endereço de outra vez do jogo: não lê lixo
             if (item.pid == currentPid) d.learnSig(item)
-            if (item.frozen) return@forEach
+            // confere os caminhos de reserva de tempos em tempos e quando o valor muda (o jogo mudou de estado)
+            val check = item.chains.isNotEmpty() && item.pid == currentPid
+            if (item.frozen) {
+                if (check && refreshTick % 20 == 0) d.pruneChains(item)
+                return@forEach
+            }
             val v = runCatching { d.send("read ${item.addr} ${item.type}", quiet = true).status }.getOrDefault("?")
             if (v != item.value) replace(item) { it.copy(value = v) }
+            if (check && ((v != item.value && refreshTick % 5 == 0) || refreshTick % 20 == 0)) d.pruneChains(item.copy(value = v))
         }
+        refreshTick++
     }
+
+    private var refreshTick = 0
 
     private fun replace(item: SavedItem, change: (SavedItem) -> SavedItem) {
         val i = Session.saved.indexOfFirst { it.id == item.id }
@@ -844,7 +884,7 @@ internal fun normalizeNumbers(input: String): String =
 
 private fun SavedItem.toJson() = JSONObject().put("addr", addr).put("type", type).put("region", region).put("value", value).put("name", name).put("frozen", frozen)
     .put("pointer", pointer).put("id", id).put("anchor", anchor).put("offset", offset).put("pid", pid)
-    .put("chains", JSONArray(chains)).put("sig", sig).put("sigOff", sigOff)
+    .put("chains", JSONArray(chains)).put("sig", sig).put("sigOff", sigOff).put("verified", verified)
 
 private val AOB = Regex("""([0-9a-f]{2}|\?\?){1,192}""")
 
@@ -903,7 +943,7 @@ private fun JSONObject.toSaved(): SavedItem {
     val sig = optString("sig", "").takeIf { AOB.matches(it) }.orEmpty()  // vai direto para o daemon: só hex e ??
     return base.copy(
         id = optString("id", "").ifEmpty { base.id }, anchor = optString("anchor", ""), offset = optLong("offset", 0),
-        pid = optInt("pid", 0), chains = chains, sig = sig, sigOff = optInt("sigOff", 0).coerceIn(0, 191),
+        pid = optInt("pid", 0), chains = chains, sig = sig, sigOff = optInt("sigOff", 0).coerceIn(0, 191), verified = optBoolean("verified", true),
     )
 }
 

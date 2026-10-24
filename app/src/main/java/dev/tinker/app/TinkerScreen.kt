@@ -469,7 +469,11 @@ private fun PointerPanel(engine: Engine, item: SavedItem, run: (suspend () -> St
         Text("Ponteiro (endereço que não muda ao reiniciar)", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
         if (item.pointer.isNotEmpty()) {
             Text(pointerText(item.pointer), fontFamily = FontFamily.Monospace, fontSize = 13.sp)
-            Text("O Tinker segue esse caminho sozinho a cada leitura.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                if (item.verified) "Confirmado: o Tinker segue esse caminho sozinho a cada leitura."
+                else "Escolhido sozinho. Na próxima vez que o jogo abrir, o Tinker confere com o último valor e confirma (ou troca por um de reserva).",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             TextButton(onClick = { engine.setPointer(item, "") }) { Text("Parar de usar o ponteiro") }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -485,7 +489,7 @@ private fun PointerPanel(engine: Engine, item: SavedItem, run: (suspend () -> St
         }
         if (item.chains.isNotEmpty()) {
             Text(
-                "${item.chains.size} caminhos guardados. Ao reabrir o jogo, o Tinker testa com o último valor e escolhe sozinho.",
+                "${item.chains.size} caminhos de reserva. Enquanto você joga, os que erram saem sozinhos.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             // se sobrarem vários: diga o valor que o jogo mostra agora
@@ -636,7 +640,7 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
             ResultCard(
                 shown(item.value, item.type), "0x${item.addr}" + when {
                     old -> " · ⚠ de outra vez do jogo"
-                    item.pointer.isNotEmpty() -> " · 🔗 ponteiro"
+                    item.pointer.isNotEmpty() -> if (item.verified) " · 🔗 ponteiro" else " · 🔗 ponteiro (confirma ao reabrir)"
                     item.anchor.isNotEmpty() -> " · ↳ " + (s.saved.firstOrNull { it.id == item.anchor }?.let { it.name.ifEmpty { "0x" + it.addr } } ?: "?") + " " + offsetText(item.offset)
                     else -> ""
                 }, "${TYPE_NAMES[item.type]} · ${item.region}",

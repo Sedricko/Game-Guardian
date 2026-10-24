@@ -65,10 +65,12 @@ Se o mesmo número aparecer normal e com 🔒, edite o 🔒. Dá para desligar e
 
 Quando o jogo reinicia, os endereços mudam. O Tinker cuida disso sozinho:
 
-1. **Ao salvar** um valor, ele já busca os ponteiros (como o Pointer scan do Cheat Engine, com base só nas libs do jogo)
-   e aprende a **assinatura**: os bytes em volta do valor que não mudam.
+1. **Ao salvar** um valor, ele já busca os ponteiros (como o Pointer scan do Cheat Engine, com base só nas libs do jogo),
+   **escolhe e guarda o melhor** (os outros ficam de reserva) e aprende a **assinatura**: os bytes em volta do valor que não mudam.
+   Enquanto você joga, os caminhos que param de chegar no valor saem sozinhos.
 2. Salvos perto um do outro (até 4 KB, a mesma "ficha": ouro, gema, energia) ficam ligados pelo **offset** (**↳ Ouro +0x8**).
-3. **Ao reabrir o jogo**, o Tinker escolhe ele sozinho (se estava aberto, ou ao abrir o Tinker) e cada salvo volta sozinho: ponteiro em uso → caminhos guardados
+3. **Ao reabrir o jogo**, o Tinker escolhe ele sozinho (se estava aberto, ou ao abrir o Tinker) e cada salvo volta sozinho:
+   ponteiro guardado (confirmado com o último valor e daí em diante fixo) → caminhos de reserva
    (testados com o último valor) → assinatura. Os da mesma ficha vêm junto. O resultado aparece no topo da aba Salvos.
 4. Sobrou dúvida entre vários caminhos? Abra o salvo, digite o valor que o jogo mostra e toque em **Filtrar pelo valor**.
 
