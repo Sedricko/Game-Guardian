@@ -1428,6 +1428,8 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                 }
                 keyInfo?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
                 if (gemini) GeminiModels(engine)
+                Toggle("IA pode testar valores", "Para saber se um resultado é o verdadeiro, ela escreve um valor de teste por 2 segundos e depois volta o original. " +
+                    "Desligado: ela só olha.", s.aiCanTest) { s.aiCanTest = it; engine.saveSettings() }
                 if ((if (gemini) s.geminiKey else s.aiKey).isNotBlank()) TextButton(onClick = {
                     if (gemini) s.geminiKey = "" else s.aiKey = ""
                     engine.saveSettings()

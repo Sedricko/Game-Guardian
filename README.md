@@ -110,6 +110,9 @@ endereço e faz busca e refino (aparecem na aba Busca). Ela não edita nem conge
 **salva** (os ponteiros e a assinatura vêm sozinhos; ❄ congela), e depois **↶ Desfazer**. Também sugere **receitas** (botão Criar).
 A conversa continua: quando ela pede para mexer no jogo (gastar, levar dano), faça e toque em **Continuar**. Ela faz busca sem
 valor e compara (↑ ↓ = ≠), lê os bytes em volta e faz busca AOB, vê os salvos e ponteiros, e **anota** o que descobre de cada jogo para a próxima vez.
+Ela também **espera a mudança sozinha**: diz o que fazer no jogo (gastar, levar dano), você minimiza e joga, e ela refina quando o
+valor muda. Com **IA pode testar valores** ligado em Ajustes, ela confirma qual resultado é o verdadeiro escrevendo um valor de
+teste por 2 segundos e voltando o original.
 Aparece sozinha quando a busca dá 0, quando o jogo fecha e quando um salvo não volta ao reabrir. Cada
 ferramenta usada aparece embaixo da pergunta (🔧) e fica no Registro, junto com o começo da resposta.
 

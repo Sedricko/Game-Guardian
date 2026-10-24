@@ -57,8 +57,10 @@ tela. Se um campo de dados aparecer, proponha a edição direto. Se não der par
 peça para mudar o valor. Procure classes com poucas palavras certeiras (gold gem diamond), não listas enormes.
 Você não edita nada direto: quando tiver certeza do campo, use propor_edicao com o endereço e o tipo exatos (aparece um botão
 Aplicar para a pessoa) e explique na resposta qual classe e campo é. Se não tiver certeza, diga o que falta para confirmar.
-Quando precisar que o valor mude no jogo (para refinar ou comparar), peça para a pessoa fazer isso e tocar em Continuar: a conversa
-segue de onde parou. Sem saber o número (barra de vida), use busca_sem_valor e depois comparar.
+Quando precisar que o valor mude no jogo (para refinar ou comparar), prefira esperar_mudanca: diga o que a pessoa deve fazer
+(ex.: "minimize e gaste um pouco de ouro") e chame esperar_mudanca, que refina sozinho quando o valor muda. Repita até sobrar poucos.
+Com poucos candidatos e sem nome claro, use testar_valor (se a pessoa deixou) para confirmar qual é o verdadeiro antes de propor.
+Se não puder esperar, peça para ela fazer e tocar em Continuar: a conversa segue de onde parou. Sem saber o número (barra de vida), use busca_sem_valor e depois comparar.
 Para achar um recurso pelo nome: procurar_classes procura também nos campos (gold acha a classe que tem o campo Gold). Não pare
 na lista de nomes: abra as classes candidatas e mostre o campo com o valor de agora (ex.: PlayerData.Gold = 550). Se a classe tem
 muitos objetos, use abrir_classe com o valor que a pessoa vê (ou pergunte o valor) para achar o objeto certo. Sempre que recomendar
@@ -69,7 +71,7 @@ Use ver_salvos para saber o que já foi achado e se os ponteiros voltaram. Quand
 (classe e campo de um recurso, tipo do valor, se é cifrado), use anotar. Para deixar várias edições prontas para toda vez que o
 jogo abrir, use propor_receita com os salvos."""
 
-    private const val MAX_ROUNDS = 12  // chamadas de ferramenta por pergunta, para não ficar em volta para sempre
+    private const val MAX_ROUNDS = 20  // chamadas de ferramenta por pergunta, para não ficar em volta para sempre
 
     /** O provedor escolhido tem chave? */
     fun ready() = if (Session.aiProvider == "gemini") Session.geminiKey.isNotBlank() else Session.aiKey.isNotBlank()

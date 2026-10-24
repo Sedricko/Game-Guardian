@@ -207,4 +207,11 @@ class ValuesTest {
         assertEquals("12~13", retryPlans("i32,f32,i64,f64,xi32,xf32", "12.5").single().second)  // já tinha todos os tipos
         assertEquals(emptyList<Triple<String, String, String>>(), retryPlans("i32,f32,i64,f64,xi32,xf32", "100;200"))
     }
+
+    @Test
+    fun aiTestValueDiffersFromCurrent() {
+        assertEquals("15106", testValue(15105.0, "i32"))
+        assertEquals("101.5", testValue(100.0, "f32"))
+        assertEquals("2.25", testValue(0.75, "xf32"))
+    }
 }

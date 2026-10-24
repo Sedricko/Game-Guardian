@@ -159,6 +159,11 @@ internal fun retryPlans(types: String, value: String): List<Triple<String, Strin
     return plans
 }
 
+/** Valor do teste da IA: diferente do atual e plausível (inteiro +1; decimal +1.5), para a tela mostrar a mudança. */
+internal fun testValue(current: Double, type: String): String =
+    if (type.endsWith("f32") || type.endsWith("f64")) java.math.BigDecimal(current + 1.5).setScale(3, java.math.RoundingMode.HALF_UP).stripTrailingZeros().toPlainString()
+    else (current.toLong() + 1).toString()
+
 /** Jeito de comparar pedido pela IA (aumentou, diminuiu, igual, mudou, com ou sem quanto) no comando do daemon. */
 internal fun compareOp(how: String, by: String): String? {
     val h = how.trim().lowercase()
@@ -214,6 +219,7 @@ object Session {
     var engine by mutableStateOf<GameEngine?>(null)
     var aiKey by mutableStateOf("")  // chave da API do Claude para o assistente; vazia = assistente desligado
     var aiProvider by mutableStateOf("claude")  // "claude" ou "gemini"
+    var aiCanTest by mutableStateOf(false)  // a IA pode escrever um valor de teste (e voltar o original) para saber se é o verdadeiro
     var geminiKey by mutableStateOf("")
     var geminiModels by mutableStateOf(listOf<String>())  // os que a chave do Gemini pode usar, o melhor primeiro
     var geminiModel by mutableStateOf("gemini-2.5-flash")  // se sair de linha, o assistente troca sozinho pelo Flash mais novo
@@ -251,7 +257,7 @@ class Engine private constructor(private val app: Context) {
         prefs.edit().putBoolean("autoPause", Session.autoPause).putBoolean("findEncrypted", Session.findEncrypted)
             .putBoolean("autoPointers", Session.autoPointers).putBoolean("gameLibsOnly", Session.gameLibsOnly)
             .putBoolean("autoOverlay", Session.autoOverlay).putBoolean("ownKeypad", Session.ownKeypad).putFloat("alpha", Session.alpha).putInt("panelSize2", Session.panelSize)
-            .putString("aiKey", Session.aiKey).putString("aiProvider", Session.aiProvider).putString("geminiKey", Session.geminiKey)
+            .putString("aiKey", Session.aiKey).putString("aiProvider", Session.aiProvider).putBoolean("aiCanTest", Session.aiCanTest).putString("geminiKey", Session.geminiKey)
             .putString("geminiModel", Session.geminiModel).apply()
     }
 
@@ -267,6 +273,7 @@ class Engine private constructor(private val app: Context) {
         Session.ownKeypad = prefs.getBoolean("ownKeypad", true)
         Session.aiKey = prefs.getString("aiKey", "").orEmpty()
         Session.aiProvider = prefs.getString("aiProvider", "claude").orEmpty()
+        Session.aiCanTest = prefs.getBoolean("aiCanTest", false)
         Session.geminiKey = prefs.getString("geminiKey", "").orEmpty()
         // chave pré-definida (repositório privado, uso pessoal): entra uma vez só; apagou ou trocou, não volta
         if (!prefs.getBoolean("defaultKeyGiven", false)) {
@@ -898,6 +905,49 @@ class Engine private constructor(private val app: Context) {
             if (note.isEmpty()) return@AiTool "Nota vazia."
             f.appendText("${java.text.SimpleDateFormat("dd/MM", java.util.Locale.US).format(java.util.Date())} $note\n")
             "Anotado."
+        },
+        AiTool("esperar_mudanca", "Espera a pessoa mexer no jogo (gastar, ganhar, levar dano) e refina sozinho quando os resultados mudarem — " +
+            "sem ela digitar o valor novo. Diga antes, na resposta ou no começo, o que ela deve fazer no jogo; ela minimiza o Tinker e joga.",
+            mapOf("segundos" to "quanto esperar, até 90 (padrão 45)", "como" to "opcional: aumentou, diminuiu ou mudou (padrão mudou)"), emptyList()) { a ->
+            val secs = (a.optString("segundos").toIntOrNull() ?: 45).coerceIn(5, 90)
+            val op = compareOp(a.optString("como").ifBlank { "mudou" }, "") ?: "changed"
+            aiBusy {
+                val (count0, first) = list()
+                if ((count0 ?: 0L) == 0L) return@aiBusy "Não há resultados para vigiar: busque primeiro."
+                val before = first.associate { it.addr + it.type to it.value }
+                val end = System.currentTimeMillis() + secs * 1000L
+                var changed = false
+                while (!changed && System.currentTimeMillis() < end) {
+                    delay(1500)
+                    changed = list().second.any { h -> before[h.addr + h.type]?.let { it != h.value } == true }
+                }
+                if (!changed) "Nada mudou em $secs s nos resultados vigiados (os ${before.size} primeiros). Peça para a pessoa mexer no valor e chame de novo."
+                else { delay(800); resultsText(compare(op)) }  // espera o jogo terminar de atualizar antes de comparar
+            }
+        },
+        AiTool("testar_valor", "Confirma se um resultado é o valor verdadeiro: escreve um valor de teste, espera 2 s e lê de novo, e depois volta o " +
+            "valor original. Se o jogo desfez o teste, é cópia (ou é recalculado); se ficou, é o verdadeiro. Só funciona se a pessoa ligou " +
+            "\"IA pode testar valores\" em Ajustes.",
+            mapOf("endereco" to "endereço em hexadecimal", "tipo" to "i32, f32, i64, f64, xi32 ou xf32"), listOf("endereco", "tipo")) { a ->
+            if (!Session.aiCanTest) return@AiTool "A pessoa não deixou a IA testar valores (Ajustes → Assistente → IA pode testar valores). Use ver_endereco ou peça para ela conferir."
+            val addr = parseAddress(a.optString("endereco")) ?: return@AiTool "Endereço inválido."
+            val type = a.optString("tipo").trim().takeIf { it in TYPE_SIZES } ?: return@AiTool "Tipo inválido."
+            val old = call { d -> runCatching { d.send("read $addr $type", quiet = true).status }.getOrNull() } ?: return@AiTool "Não deu para ler 0x$addr."
+            val n = old.toDoubleOrNull() ?: return@AiTool "0x$addr não tem um número agora ($old)."
+            val test = testValue(n, type)
+            try {
+                write(addr, type, test)
+                Diag.add("IA testando 0x$addr: $old → $test")
+                delay(2000)
+                val now = call { d -> runCatching { d.send("read $addr $type", quiet = true).status }.getOrDefault("?") }
+                when (now.toDoubleOrNull()) {
+                    test.toDouble() -> "0x$addr ficou em $test: o jogo não desfez, provável valor verdadeiro (a tela deve mostrar $test enquanto o teste dura). Voltei para $old."
+                    n -> "0x$addr voltou sozinho para $old: o jogo reescreve, é cópia ou valor recalculado. Não é este."
+                    else -> "0x$addr virou $now (era $old, testei $test): o jogo mexe nele; pode ser derivado de outro campo."
+                }
+            } finally {
+                write(addr, type, old)  // sempre volta o original, mesmo se der erro no meio
+            }
         },
         AiTool("ver_resultados", "Mostra os resultados atuais da busca, com o campo IL2CPP quando há até 20.", emptyMap(), emptyList()) { resultsText(Session.status) },
     )
