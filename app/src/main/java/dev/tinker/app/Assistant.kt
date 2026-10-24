@@ -21,7 +21,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import kotlinx.coroutines.ensureActive
 
-/** Conversa com a IA: guarda as mensagens para "Continuar" seguir de onde parou (só cresce, nunca reescreve). */
+/** Conversa com a IA: guarda as mensagens para "Continuar" seguir de onde parou (respostas antigas de ferramentas encolhem). */
 class AiChat {
     internal var provider = ""
     internal val claude = mutableListOf<BetaMessageParam>()
@@ -119,6 +119,14 @@ jogo abrir, use propor_receita com os salvos."""
     /** Na primeira mensagem vai o contexto da tela; nas seguintes (Continuar), só o que a pessoa disse. */
     suspend fun ask(chat: AiChat, context: suspend () -> String, question: String, tools: List<AiTool>, onStep: (String) -> Unit): String {
         if (chat.provider != Session.aiProvider) { chat.reset(); chat.provider = Session.aiProvider }
+        // conversa nova: o modelo mais rápido entre os bons (no meio da conversa não troca, o Gemini perderia o fio)
+        if (Session.aiProvider == "gemini" && Session.geminiAutoModel && !chat.started) {
+            if (Session.geminiModels.isEmpty()) Session.geminiModels = geminiModels(Session.geminiKey)
+            pickGemini(Session.geminiModels, Session.geminiSpeed)?.takeIf { it != Session.geminiModel.trim() }?.let { m ->
+                Diag.ai("Gemini: usando $m nesta conversa (rodada média: ${Session.geminiSpeed.entries.joinToString { "${it.key} ${it.value / 1000} s" }.ifEmpty { "sem medidas ainda" }})")
+                Session.geminiModel = m
+            }
+        }
         val prompt = if (chat.started) question else "${context()}\n\n=== Pergunta ===\n$question"
         Diag.ai("==== PERGUNTA (${Session.aiProvider}, ${if (Session.aiProvider == "gemini") Session.geminiModel else "claude-opus-5-5"}${if (chat.started) ", continuando" else ""}): $question")
         if (!chat.started) Diag.ai("contexto (${prompt.length} letras):\n${prompt.take(6000)}${if (prompt.length > 6000) "\n…(cortado)" else ""}")
@@ -245,6 +253,7 @@ jogo abrir, use propor_receita com os salvos."""
         return try {
             repeat(rounds()) {
                 kotlin.coroutines.coroutineContext.ensureActive()
+                shrinkOld(contents)
                 fun body(think: Boolean) = JSONObject()
                     .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", SYSTEM))))
                     .put("contents", contents)
@@ -253,7 +262,9 @@ jogo abrir, use propor_receita com os salvos."""
                     .apply { if (think) put("generationConfig", JSONObject().put("thinkingConfig", JSONObject().put("thinkingLevel", "low"))) }
                     .toString()
                 var body = body(lowThinking)
+                val sent = System.currentTimeMillis()
                 var (code, reply) = http("models/${Session.geminiModel.trim()}:generateContent", Session.geminiKey, body)
+                noteSpeed(Session.geminiModel.trim(), code, System.currentTimeMillis() - sent)
                 // modelo que não conhece o nível de pensamento (2.x): manda sem e lembra
                 if (code == 400 && "think" in reply.lowercase()) {
                     lowThinking = false
@@ -334,6 +345,32 @@ jogo abrir, use propor_receita com os salvos."""
         }
     }
 
+    /** Média do tempo de uma rodada (as últimas pesam mais); servidor cheio conta como lento. */
+    private fun noteSpeed(model: String, code: Int, ms: Long) {
+        val t = when (code) { 200 -> ms; 503, 500 -> 120_000L; else -> return }
+        Session.geminiSpeed[model] = Session.geminiSpeed[model]?.let { (it * 2 + t) / 3 } ?: t
+    }
+
+    /**
+     * Cada rodada manda a conversa inteira de novo (chegava a 18 mil tokens e 110 s por rodada): respostas de
+     * ferramentas mais antigas que as 3 últimas ficam curtas e prints antigos saem. A IA já tirou delas o que precisava.
+     */
+    private fun shrinkOld(contents: JSONArray) {
+        var users = 0
+        for (i in contents.length() - 1 downTo 0) {
+            val m = contents.getJSONObject(i)
+            if (m.optString("role") != "user" || ++users <= 3) continue
+            val parts = m.optJSONArray("parts") ?: continue
+            for (k in 0 until parts.length()) {
+                val p = parts.getJSONObject(k)
+                if (p.has("inlineData")) { parts.put(k, JSONObject().put("text", "(print antigo da tela)")); continue }
+                val r = p.optJSONObject("functionResponse")?.optJSONObject("response") ?: continue
+                val t = r.optString("result")
+                if (t.length > 500) r.put("result", t.take(500) + "\n…(resposta antiga encurtada)")
+            }
+        }
+    }
+
     private fun keyProblem(code: Int, reply: String) =
         code == 429 || code == 401 || code == 403 || (code == 400 && "api key" in reply.lowercase())
 
@@ -407,3 +444,10 @@ internal fun geminiWait(code: Int, reply: String): Int? = when {
     code != 429 || "perday" in reply.lowercase() -> null
     else -> (Regex(""""retryDelay"\s*:\s*"(\d+)""").find(reply)?.groupValues?.get(1)?.toIntOrNull() ?: 60).coerceIn(5, 90)
 }
+
+/**
+ * Modelo para uma conversa nova: entre os 3 melhores da conta (sem Lite, que erra mais), o de rodada mais rápida.
+ * Sem medida conta como 30 s: um modelo ainda não usado é experimentado quando o atual está mais lento que isso.
+ */
+internal fun pickGemini(ranked: List<String>, speed: Map<String, Long>): String? =
+    ranked.filter { "-lite" !in it }.take(3).minByOrNull { speed[it] ?: 30_000L }

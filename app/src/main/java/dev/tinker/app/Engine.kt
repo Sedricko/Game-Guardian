@@ -10,6 +10,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
@@ -238,6 +239,8 @@ object Session {
     val geminiKey get() = geminiKeys.getOrNull(geminiKeyIndex) ?: geminiKeys.firstOrNull().orEmpty()
     var geminiModels by mutableStateOf(listOf<String>())  // os que a chave do Gemini pode usar, o melhor primeiro
     var geminiModel by mutableStateOf("gemini-2.5-flash")  // se sair de linha, o assistente troca sozinho pelo Flash mais novo
+    var geminiAutoModel by mutableStateOf(true)  // a cada conversa nova usa o mais rápido entre os bons (medido de verdade)
+    val geminiSpeed = mutableStateMapOf<String, Long>()  // tempo médio de uma rodada por modelo, em ms
     val classes = mutableStateListOf<String>()  // classes IL2CPP abertas por nome neste jogo (atalhos)
     val history = mutableStateListOf<Recent>()  // últimas buscas, para repetir com um toque
     var pointerInfo by mutableStateOf("")
@@ -274,7 +277,8 @@ class Engine private constructor(private val app: Context) {
             .putBoolean("autoOverlay", Session.autoOverlay).putBoolean("ownKeypad", Session.ownKeypad).putFloat("alpha", Session.alpha).putInt("panelSize2", Session.panelSize)
             .putString("aiKey", Session.aiKey).putString("aiProvider", Session.aiProvider).putBoolean("aiCanTest", Session.aiCanTest).putBoolean("aiAuto", Session.aiAuto).putBoolean("aiControl", Session.aiControl)
             .putString("geminiKeys", Session.geminiKeys.joinToString("\n")).putInt("geminiKeyIndex", Session.geminiKeyIndex)
-            .putString("geminiModel", Session.geminiModel).apply()
+            .putString("geminiModel", Session.geminiModel).putBoolean("geminiAuto", Session.geminiAutoModel)
+            .putString("geminiSpeed", Session.geminiSpeed.entries.joinToString("\n") { "${it.key}=${it.value}" }).apply()
     }
 
     /** Pede a permissão de sobreposição sozinho só na primeira vez; recusou, o app abre normal nas próximas. */
@@ -301,6 +305,8 @@ class Engine private constructor(private val app: Context) {
             prefs.edit().putBoolean("defaultKeyGiven", true).putString("geminiKeys", Session.geminiKeys.joinToString("\n")).putString("aiProvider", Session.aiProvider).apply()
         }
         Session.geminiModel = prefs.getString("geminiModel", Session.geminiModel).orEmpty().ifBlank { "gemini-2.5-flash" }
+        Session.geminiAutoModel = prefs.getBoolean("geminiAuto", true)
+        prefs.getString("geminiSpeed", "").orEmpty().lines().forEach { l -> l.split('=').takeIf { it.size == 2 }?.let { (m, ms) -> ms.toLongOrNull()?.let { Session.geminiSpeed[m] = it } } }
         Session.alpha = prefs.getFloat("alpha", Session.alpha)
         Session.panelSize = prefs.getInt("panelSize2", Session.panelSize).coerceIn(0, PANEL_SIZES.lastIndex)  // chave nova: quem já usava volta uma vez para tela cheia, o novo padrão
         loadSaved()

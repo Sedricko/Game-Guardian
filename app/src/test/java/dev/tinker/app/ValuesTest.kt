@@ -244,4 +244,14 @@ class ValuesTest {
         assertEquals(30, geminiWait(503, ""))
         assertEquals(null, geminiWait(400, ""))
     }
+
+    @Test
+    fun picksFastestGoodModel() {
+        val ranked = listOf("gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.8-pro", "gemini-3.8-flash-lite", "gemini-2.5-flash")
+        assertEquals("gemini-3.8-flash", pickGemini(ranked, emptyMap()))  // sem medidas: o melhor
+        assertEquals("gemini-3.5-flash", pickGemini(ranked, mapOf("gemini-3.8-flash" to 60_000L)))  // lento: experimenta o próximo
+        assertEquals("gemini-3.8-flash", pickGemini(ranked, mapOf("gemini-3.8-flash" to 20_000L, "gemini-3.5-flash" to 25_000L)))
+        assertEquals("gemini-3.8-pro", pickGemini(ranked, mapOf("gemini-3.8-flash" to 60_000L, "gemini-3.5-flash" to 50_000L)))
+        assertEquals("gemini-3.5-flash", pickGemini(listOf("gemini-3.8-flash-lite", "gemini-3.5-flash"), emptyMap()))  // Lite fica de fora
+    }
 }

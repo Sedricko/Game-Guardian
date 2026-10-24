@@ -1663,9 +1663,13 @@ private fun GeminiModels(engine: Engine) {
     info?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
     if (s.geminiModels.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         s.geminiModels.take(12).forEach { m ->
-            FilterChip(selected = m == s.geminiModel, onClick = { s.geminiModel = m; engine.saveSettings() }, label = { Text(m, maxLines = 1) })
+            // escolher na mão desliga a escolha automática
+            FilterChip(selected = m == s.geminiModel, onClick = { s.geminiModel = m; s.geminiAutoModel = false; engine.saveSettings() },
+                label = { Text(m + (s.geminiSpeed[m]?.let { " · ${it / 1000} s" } ?: ""), maxLines = 1) })
         }
     }
+    Toggle("Escolher sozinho o modelo mais rápido", "A cada conversa nova usa, entre os 3 melhores (sem Lite), o que respondeu mais rápido. " +
+        "O tempo de cada um aparece ao lado do nome.", s.geminiAutoModel) { s.geminiAutoModel = it; engine.saveSettings() }
 }
 
 /** Linha de ajuste: título, explicação curta e o interruptor. */
