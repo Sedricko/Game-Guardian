@@ -132,7 +132,8 @@ class Engine private constructor(private val app: Context) {
             if (!quiet) Diag.add("< ok ${r.status}".trimEnd() + " (${(System.nanoTime() - t0) / 1_000_000} ms)")
             return r
         } catch (e: IOException) {
-            Diag.add("< erro: ${e.message} (comando: $command, ${(System.nanoTime() - t0) / 1_000_000} ms)")
+            // comandos de rotina (quiet) falham muito de propósito (ex.: testar caminhos de ponteiro): quem chama decide se é problema
+            if (!quiet) Diag.add("< erro: ${e.message} (comando: $command, ${(System.nanoTime() - t0) / 1_000_000} ms)")
             throw e
         }
     }
@@ -787,7 +788,10 @@ class Engine private constructor(private val app: Context) {
     }
 
     suspend fun refreshSaved() = call { d ->
-        if (!d.isAttached) return@call
+        // a aba Salvos pode estar aberta no app e no menu flutuante ao mesmo tempo: uma leitura por segundo basta
+        val now = System.currentTimeMillis()
+        if (!d.isAttached || now - lastRefresh < 800) return@call
+        lastRefresh = now
         Session.saved.toList().forEach { old ->
             val item = d.resolve(old)
             if (stale(item)) return@forEach  // endereço de outra vez do jogo: não lê lixo
@@ -806,6 +810,7 @@ class Engine private constructor(private val app: Context) {
     }
 
     private var refreshTick = 0
+    @Volatile private var lastRefresh = 0L
 
     private fun replace(item: SavedItem, change: (SavedItem) -> SavedItem) {
         val i = Session.saved.indexOfFirst { it.id == item.id }
