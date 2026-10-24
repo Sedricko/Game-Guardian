@@ -13,6 +13,7 @@ concurrency:
 jobs:
   apk:
     runs-on: ubuntu-latest
+    timeout-minutes: 25  # um runner travado gastava até 6 h da cota de minutos
     permissions:
       contents: write  # para publicar o APK na página de releases
     steps:
