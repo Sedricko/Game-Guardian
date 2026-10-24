@@ -824,30 +824,86 @@ class Engine private constructor(private val app: Context) {
 
     private val noteFiles get() = app.filesDir.listFiles { f -> f.name.startsWith("notas-") && f.name.endsWith(".txt") }.orEmpty()
 
-    /** Toda a memória (lições + notas de cada jogo) em JSON, para backup e exportação. */
-    fun memoryJson(): String = JSONObject().put("tinker", "memoria-ia").put("versao", 1)
+    // Biblioteca: um perfil por jogo (notas da IA, receitas e salvos que voltam sozinhos), tudo no mesmo backup.
+
+    /** Jogos que têm alguma coisa guardada: notas, receitas ou salvos. */
+    private fun libraryPkgs(): List<String> = app.filesDir.listFiles().orEmpty().mapNotNull { f ->
+        Regex("""(?:notas-(.+)\.txt|recipes-(.+)\.json|saved-(.+)\.json)""").matchEntire(f.name)?.groupValues?.drop(1)?.firstOrNull { it.isNotEmpty() }
+    }.filter { it != "sem-jogo" && PKG.matches(it) }.distinct().sorted()
+
+    private fun gameName(pkg: String) = runCatching { app.packageManager.run { getApplicationLabel(getApplicationInfo(pkg, 0)).toString() } }.getOrDefault(pkg)
+
+    private fun jsonFile(name: String) = runCatching { JSONArray(File(app.filesDir, name).readText()) }.getOrDefault(JSONArray())
+
+    /** Salvos que valem em outra abertura ou outro aparelho: os que voltam pela classe, ponteiro ou assinatura (endereço solto não volta). */
+    private fun portableSaved(pkg: String): List<JSONObject> = jsonFile("saved-$pkg.json").let { a -> (0 until a.length()).map { a.getJSONObject(it) } }
+        .filter { o -> !o.optBoolean("temp") && (listOf("il2", "pointer", "sig").any { o.optString(it).isNotEmpty() } || (o.optJSONArray("chains")?.length() ?: 0) > 0) }
+
+    data class GameProfile(val pkg: String, val name: String, val notes: String, val recipes: Int, val saved: Int)
+
+    fun library(): List<GameProfile> = libraryPkgs().map { p ->
+        GameProfile(p, gameName(p), File(app.filesDir, "notas-$p.txt").takeIf { it.exists() }?.readText().orEmpty(), jsonFile("recipes-$p.json").length(), portableSaved(p).size)
+    }.filter { it.notes.isNotBlank() || it.recipes > 0 || it.saved > 0 }
+
+    /** Toda a memória (lições + perfil de cada jogo) em JSON, para backup e exportação. */
+    fun memoryJson(): String = JSONObject().put("tinker", "memoria-ia").put("versao", 2)
         .put("criado", java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US).format(java.util.Date()))
         .put("licoes", lessons())
-        .put("notas", JSONObject().apply { noteFiles.forEach { put(it.name.removePrefix("notas-").removeSuffix(".txt"), it.readText()) } })
+        .put("jogos", JSONObject().apply {
+            library().forEach { g ->
+                put(g.pkg, JSONObject().put("nome", g.name).put("notas", g.notes).put("receitas", jsonFile("recipes-${g.pkg}.json"))
+                    // pid -1 (de outra vez do jogo): na restauração o salvo é procurado de novo (classe, ponteiro ou assinatura), nunca usado no endereço velho
+                    .put("salvos", JSONArray().apply { portableSaved(g.pkg).forEach { put(it.put("pid", -1).put("frozen", false)) } }))
+            }
+        })
         .toString(2)
 
-    /** Junta uma memória exportada com a de agora (não apaga nada, não repete linha). */
+    /** Junta uma memória exportada com a de agora (não apaga nada, não repete linha, receita nem salvo). */
     fun importMemory(text: String): String {
         val j = runCatching { JSONObject(text) }.getOrNull()?.takeIf { it.optString("tinker") == "memoria-ia" }
             ?: return "Não é uma memória do Tinker (arquivo tinker-memoria-ia.json)."
         lessonsFile.writeText(mergeLines(lessons(), j.optString("licoes")))
-        val notes = j.optJSONObject("notas") ?: JSONObject()
-        var games = 0
-        notes.keys().forEach { pkg ->
-            if (!Regex("""[A-Za-z0-9._]{1,120}""").matches(pkg)) return@forEach  // vira nome de arquivo: nada de / ou ..
+        // versão 1 tinha só "notas" (texto por jogo); a 2 tem "jogos" com notas, receitas e salvos
+        val games = j.optJSONObject("jogos") ?: JSONObject().apply { j.optJSONObject("notas")?.let { n -> n.keys().forEach { put(it, JSONObject().put("notas", n.optString(it))) } } }
+        var count = 0; var recipes = 0; var saved = 0
+        games.keys().forEach { pkg ->
+            if (!PKG.matches(pkg)) return@forEach  // vira nome de arquivo: nada de / ou ..
+            val g = games.optJSONObject(pkg) ?: return@forEach
             val f = File(app.filesDir, "notas-$pkg.txt")
-            f.writeText(mergeLines(f.takeIf { it.exists() }?.readText().orEmpty(), notes.optString(pkg)))
-            games++
+            val notes = mergeLines(f.takeIf { it.exists() }?.readText().orEmpty(), g.optString("notas"))
+            if (notes.isNotEmpty()) f.writeText(notes)
+            recipes += mergeRecipes(pkg, g.optJSONArray("receitas") ?: JSONArray())
+            saved += mergeSaved(pkg, g.optJSONArray("salvos") ?: JSONArray())
+            count++
         }
         backupMemorySoon()
         val n = lessons().lines().count { it.isNotBlank() }
-        Diag.add("Memória da IA importada: $n lições, notas de $games jogos")
-        return "Memória importada: $n lições e notas de $games jogos."
+        Diag.add("Memória da IA importada: $n lições, $count jogos, +$recipes receitas, +$saved salvos")
+        return "Memória importada: $n lições e $count jogos (+$recipes receitas, +$saved salvos novos)."
+    }
+
+    /** Receitas novas do backup (validadas como as coladas à mão); mesma id ou mesmo nome já existe, fica a de agora. */
+    private fun mergeRecipes(pkg: String, a: JSONArray): Int {
+        val current = pkg == savedPkg
+        val have = if (current) Session.recipes.toList() else jsonFile("recipes-$pkg.json").let { x -> (0 until x.length()).mapNotNull { runCatching { x.getJSONObject(it).toRecipe() }.getOrNull() } }
+        val new = (0 until a.length()).mapNotNull { runCatching { a.getJSONObject(it).toRecipe() }.getOrNull() }
+            .filter { r -> have.none { it.id == r.id || it.name == r.name } }.distinctBy { it.name }
+        if (new.isEmpty()) return 0
+        if (current) { Session.recipes.addAll(new); storeRecipes() }
+        else File(app.filesDir, "recipes-$pkg.json").writeText(JSONArray().apply { (have + new).forEach { put(it.toJson()) } }.toString())
+        return new.size
+    }
+
+    /** Salvos novos do backup: entram como "de outra vez do jogo" e voltam pela restauração quando o jogo abrir. */
+    private fun mergeSaved(pkg: String, a: JSONArray): Int {
+        val current = pkg == savedPkg
+        val have = if (current) Session.saved.toList() else jsonFile("saved-$pkg.json").let { x -> (0 until x.length()).mapNotNull { runCatching { x.getJSONObject(it).toSaved() }.getOrNull() } }
+        val new = (0 until a.length()).mapNotNull { runCatching { a.getJSONObject(it).toSaved().copy(pid = -1, frozen = false) }.getOrNull() }
+            .filter { s -> have.none { it.id == s.id || (s.il2.isNotEmpty() && it.il2 == s.il2) || (s.name.isNotEmpty() && it.name == s.name && it.type == s.type) } }
+        if (new.isEmpty()) return 0
+        if (current) { Session.saved.addAll(new); storeSaved() }
+        else File(app.filesDir, "saved-$pkg.json").writeText(JSONArray().apply { (have + new).forEach { put(it.toJson()) } }.toString())
+        return new.size
     }
 
     private fun memoryUri(create: Boolean): android.net.Uri? {
@@ -879,9 +935,9 @@ class Engine private constructor(private val app: Context) {
 
     private var backupJob: kotlinx.coroutines.Job? = null
 
-    /** Várias coisas aprendidas seguidas viram um backup só. */
+    /** Várias coisas aprendidas seguidas viram um backup só (no máximo um a cada 3 s, mesmo com salvos mudando sem parar). */
     private fun backupMemorySoon() {
-        backupJob?.cancel()
+        if (backupJob?.isActive == true) return
         backupJob = scope.launch(Dispatchers.IO) { delay(3000); backupMemory() }
     }
 
@@ -1534,7 +1590,7 @@ class Engine private constructor(private val app: Context) {
         }
     }
 
-    private fun storeRecipes() = runCatching { recipesFile.writeText(JSONArray().apply { Session.recipes.forEach { put(it.toJson()) } }.toString()) }
+    private fun storeRecipes() = runCatching { recipesFile.writeText(JSONArray().apply { Session.recipes.forEach { put(it.toJson()) } }.toString()); backupMemorySoon() }
 
     private fun loadRecipes() {
         Session.recipes.clear()
@@ -1987,7 +2043,7 @@ class Engine private constructor(private val app: Context) {
     /** Uma linha por salvo no relatório: onde está, se vale nesta vez do jogo e como volta quando o jogo reabre. */
     private fun savedLine(it: SavedItem) = buildString {
         append("${label(it)}: ${TYPE_NAMES[it.type]} 0x${it.addr} = ${it.value}")
-        append(if (stale(it)) " · de outra vez do jogo (PID ${it.pid})" else if (it.pid == 0) " · PID desconhecido" else "")
+        append(if (it.pid < 0) " · do backup (volta quando o jogo abrir)" else if (stale(it)) " · de outra vez do jogo (PID ${it.pid})" else if (it.pid == 0) " · PID desconhecido" else "")
         if (it.frozen) append(" · congelado")
         if (it.pointer.isNotEmpty()) append(" · ponteiro ${it.pointer}${if (it.verified) "" else " (a confirmar)"}")
         if (it.anchor.isNotEmpty()) append(" · segue ${Session.saved.firstOrNull { a -> a.id == it.anchor }?.let(::label) ?: "?"} ${offsetText(it.offset)}")
@@ -2263,6 +2319,7 @@ class Engine private constructor(private val app: Context) {
         val a = JSONArray()
         Session.saved.forEach { a.put(it.toJson()) }
         savedFile.writeText(a.toString())
+        if (savedPkg != null) backupMemorySoon()  // o perfil do jogo no backup acompanha os salvos
     }
 }
 
@@ -2541,6 +2598,7 @@ internal fun readable(value: String, cipherType: String): String? {
 }
 
 const val MEMORY_FILE = "tinker-memoria-ia.json"
+private val PKG = Regex("""[A-Za-z0-9._]{1,120}""")  // nome de pacote que vira nome de arquivo
 
 /** Linhas de memória: as de agora mais as novas que ainda não estavam (a data do começo não conta). */
 internal fun mergeLines(old: String, new: String): String {

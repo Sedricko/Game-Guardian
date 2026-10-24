@@ -1456,12 +1456,28 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                     "ou com senha na Play Store. ⏹ Parar a qualquer momento.", s.aiControl) { s.aiControl = it; engine.saveSettings() }
                 // o que a IA aprendeu (lições gerais + notas deste jogo): ver e apagar
                 var showLessons by remember { mutableStateOf(false) }
+                // abrir arquivo só na tela principal: o painel flutuante não recebe resultado de outra tela
+                val openMemory = if (!overlay) androidx.activity.compose.rememberLauncherForActivityResult(
+                    androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+                ) { uri -> uri?.let { u -> keyInfo = runCatching { clipCtx.contentResolver.openInputStream(u)!!.use { it.reader().readText() } }
+                    .map(engine::importMemory).getOrElse { "Não leu o arquivo: ${it.message}" } } } else null
                 TextButton(onClick = { showLessons = !showLessons }) { Text((if (showLessons) "▾ " else "▸ ") + "O que a IA aprendeu") }
                 if (showLessons) {
                     val text = remember(showLessons) { engine.lessons() }
                     Text(text.ifBlank { "Nada ainda: ela aprende uma lição no fim de cada tarefa." }, style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace, modifier = Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState()))
                     if (text.isNotBlank()) TextButton(onClick = { engine.clearLessons(); showLessons = false }) { Text("Apagar o aprendizado") }
+                    // biblioteca: o perfil de cada jogo, que cresce a cada conversa, salvo e receita
+                    val games = remember(showLessons, keyInfo) { engine.library() }
+                    var openGame by remember { mutableStateOf<String?>(null) }
+                    Text("Biblioteca dos jogos (${games.size})", style = MaterialTheme.typography.titleSmall)
+                    games.forEach { g ->
+                        TextButton(onClick = { openGame = if (openGame == g.pkg) null else g.pkg }) {
+                            Text("${if (openGame == g.pkg) "▾" else "▸"} ${g.name} · ${g.notes.lines().count { it.isNotBlank() }} notas · ${g.recipes} receitas · ${g.saved} salvos")
+                        }
+                        if (openGame == g.pkg) Text(g.notes.ifBlank { "Sem notas ainda." }, style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace, modifier = Modifier.heightIn(max = 200.dp).verticalScroll(rememberScrollState()))
+                    }
                     // backup: sozinho em Download/Tinker a cada coisa aprendida; volta sozinho numa instalação nova
                     Text("Backup automático em Download/Tinker/$MEMORY_FILE" + if (engine.lastMemoryBackup.isEmpty()) "" else " (último: ${engine.lastMemoryBackup})",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1477,6 +1493,8 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                             keyInfo = if (t.isBlank()) "Copie o conteúdo do arquivo $MEMORY_FILE e toque de novo." else engine.importMemory(t)
                         }) { Text("Importar (colar)") }
                         OutlinedButton(onClick = { keyInfo = engine.restoreMemory() }) { Text("Restaurar do backup") }
+                        // backup de outro aparelho ou outra instância (copiado para cá): escolher o arquivo
+                        openMemory?.let { l -> OutlinedButton(onClick = { l.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }) { Text("Abrir arquivo") } }
                     }
                 }
                 Toggle("IA pode testar valores", "Para saber se um resultado é o verdadeiro, ela escreve um valor de teste por 2 segundos e depois volta o original. " +
