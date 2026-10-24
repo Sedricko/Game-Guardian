@@ -7,7 +7,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -81,9 +83,14 @@ fun AiBox(
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             presets.forEach { p -> AssistChip(onClick = { ask(p, fresh = true) }, enabled = !loading, label = { Text(p, maxLines = 1) }) }
         }
+        // a conversa rola dentro da própria caixa: em telas sem rolagem (Memória → Ficha) o texto ficava cortado
+        val talk = rememberScrollState()
+        LaunchedEffect(turns.size) { talk.animateScrollTo(talk.maxValue) }
+        if (turns.isNotEmpty()) Column(Modifier.fillMaxWidth().heightIn(max = 320.dp).verticalScroll(talk), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         turns.forEachIndexed { i, (q, a) ->
             Text("Você: $q", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-            SelectionContainer { Text(a, style = MaterialTheme.typography.bodyMedium) }
+            // sem os ** e ` do markdown, que apareciam crus na tela
+            SelectionContainer { Text(remember(a) { a.replace("**", "").replace("`", "") }, style = MaterialTheme.typography.bodyMedium) }
             if (i == turns.lastIndex) {
                 // classes citadas pela IA viram atalho para abrir a ficha
                 val cited = remember(a) {
@@ -97,6 +104,7 @@ fun AiBox(
                     ctx.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Resposta da IA", a))
                 }) { Text("⧉ Copiar resposta") }
             }
+        }
         }
         // edições e receitas sugeridas: só acontecem com o toque
         if (!loading) s.aiProposals.toList().forEach { p ->

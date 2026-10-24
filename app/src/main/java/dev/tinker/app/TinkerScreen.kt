@@ -1008,12 +1008,19 @@ private fun FichaView(engine: Engine, center: String, run: (suspend () -> String
         // sem IL2CPP não há nomes de classe: a ficha mostra só os bytes em volta
         Text("${e.name}: este jogo não tem classes IL2CPP com nome. A ficha mostra os campos em volta do salvo; receitas vão pelo ponteiro ou pela assinatura.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    } else ClassOpener(engine)
-    if (center == "0") {
-        Text("Digite o nome de uma classe do jogo (ex.: PlayerData) ou abra a ficha de um salvo (Salvos → Explorar ficha).",
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (center != "0") FichaBody(engine, center, run)
         return
     }
+    if (center == "0") {
+        // sem objeto aberto não há a lista da ficha: a tela inteira rola (lista de classes e resposta da IA não ficam cortadas)
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ClassOpener(engine)
+            Text("Digite o nome de uma classe ou de um campo do jogo (ex.: PlayerData, gold) ou abra a ficha de um salvo (Salvos → Explorar ficha).",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        return
+    }
+    ClassOpener(engine)
     FichaBody(engine, center, run)
 }
 
