@@ -99,15 +99,22 @@ lidos da memória do jogo; nos outros, o tipo é adivinhado (inteiro, decimal, p
 (já entra ligado pelo offset) ou editar; num ponteiro, para abrir o objeto para onde ele aponta. Salvos dentro de um objeto IL2CPP
 ganham o nome do campo sozinhos. Na lista de endereços da aba Memória, o que muda também fica destacado.
 
-## Abrir objeto pelo nome e receitas (jogos Unity IL2CPP)
+## Motor do jogo
+
+Ao escolher o jogo, o Tinker reconhece o motor pelas bibliotecas do APK (Unity IL2CPP, Unity Mono, Unreal, Cocos, Godot,
+GameMaker, Flutter, Java…) e se ele roda em 32 ou 64 bits; aparece no topo (`PID 1234 · Unity IL2CPP · 64 bits`) e no relatório.
+Classes e fichas por nome funcionam no IL2CPP de 32 e 64 bits; nos outros motores a ficha mostra os campos em volta.
+
+## Abrir objeto pelo nome e receitas
 
 **Memória → Ficha do objeto**: toque em **Ver todas as classes do jogo** e escolha uma (as do próprio jogo vêm primeiro;
 digite parte do nome para filtrar), ou digite a classe (`PlayerData`) e toque em **Abrir** — aparecem todos os campos com o valor
 de agora (`Gem = 1000`, `UpgradeStone = …`); toque num campo para **Editar**, **Salvar** ou **Congelar**. **Filtrar campo**
 acha rápido (`gem`). Campos que são listas (`OwnedWeapons`) abrem a lista, com a ficha de cada item.
 
-**Receitas**: nos Salvos, marque campos com nome do jogo e toque em **Criar receita**. A receita guarda cada campo pelo nome
-da classe (não pelo endereço): **Aplicar** escreve tudo de uma vez e congela os ❄, em qualquer vez que o jogo abrir;
+**Receitas** (qualquer jogo): nos Salvos, marque os campos e toque em **Criar receita**. A receita guarda cada campo pelo nome
+da classe (Unity IL2CPP), senão pelo ponteiro 🎯, senão pela assinatura de bytes que o Tinker aprende sozinho — nunca pelo
+endereço: **Aplicar** escreve tudo de uma vez e congela os ❄, em qualquer vez que o jogo abrir;
 **ao abrir** aplica sozinha quando o jogo carrega; **Copiar** manda como texto, e **Colar lista** recebe.
 
 ## Busca por bytes (AOB)

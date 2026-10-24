@@ -241,7 +241,7 @@ private fun Header(
                     when {
                         p == null -> "toque para escolher"
                         s.paused -> "pausado · toque para trocar"
-                        else -> "PID ${p.pid} · toque para trocar"
+                        else -> "PID ${p.pid}" + (s.engine?.let { " · $it" } ?: "") + " · toque para trocar"
                     },
                     style = MaterialTheme.typography.labelSmall,
                     color = if (s.paused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -825,7 +825,7 @@ private fun Recipes(engine: Engine, run: (suspend () -> String) -> Unit, onInfo:
             r.steps.forEachIndexed { i, st ->
                 val key = r.id + i
                 Row(Modifier.fillMaxWidth().clickable { editing = if (editing == key) null else key }, verticalAlignment = Alignment.CenterVertically) {
-                    Text(st.label, Modifier.weight(1f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("${st.label} · ${st.how}", Modifier.weight(1f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(st.value + if (st.freeze) " ❄" else "", fontFamily = FontFamily.Monospace, fontSize = 14.sp)
                 }
                 if (editing == key) {
@@ -980,7 +980,12 @@ private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
 @Composable
 private fun FichaView(engine: Engine, center: String, run: (suspend () -> String) -> Unit) {
     val s = Session
-    ClassOpener(engine)
+    val e = s.engine
+    if (e != null && !e.il2cpp) {
+        // sem IL2CPP não há nomes de classe: a ficha mostra só os bytes em volta
+        Text("${e.name}: este jogo não tem classes IL2CPP com nome. A ficha mostra os campos em volta do salvo; receitas vão pelo ponteiro ou pela assinatura.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    } else ClassOpener(engine)
     if (center == "0") {
         Text("Digite o nome de uma classe do jogo (ex.: PlayerData) ou abra a ficha de um salvo (Salvos → Explorar ficha).",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1013,8 +1018,8 @@ private fun ClassOpener(engine: Engine) {
                     found.size == 1 -> null
                     else -> "${found.size} objetos $name: escolha um."
                 }
-                // ficha pelo primeiro campo (+0x10): o começo do objeto não está dentro de nenhum campo
-                found.singleOrNull()?.let { s.view = (it.toLong(16) + 0x10).toString(16) to "i32" }
+                // ficha pelo primeiro campo (+0x10, ou +0x8 em 32 bits): o começo do objeto não está dentro de nenhum campo
+                found.singleOrNull()?.let { s.view = (it.toLong(16) + (s.engine?.header ?: 0x10L)).toString(16) to "i32" }
             }.onFailure { info = it.message }
             loading = false
         }
@@ -1069,7 +1074,7 @@ private fun ClassOpener(engine: Engine) {
     if (objs.isNotEmpty()) {
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             objs.take(30).forEachIndexed { i, o ->
-                FilterChip(selected = false, onClick = { s.view = (o.toLong(16) + 0x10).toString(16) to "i32" }, label = { Text("#${i + 1} 0x$o", maxLines = 1) })
+                FilterChip(selected = false, onClick = { s.view = (o.toLong(16) + (s.engine?.header ?: 0x10L)).toString(16) to "i32" }, label = { Text("#${i + 1} 0x$o", maxLines = 1) })
             }
         }
     }
@@ -1399,8 +1404,8 @@ private val HELP = listOf(
         "do jogo; Código procura nas instruções. Os lugares achados viram resultados normais.",
     "Qual resultado salvar" to "Com até 20 resultados, em jogo Unity IL2CPP, cada um mostra o campo do jogo (ex.: PlayerData.UpgradeStone). " +
         "\"Cópia temporária (Int32)\" é o número que o jogo cria só para mostrar na tela: editar não muda nada e some ao fechar. Salve o campo de verdade.",
-    "Receitas" to "Nos Salvos, marque campos que têm nome do jogo (os salvos pela ficha) e toque em Criar receita. A receita guarda cada " +
-        "campo pelo nome da classe, não pelo endereço: Aplicar escreve todos os valores de uma vez (e congela os ❄), em qualquer vez que o " +
+    "Receitas" to "Nos Salvos, marque os campos e toque em Criar receita. A receita guarda cada campo pelo nome da classe (jogo Unity " +
+        "IL2CPP), senão pelo ponteiro (🎯), senão pela assinatura que o Tinker aprende sozinho, nunca pelo endereço: Aplicar escreve todos os valores de uma vez (e congela os ❄), em qualquer vez que o " +
         "jogo abrir. Ligue \"ao abrir\" para aplicar sozinha quando o jogo carregar. Copiar manda a receita como texto; Colar lista recebe.",
     "Abrir objeto pelo nome" to "Memória → Ficha do objeto: toque em Ver todas as classes do jogo e escolha uma (as do jogo vêm primeiro; " +
         "digite parte do nome para filtrar), ou digite a classe (ex.: PlayerData) e toque em Abrir: aparecem todos os campos com " +

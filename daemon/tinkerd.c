@@ -1103,21 +1103,23 @@ static void cmd_il2objs(const char *full) {
 static void klass_chunk(size_t ci, unsigned char *buf, void *ctx) {
     pscan_t *ps = ctx;
     const chunk_t *c = &ps->cs.c[ci];
-    if (psize != 8 || read_mem(c->addr, buf, c->len)) return;
+    if (read_mem(c->addr, buf, c->len)) return;
     klass_t k;
-    for (size_t i = 0; i + 48 <= c->len; i += 8) {
-        uint64_t img, nm, ns;
-        memcpy(&img, buf + i, 8);
-        memcpy(&nm, buf + i + 16, 8);
-        memcpy(&ns, buf + i + 24, 8);
-        img &= TAGMASK; nm &= TAGMASK; ns &= TAGMASK;
+    size_t p = (size_t)psize;
+    // 64 bits até 48 bits de endereço (Android arm64 usa 39; o teste no PC, x86-64, usa 0x55...); 32 bits: qualquer um acima de 64 KB
+    uint64_t lo = p == 8 ? 0x10000000 : 0x10000, hi = p == 8 ? 0x1000000000000ULL : 0x100000000ULL;
+    for (size_t i = 0; i + 6 * p <= c->len; i += p) {
+        uint64_t img = 0, nm = 0, ns = 0;
+        uint32_t bits;
+        memcpy(&img, buf + i, p);
+        memcpy(&nm, buf + i + 2 * p, p);
+        memcpy(&ns, buf + i + 3 * p, p);
+        if (p == 8) { img &= TAGMASK; nm &= TAGMASK; ns &= TAGMASK; }
         // filtro barato antes de ler a classe inteira: três ponteiros, nome e namespace perto um do outro
-        // até 48 bits: Android arm64 usa 39, mas o teste no PC (x86-64) usa endereços 0x55...
-        if (img < 0x10000000 || img >= 0x1000000000000ULL || nm < 0x10000000 || nm >= 0x1000000000000ULL || ns < 0x10000000) continue;
+        if (img < lo || img >= hi || nm < lo || nm >= hi || ns < lo || ns >= hi) continue;
         if ((nm > ns ? nm - ns : ns - nm) > 0x4000000) continue;
         // logo depois vem o próprio tipo da classe (byval_arg: dado + bits); o código do tipo é classe, struct ou genérico
-        uint32_t bits;
-        memcpy(&bits, buf + i + 40, 4);
+        memcpy(&bits, buf + i + 5 * p, 4);
         unsigned code = (bits >> 16) & 0xff;
         if (code != 0x11 && code != 0x12 && code != 0x15) continue;
         if (read_klass(c->addr + i, &k) && k.nfields > 0) hpush(&ps->out[ci], (hit_t){c->addr + i, (uint64_t)k.nfields, 0, c->region});
@@ -1126,7 +1128,6 @@ static void klass_chunk(size_t ci, unsigned char *buf, void *ctx) {
 
 static void cmd_il2classes(void) {
     psize = ptr_size();
-    if (psize != 8) { puts("err lista de classes só em jogo 64 bits por enquanto"); return; }
     chunks_t cs = {.want = ~((1u << R_V) | (1u << 7))};
     if (each_region(add_chunks, &cs)) { puts("err não leu o mapa de memória"); return; }
     pscan_t ps = {NULL, 0, 0, 0, 0, cs, calloc(cs.n ? cs.n : 1, sizeof(hits_t))};

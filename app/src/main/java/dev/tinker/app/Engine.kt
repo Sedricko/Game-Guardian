@@ -90,9 +90,20 @@ data class ListItem(val index: Int, val addr: String, val label: String, val val
 
 /**
  * Receita: um passo por campo, guardado pelo nome (classe IL2CPP + offset), não pelo endereço; por isso vale
- * toda vez que o jogo abre e dá para passar para outra pessoa.
+ * toda vez que o jogo abre e dá para passar para outra pessoa. Jogo sem IL2CPP: o passo vai pelo ponteiro (ptr)
+ * ou pela assinatura (sig + sigOff); cls fica vazio.
  */
-data class Step(val cls: String, val off: Long, val type: String, val value: String, val freeze: Boolean, val label: String)
+data class Step(
+    val cls: String, val off: Long, val type: String, val value: String, val freeze: Boolean, val label: String,
+    val ptr: String = "", val sig: String = "", val sigOff: Int = 0,
+)
+
+/** Motor do jogo, reconhecido pelas bibliotecas do APK; bits do processo (32 ou 64). */
+data class GameEngine(val name: String, val bits: Int) {
+    val il2cpp get() = name == "Unity IL2CPP"
+    val header get() = if (bits == 32) 0x8L else 0x10L  // onde começam os campos de um objeto IL2CPP
+    override fun toString() = "$name · $bits bits"
+}
 data class Recipe(val id: String = java.util.UUID.randomUUID().toString(), val name: String, val steps: List<Step>, val auto: Boolean = false)
 
 /** Uma linha da ficha: um campo (ou 4 bytes) em volta do valor, com o tipo provável e o valor lido do jeito certo. */
@@ -127,6 +138,7 @@ object Session {
     var tab by mutableIntStateOf(0)  // índice em TABS  // visualizador de memória: endereço e tipo  // segurando o "olho": painel quase invisível
     val saved = mutableStateListOf<SavedItem>()
     val recipes = mutableStateListOf<Recipe>()
+    var engine by mutableStateOf<GameEngine?>(null)
     val classes = mutableStateListOf<String>()  // classes IL2CPP abertas por nome neste jogo (atalhos)
     val history = mutableStateListOf<Recent>()  // últimas buscas, para repetir com um toque
     var pointerInfo by mutableStateOf("")
@@ -301,6 +313,33 @@ class Engine private constructor(private val app: Context) {
      * O jogo da última vez está aberto, ou reabriu com outro PID? Escolhe ele sozinho.
      * startDaemon=false só olha se o daemon já está rodando (não pede root sem o usuário abrir o Tinker).
      */
+    /** Motor pelas bibliotecas: as extraídas na pasta lib e as de dentro dos APKs (quando o Android não extrai). */
+    private fun detectEngine(pkg: String): GameEngine? {
+        val info = runCatching { app.packageManager.getApplicationInfo(pkg, 0) }.getOrNull() ?: return null
+        val libs = HashSet<String>()
+        info.nativeLibraryDir?.let { File(it).list()?.let(libs::addAll) }
+        (listOf(info.sourceDir) + info.splitSourceDirs.orEmpty()).forEach { apk ->
+            runCatching { java.util.zip.ZipFile(apk).use { z -> z.entries().asSequence().map { it.name }.filter { it.startsWith("lib/") }.forEach { libs += it.substringAfterLast('/') } } }
+        }
+        val dir = info.nativeLibraryDir.orEmpty().substringAfterLast('/')
+        val bits = if (dir == "arm" || dir == "x86") 32 else 64
+        fun has(vararg n: String) = libs.any { l -> n.any { l.startsWith(it) } }
+        val name = when {
+            has("libil2cpp.so") -> "Unity IL2CPP"
+            has("libmonobdwgc", "libmono.so") -> "Unity Mono"
+            has("libunity.so") -> "Unity"
+            has("libUE4.so", "libUnreal.so", "libUE5") -> "Unreal"
+            has("libcocos") -> "Cocos"
+            has("libgodot") -> "Godot"
+            has("libyoyo.so") -> "GameMaker"
+            has("libflutter.so") -> "Flutter"
+            has("libgdx.so") -> "libGDX (Java)"
+            libs.none { it.endsWith(".so") } -> "Java/Kotlin"
+            else -> "motor próprio"
+        }
+        return GameEngine(name, bits)
+    }
+
     suspend fun followGame(startDaemon: Boolean): String? {
         if (daemon == null && !startDaemon) return null
         // o app e o menu flutuante chamam juntos ao abrir: um só escolhe o jogo (a restauração leva alguns segundos)
@@ -358,6 +397,7 @@ class Engine private constructor(private val app: Context) {
         Session.paused = false
         Session.canUndo = false
         switchSaved(p.pkg)
+        Session.engine = detectEngine(p.pkg)?.also { Diag.add("Motor do jogo: $it") }
         // a restauração roda em segundo plano (a cada 3 s): aqui ela segurava a escolha do jogo por até 45 s
         Session.restoreInfo = if (Session.saved.any(::stale)) "Procurando os salvos da última vez…" else ""
         "Pronto. Digite um valor que você vê no jogo e toque em Nova busca."
@@ -572,17 +612,21 @@ class Engine private constructor(private val app: Context) {
         val start = c.start.toLong(16)
         val itemsF = c.fields.firstOrNull { it.name == "_items" } ?: return@call null
         val sizeF = c.fields.firstOrNull { it.name == "_size" } ?: return@call null
-        val items = (d.send("read ${(start + itemsF.offset).toString(16)} i64", quiet = true).status.toLongOrNull() ?: 0L) and 0x00ffffffffffffffL
+        val b32 = Session.engine?.bits == 32
+        val pt = if (b32) "i32" else "i64"
+        val mask = if (b32) 0xffffffffL else 0x00ffffffffffffffL
+        val head = Session.engine?.header ?: 0x10L
+        val items = (d.send("read ${(start + itemsF.offset).toString(16)} $pt", quiet = true).status.toLongOrNull() ?: 0L) and mask
         val size = (d.send("read ${(start + sizeF.offset).toString(16)} i32", quiet = true).status.toIntOrNull() ?: 0).coerceIn(0, 200)
         if (items < 0x10000 || size == 0) return@call emptyList()
-        // array do IL2CPP (64 bits): klass, monitor, bounds, tamanho; os itens começam em +0x20
-        val first = items + 0x20
-        val words = d.send("dump ${first.toString(16)} i64 $size", quiet = true).lines.map { (it.substringAfter(' ').toLongOrNull() ?: 0L) and 0x00ffffffffffffffL }
-        if (words.all { it == 0L || it in 0x10000000L until 0x10000000000L }) {
+        // array do IL2CPP: klass, monitor, bounds, tamanho; os itens começam em +0x20 (64 bits) ou +0x10 (32 bits)
+        val first = items + 2 * head
+        val words = d.send("dump ${first.toString(16)} $pt $size", quiet = true).lines.map { (it.substringAfter(' ').toLongOrNull() ?: 0L) and mask }
+        if (words.all { it == 0L || it in 0x10000L until (if (b32) 0x100000000L else 0x1000000000000L) }) {
             words.mapIndexed { i, p ->
-                // ficha do item pelo primeiro campo (+0x10): o próprio começo do objeto não está dentro de nenhum campo
-                val name = if (p == 0L) "vazio" else d.il2((p + 0x10).toString(16))?.name?.substringAfterLast('.') ?: "objeto"
-                ListItem(i, (p + 0x10).toString(16), "#$i $name", if (p == 0L) "nulo" else "0x" + p.toString(16), p != 0L)
+                // ficha do item pelo primeiro campo: o próprio começo do objeto não está dentro de nenhum campo
+                val name = if (p == 0L) "vazio" else d.il2((p + head).toString(16))?.name?.substringAfterLast('.') ?: "objeto"
+                ListItem(i, (p + head).toString(16), "#$i $name", if (p == 0L) "nulo" else "0x" + p.toString(16), p != 0L)
             }
         } else {
             d.send("dump ${first.toString(16)} i32 $size", quiet = true).lines.mapIndexed { i, l ->
@@ -596,15 +640,25 @@ class Engine private constructor(private val app: Context) {
 
     private val recipesFile get() = File(app.filesDir, "recipes-${savedPkg ?: "sem-jogo"}.json")
 
-    /** Receita com os salvos marcados que têm classe IL2CPP (os achados pela ficha ou que ganharam nome sozinhos). */
+    /**
+     * Receita com os salvos marcados. Cada campo vai pelo que sobrevive a reabrir o jogo: classe IL2CPP, senão o
+     * ponteiro, senão a assinatura; sem nenhum dos três, fica de fora.
+     */
     fun createRecipe(items: List<SavedItem>, name: String): String {
-        val steps = items.filter { it.il2.isNotEmpty() && !it.temp }.map {
-            Step(it.il2.substringBeforeLast('+'), it.il2.substringAfterLast('+').toLong(16), it.type, readable(it.value, it.type) ?: it.value, it.frozen, it.name.ifEmpty { it.il2 })
+        val steps = items.filter { !it.temp }.mapNotNull {
+            val v = readable(it.value, it.type) ?: it.value
+            val label = it.name.ifEmpty { it.il2.ifEmpty { it.addr } }
+            when {
+                it.il2.isNotEmpty() -> Step(it.il2.substringBeforeLast('+'), it.il2.substringAfterLast('+').toLong(16), it.type, v, it.frozen, label)
+                it.pointer.isNotEmpty() -> Step("", 0, it.type, v, it.frozen, label, ptr = it.pointer)
+                sigUseful(it.sig) -> Step("", 0, it.type, v, it.frozen, label, sig = it.sig, sigOff = it.sigOff)
+                else -> null
+            }
         }
-        if (steps.isEmpty()) return "Nenhum dos marcados tem classe IL2CPP: salve os campos pela ficha do objeto (Memória → Ficha)."
+        if (steps.isEmpty()) return "Nenhum dos marcados tem classe, ponteiro ou assinatura ainda. Toque em 🎯 Ponteiros no salvo, ou espere uns minutos jogando (a assinatura aprende sozinha)."
         Session.recipes.add(Recipe(name = name.trim().ifEmpty { "Receita ${Session.recipes.size + 1}" }, steps = steps))
         storeRecipes()
-        Diag.add("Receita criada com ${steps.size} campos: ${steps.joinToString { "${it.label} = ${it.value}" }}")
+        Diag.add("Receita criada com ${steps.size} campos: ${steps.joinToString { "${it.label} = ${it.value} (${it.how})" }}")
         return "Receita criada com ${steps.size} campos (dos ${items.size} marcados). Toque em Aplicar."
     }
 
@@ -620,32 +674,59 @@ class Engine private constructor(private val app: Context) {
     }
 
     /**
-     * Aplica: acha o objeto de cada classe pelo nome, escreve o valor e, nos marcados com ❄, congela (vira salvo
-     * congelado, que volta sozinho ao reabrir). Classe com vários objetos fica de fora: não dá para saber qual.
+     * Aplica: acha o lugar de cada passo (objeto da classe pelo nome, ponteiro ou assinatura), escreve o valor e, nos
+     * marcados com ❄, congela (vira salvo congelado, que volta sozinho ao reabrir). Mais de um lugar possível fica de fora.
      */
     suspend fun applyRecipe(r: Recipe): String {
-        val frozen = mutableListOf<Hit>()
+        val frozen = mutableListOf<Pair<Hit, Step>>()
         val notes = mutableListOf<String>()
         val ok = call { d ->
             val objs = HashMap<String, List<Long>>()
-            r.steps.count { st ->
-                val o = objs.getOrPut(st.cls) {
-                    runCatching { d.send("il2objs ${st.cls}", quiet = true).lines.mapNotNull { it.removePrefix("obj ").toLongOrNull(16) } }.getOrDefault(emptyList())
+            fun place(st: Step): String? = when {
+                st.cls.isNotEmpty() -> {
+                    val o = objs.getOrPut(st.cls) {
+                        runCatching { d.send("il2objs ${st.cls}", quiet = true).lines.mapNotNull { it.removePrefix("obj ").toLongOrNull(16) } }.getOrDefault(emptyList())
+                    }
+                    when {
+                        o.isEmpty() -> null.also { notes += "${st.label}: classe ainda não carregou" }
+                        o.size > 1 -> null.also { notes += "${st.label}: ${o.size} objetos, não sei qual" }
+                        else -> (o[0] + st.off).toString(16)
+                    }
                 }
-                when {
-                    o.isEmpty() -> { notes += "${st.label}: classe ainda não carregou"; false }
-                    o.size > 1 -> { notes += "${st.label}: ${o.size} objetos, não sei qual"; false }
-                    else -> {
-                        val a = (o[0] + st.off).toString(16)
-                        val w = runCatching { d.send("write $a ${st.type} ${st.value.arg()}", quiet = true) }
-                        if (w.isFailure) notes += "${st.label}: ${w.exceptionOrNull()?.message}"
-                        else if (st.freeze) frozen += Hit(a, st.type, "?", normalizeNumbers(st.value))
-                        w.isSuccess
+                st.ptr.isNotEmpty() -> runCatching { d.send("resolve ${st.ptr}", quiet = true).status }.getOrNull()
+                    ?: null.also { notes += "${st.label}: ponteiro ainda não resolve" }
+                else -> {
+                    val f = runCatching { d.send("aobfind ${st.sig}", quiet = true) }.getOrNull()
+                    when {
+                        f == null || f.lines.isEmpty() -> null.also { notes += "${st.label}: assinatura não achada" }
+                        f.lines.size > 1 -> null.also { notes += "${st.label}: assinatura em ${f.status} lugares" }
+                        else -> (f.lines[0].toLong(16) + st.sigOff).toString(16)
                     }
                 }
             }
+            r.steps.count { st ->
+                val a = place(st) ?: return@count false
+                val w = runCatching { d.send("write $a ${st.type} ${st.value.arg()}", quiet = true) }
+                if (w.isFailure) notes += "${st.label}: ${w.exceptionOrNull()?.message}"
+                else if (st.freeze) frozen += Hit(a, st.type, "?", normalizeNumbers(st.value)) to st
+                w.isSuccess
+            }
         }
-        if (frozen.isNotEmpty()) addSaved(frozen, frozen = true)
+        if (frozen.isNotEmpty()) {
+            addSaved(frozen.map { it.first }, frozen = true)
+            // o salvo congelado guarda como foi achado, para voltar sozinho ao reabrir
+            frozen.forEach { (h, st) ->
+                val i = Session.saved.indexOfFirst { it.addr == h.addr && it.type == h.type }
+                if (i >= 0) Session.saved[i] = Session.saved[i].let {
+                    it.copy(
+                        name = it.name.ifEmpty { st.label },
+                        il2 = if (st.cls.isNotEmpty()) "${st.cls}+${st.off.toString(16)}" else it.il2,
+                        pointer = it.pointer.ifEmpty { st.ptr }, chains = if (st.ptr.isNotEmpty() && st.ptr !in it.chains) it.chains + st.ptr else it.chains,
+                        sig = it.sig.ifEmpty { st.sig }, sigOff = if (it.sig.isEmpty()) st.sigOff else it.sigOff,
+                    )
+                }
+            }
+        }
         Diag.add("Receita ${r.name}: $ok de ${r.steps.size} aplicados" + if (notes.isEmpty()) "" else " (${notes.joinToString("; ")})")
         return "${r.name}: $ok de ${r.steps.size} aplicados." + if (notes.isEmpty()) "" else " " + notes.joinToString("; ")
     }
@@ -1072,6 +1153,7 @@ class Engine private constructor(private val app: Context) {
             appendLine("App: Tinker ${runCatching { app.packageManager.getPackageInfo(app.packageName, 0).versionName }.getOrNull()}")
             appendLine("Aparelho: ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} · Android ${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT}) · ${android.os.Build.SUPPORTED_ABIS.joinToString()}")
             appendLine("Jogo: ${p?.let { "${it.label} (${it.pkg}, PID ${it.pid})${if (Session.paused) " · pausado" else ""}" } ?: "nenhum"}")
+            appendLine("Motor: ${Session.engine ?: "?"}")
             appendLine("Regiões ativas: ${Session.regions.filter { it.enabled }.joinToString { it.code }.ifEmpty { "padrão" }}")
             appendLine("Salvos: ${Session.saved.size} (congelados: ${Session.saved.count { it.frozen }})")
             val mem = android.app.ActivityManager.MemoryInfo().also { app.getSystemService(android.app.ActivityManager::class.java).getMemoryInfo(it) }
@@ -1424,20 +1506,30 @@ private val LIBS = listOf(
 private val CLASS_NAME = Regex("""[A-Za-z0-9_.`<>]{1,120}""")  // vai para o daemon
 
 private fun Recipe.toJson() = JSONObject().put("id", id).put("name", name).put("auto", auto).put("steps", JSONArray().apply {
-    steps.forEach { put(JSONObject().put("cls", it.cls).put("off", it.off).put("type", it.type).put("value", it.value).put("freeze", it.freeze).put("label", it.label)) }
+    steps.forEach {
+        put(JSONObject().put("cls", it.cls).put("off", it.off).put("type", it.type).put("value", it.value).put("freeze", it.freeze).put("label", it.label)
+            .apply { if (it.ptr.isNotEmpty()) put("ptr", it.ptr); if (it.sig.isNotEmpty()) put("sig", it.sig).put("sigOff", it.sigOff) })
+    }
 })
+
+/** Como o passo acha o lugar: para o registro e a tela. */
+val Step.how get() = when { cls.isNotEmpty() -> "classe"; ptr.isNotEmpty() -> "ponteiro"; else -> "assinatura" }
 
 /** Receita de arquivo ou colada: tudo validado, porque classe, tipo e valor vão para o daemon. */
 private fun JSONObject.toRecipe(): Recipe {
     val a = getJSONArray("steps")
     val steps = List(a.length()) { i ->
         val j = a.getJSONObject(i)
-        val cls = j.getString("cls")
+        val cls = j.optString("cls", "")
         val type = j.getString("type")
-        require(CLASS_NAME.matches(cls) && type in TYPE_SIZES) { "Receita inválida: $cls / $type" }
+        val ptr = j.optString("ptr", "")
+        val sig = j.optString("sig", "")
+        require((cls.isEmpty() || CLASS_NAME.matches(cls)) && type in TYPE_SIZES) { "Receita inválida: $cls / $type" }
+        require((ptr.isEmpty() || POINTER.matches(ptr)) && (sig.isEmpty() || AOB.matches(sig))) { "Receita inválida: ponteiro ou assinatura" }
+        require(cls.isNotEmpty() || ptr.isNotEmpty() || sig.isNotEmpty()) { "Receita inválida: passo sem classe, ponteiro ou assinatura" }
         val v = normalizeNumbers(j.getString("value"))
         require(Regex("""-?[0-9.eE+-]{1,40}""").matches(v)) { "Receita inválida: valor $v" }
-        Step(cls, j.getLong("off").coerceIn(0L, 0x10000L), type, v, j.optBoolean("freeze", false), j.optString("label", cls).take(60))
+        Step(cls, j.optLong("off", 0).coerceIn(0L, 0x10000L), type, v, j.optBoolean("freeze", false), j.optString("label", cls).take(60), ptr, sig, j.optInt("sigOff", 0).coerceIn(0, 191))
     }
     return Recipe(optString("id", "").ifEmpty { java.util.UUID.randomUUID().toString() }, optString("name", "Receita").take(40), steps, optBoolean("auto", false))
 }
