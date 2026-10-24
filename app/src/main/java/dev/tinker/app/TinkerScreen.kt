@@ -253,6 +253,13 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
     var editingAll by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf(setOf<String>()) }
     val enabled = s.process != null && !s.busy
+    // valores ao vivo, como no Cheat Engine: relê os resultados mostrados a cada segundo
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1000)
+            if (!s.busy && s.count != null) runCatching { s.results = engine.list().second }
+        }
+    }
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Panel {
