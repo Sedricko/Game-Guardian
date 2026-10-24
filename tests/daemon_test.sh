@@ -27,6 +27,13 @@ list 1000
 writeall 7.25
 refine 7.25
 search i32 1.5
+search i32 987654300~987654399
+undo
+search i32 987654000~987654999
+refine 987654320~987654330
+undo
+undo
+write $iaddr i32 1~2
 ranges Xyz
 ranges Ch,A
 search i32 nada
@@ -47,6 +54,8 @@ check "^[0-9a-f]+ 555$"                         # dump: o vizinho seguinte
 check "^$faddr f32 (Ch|A) 3.5$"                 # auto acha o float
 check "^ok [1-9][0-9]* 0$"                      # writeall sem falhas
 check "^err valor inválido: 1.5$"               # 1.5 não é Dword
+check "^err nada para desfazer$"                # undo logo após uma busca
+check "^err valor inválido: 1~2$"               # faixa não serve para escrever
 check "^err região inválida$"
 check "^err valor inválido: nada$"
 [ "$(grep -c '^ok$' <<<"$got")" -ge 6 ] || { echo "FALHOU: oks"; exit 1; }
@@ -55,6 +64,12 @@ check "^err valor inválido: nada$"
 auto=$(printf 'attach %s\nsearch auto 555\nlist 10\n' "$pid" | "$out/tinkerd")
 echo "$auto"
 grep -qx "ok 1" <<<"$auto" && grep -qE " i32 (Ch|A) 555$" <<<"$auto" || { echo "FALHOU: Auto duplicou o endereço"; exit 1; }
+
+# Desfazer: faixa acha vários, refino diminui, desfazer volta exatamente ao anterior
+und=$(printf 'attach %s\nsearch i32 0~1000\nrefine 555\nundo\nundo\n' "$pid" | "$out/tinkerd" | grep '^ok [0-9]')
+echo "$und"
+mapfile -t n < <(sed 's/^ok //' <<<"$und")
+[ "${n[0]}" -gt "${n[1]}" ] && [ "${n[2]}" = "${n[0]}" ] && [ "${n[3]}" = "${n[1]}" ] || { echo "FALHOU: desfazer/refazer"; exit 1; }
 
 kill $tpid; wait $tpid 2>/dev/null || true
 dead=$(printf 'attach %s\n' "$pid" | "$out/tinkerd")

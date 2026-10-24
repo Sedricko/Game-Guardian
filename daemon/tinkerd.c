@@ -37,8 +37,13 @@ typedef struct { uint64_t addr; uint8_t type, region; } hit_t;
 // shortcut: resultados num vetor em RAM (16 bytes cada), trocar por arquivo mmap se passar de dezenas de milhões
 static hit_t *res;
 static size_t nres, cap;
+// Estado anterior ao último refino, para o "Desfazer".
+static hit_t *prev;
+static size_t nprev, capprev;
 
-typedef struct { uint64_t raw; double f; } value_t;
+// Um valor exato ou uma faixa "100~200" (range=1: só serve para buscar e refinar, nunca para escrever).
+typedef struct { uint64_t raw; double f; int range; double lo, hi; int64_t ilo, ihi; } value_t;
+
 
 // process_vm_* não para o jogo; /proc/pid/mem cobre VMs/kernels que o bloqueiam.
 static int read_mem(uint64_t addr, void *buf, size_t len) {
@@ -58,14 +63,36 @@ static int find_type(const char *s) {
     return -1;
 }
 
+static int parse_one(int t, const char *s, value_t *v);
+
 static int parse_value(int t, const char *s, value_t *v) {
+    const char *tilde = strchr(s, '~');
+    v->range = 0;
+    if (!tilde) return parse_one(t, s, v);
+    char a[64];
+    snprintf(a, sizeof a, "%.*s", (int)(tilde - s), s);
+    value_t lo, hi;
+    if (!parse_one(t, a, &lo) || !parse_one(t, tilde + 1, &hi)) return 0;
+    v->range = 1;
+    v->lo = fmin(lo.f, hi.f);
+    v->hi = fmax(lo.f, hi.f);
+    v->ilo = lo.ilo < hi.ilo ? lo.ilo : hi.ilo;
+    v->ihi = lo.ilo < hi.ilo ? hi.ilo : lo.ilo;
+    return 1;
+}
+
+static int parse_one(int t, const char *s, value_t *v) {
     char *end;
+    v->range = 0;
     if (TYPES[t].isfloat) {
         v->f = strtod(s, &end);
+        v->ilo = 0;
     } else {
         double d = strtod(s, &end);
         if (end == s || (*end && *end != '\n') || d != floor(d)) return 0;  // "1.5" não é inteiro
+        v->f = d;
         v->raw = (uint64_t)strtoll(s, &end, 0);
+        v->ilo = (int64_t)v->raw;
         int bits = TYPES[t].size * 8;
         if (bits < 64) v->raw &= (1ULL << bits) - 1;  // -1 e 4294967295 viram o mesmo dword
     }
@@ -73,6 +100,14 @@ static int parse_value(int t, const char *s, value_t *v) {
 }
 
 static int matches(int t, const unsigned char *p, const value_t *v) {
+    if (v->range) {
+        if (t == T_F32) { float x; memcpy(&x, p, 4); return x >= v->lo && x <= v->hi; }
+        if (t == T_F64) { double x; memcpy(&x, p, 8); return x >= v->lo && x <= v->hi; }
+        int sz = TYPES[t].size;
+        uint64_t x = 0; memcpy(&x, p, sz);
+        if (sz < 8 && (x >> (sz * 8 - 1))) x |= ~0ULL << (sz * 8);  // com sinal: -5~5 funciona
+        return (int64_t)x >= v->ilo && (int64_t)x <= v->ihi;
+    }
     if (t == T_F32) {
         float x; memcpy(&x, p, 4);
         return fabs(x - v->f) <= 1e-6 * fmax(1, fabs(v->f));  // "1.1" digitado vs 1.1f guardado
@@ -216,6 +251,7 @@ static void cmd_search(const char *tname, const char *value) {
     for (int k = 0; k < sc.ntypes; k++) if (TYPES[sc.types[k]].size < sc.step) sc.step = TYPES[sc.types[k]].size;
     sc.buf = malloc(1 << 20);
     nres = 0;
+    nprev = 0;  // nova busca: não há refino para desfazer
     int r = each_region(scan_region, &sc);
     free(sc.buf);
     if (r) puts("err não leu o mapa de memória");
@@ -226,6 +262,13 @@ static void cmd_refine(const char *value) {
     value_t v[NTYPES];
     int ok[NTYPES];
     for (int t = 0; t < NTYPES; t++) ok[t] = parse_value(t, value, &v[t]);
+    if (nres > capprev) {
+        capprev = nres;
+        prev = realloc(prev, capprev * sizeof *prev);
+        if (!prev) { puts("err sem memória"); exit(1); }
+    }
+    memcpy(prev, res, nres * sizeof *res);
+    nprev = nres;
     // shortcut: uma leitura por resultado, lento só se o refino começar com milhões
     size_t k = 0;
     unsigned char b[8];
@@ -284,7 +327,7 @@ static void cmd_write(const char *addr, const char *tname, const char *value) {
     value_t v;
     unsigned char b[8];
     if (t < 0) { printf("err tipo inválido: %s\n", tname); return; }
-    if (!parse_value(t, value, &v)) { printf("err valor inválido: %s\n", value); return; }
+    if (!parse_value(t, value, &v) || v.range) { printf("err valor inválido: %s\n", value); return; }
     encode(t, &v, b);
     if (write_mem(strtoull(addr, NULL, 16), b, TYPES[t].size)) printf("err falhou ao escrever: %s\n", strerror(errno));
     else puts("ok");
@@ -296,7 +339,7 @@ static void cmd_writeall(const char *value) {
         int t = res[i].type;
         value_t v;
         unsigned char b[8];
-        if (!parse_value(t, value, &v)) { skip++; continue; }  // ex.: "1.5" não vai para Dword
+        if (!parse_value(t, value, &v) || v.range) { skip++; continue; }  // ex.: "1.5" não vai para Dword
         encode(t, &v, b);
         fail += write_mem(res[i].addr, b, TYPES[t].size) != 0;
     }
@@ -388,7 +431,20 @@ int main(void) {
         else if (!strcmp(cmd, "pause")) puts(kill(target, SIGSTOP) ? "err não pausou" : "ok");
         else if (!strcmp(cmd, "resume")) puts(kill(target, SIGCONT) ? "err não continuou" : "ok");
         else if (!strcmp(cmd, "kill")) puts(kill(target, SIGKILL) ? "err não fechou" : "ok");
-        else if (!strcmp(cmd, "reset")) { nres = 0; puts("ok 0"); }
+        else if (!strcmp(cmd, "reset")) { nres = nprev = 0; puts("ok 0"); }
+        else if (!strcmp(cmd, "undo")) {
+            // troca atual e anterior: desfazer de novo refaz
+            if (!nprev) { puts("err nada para desfazer"); continue; }
+            if (nprev > cap) { cap = nprev; res = realloc(res, cap * sizeof *res); if (!res) { puts("err sem memória"); exit(1); } }
+            if (nres > capprev) { capprev = nres; prev = realloc(prev, capprev * sizeof *prev); if (!prev) { puts("err sem memória"); exit(1); } }
+            hit_t *tmp = malloc((nres ? nres : 1) * sizeof *tmp);
+            memcpy(tmp, res, nres * sizeof *res);
+            memcpy(res, prev, nprev * sizeof *res);
+            memcpy(prev, tmp, nres * sizeof *res);
+            free(tmp);
+            size_t t = nres; nres = nprev; nprev = t;
+            printf("ok %zu\n", nres);
+        }
         else printf("err comando desconhecido: %s\n", cmd);
     }
     return 0;

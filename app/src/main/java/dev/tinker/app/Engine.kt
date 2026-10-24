@@ -57,7 +57,8 @@ object Session {
     var alpha by mutableFloatStateOf(0.92f)
     var panelSize by mutableIntStateOf(1)  // índice em PANEL_SIZES
     var peek by mutableStateOf(false)
-    var autoPause by mutableStateOf(true)  // pausa o jogo durante busca/refino, para o valor não mudar no meio
+    var autoPause by mutableStateOf(true)
+    var canUndo by mutableStateOf(false)  // há um refino para desfazer  // pausa o jogo durante busca/refino, para o valor não mudar no meio
     var view by mutableStateOf<Pair<String, String>?>(null)
     var tab by mutableIntStateOf(0)  // índice em TABS  // visualizador de memória: endereço e tipo  // segurando o "olho": painel quase invisível
     val saved = mutableStateListOf<SavedItem>()
@@ -74,7 +75,9 @@ class Engine private constructor(private val app: Context) {
     private var closedPid = 0
     private val freezeFailing = HashSet<String>()  // endereços congelados que estão falhando (avisa uma vez)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val savedFile = File(app.filesDir, "saved.json")
+    // uma lista de salvos por jogo; "saved.json" é a lista de antes de escolher um jogo
+    private var savedPkg: String? = null
+    private val savedFile get() = File(app.filesDir, savedPkg?.let { "saved-$it.json" } ?: "saved.json")
 
     init {
         loadSaved()
@@ -126,6 +129,8 @@ class Engine private constructor(private val app: Context) {
         Diag.add("=== Últimas linhas do logcat do jogo ===")
         runCatching { dedupe(d.call("logs").lines).forEach(Diag::add) }
         Diag.add("=== Fim do relatório da queda ===")
+        Diag.add("Dica: se o jogo fechou logo depois de editar ou congelar, provavelmente o endereço não era o valor certo " +
+            "(ou era de outro tipo). Refine mais vezes até sobrar 1 resultado antes de editar.")
     }
 
     /** Botão Sair: nunca deixa o jogo pausado e encerra o daemon root. */
@@ -164,6 +169,8 @@ class Engine private constructor(private val app: Context) {
         d.send("attach ${p.pid}")
         Session.process = p
         Session.paused = false
+        Session.canUndo = false
+        switchSaved(p.pkg)
         "Pronto. Digite um valor que você vê no jogo e toque em Nova busca."
     }
 
@@ -181,10 +188,21 @@ class Engine private constructor(private val app: Context) {
     /** types vazio = Auto. */
     suspend fun search(types: Set<String>, value: String): String = call { d ->
         val list = TYPES.map { it.first }.filter { it in types }.joinToString(",").ifEmpty { "auto" }
-        "${d.frozenGame { d.send("search $list ${value.arg()}") }.status} encontrados. Mude o valor no jogo e refine."
+        val n = d.frozenGame { d.send("search $list ${value.arg()}") }.status
+        Session.canUndo = false
+        if (n == "0") "Nada encontrado. Dicas: use Auto; se o número da tela é arredondado (1.2K), busque uma faixa como 1150~1250; ou marque mais regiões em Ajustes."
+        else "$n encontrados. Mude o valor no jogo e refine."
     }
 
-    suspend fun refine(value: String): String = call { d -> "${d.frozenGame { d.send("refine ${value.arg()}") }.status} restantes." }
+    suspend fun refine(value: String): String = call { d ->
+        val n = d.frozenGame { d.send("refine ${value.arg()}") }.status
+        Session.canUndo = true
+        if (n == "0") "Nenhum restou. O valor pode ter mudado de novo antes do refino: toque em Desfazer e refine com o valor atual."
+        else "$n restantes."
+    }
+
+    /** Volta ao resultado de antes do último refino; tocar de novo refaz. */
+    suspend fun undo(): String = call { d -> "${d.send("undo").status} resultados (desfeito; toque de novo para refazer)." }
 
     suspend fun write(addr: String, type: String, value: String): String = call { d ->
         d.send("write $addr $type ${value.arg()}")
@@ -439,6 +457,21 @@ class Engine private constructor(private val app: Context) {
         }
     }
 
+    /** Troca para a lista de salvos do jogo; a lista antiga sem jogo é adotada pelo primeiro jogo escolhido. */
+    private fun switchSaved(pkg: String) {
+        if (pkg == savedPkg) return
+        storeSaved()
+        val adopt = savedPkg == null && !File(app.filesDir, "saved-$pkg.json").exists()
+        savedPkg = pkg
+        if (adopt) {
+            storeSaved()
+        } else {
+            Session.saved.clear()
+            loadSaved()
+        }
+        Diag.add("Salvos do jogo $pkg: ${Session.saved.size}${if (adopt) " (lista anterior adotada)" else ""}")
+    }
+
     private fun loadSaved() = runCatching {
         if (!savedFile.exists()) return@runCatching
         val a = JSONArray(savedFile.readText())
@@ -464,14 +497,22 @@ private fun JSONObject.toSaved(): SavedItem {
     return SavedItem(addr, type, optString("region", "?"), optString("value", "?"), optBoolean("frozen", false), optString("name", ""))
 }
 
-private fun parseValues(values: String): List<Double> =
-    values.split(';', ',', ' ').mapNotNull { it.trim().toDoubleOrNull() }
-        .also { require(it.isNotEmpty()) { "Digite um ou mais valores, separados por ;" } }
+/** "50;75" ou "100~200" ou misturado ("50;100~200"); cada item vira uma faixa (um número é a faixa dele mesmo). */
+internal fun parseValues(values: String): List<ClosedFloatingPointRange<Double>> =
+    values.split(';', ',', ' ').mapNotNull { part ->
+        val p = part.trim()
+        if ('~' in p) {
+            val a = p.substringBefore('~').trim().toDoubleOrNull() ?: return@mapNotNull null
+            val b = p.substringAfter('~').trim().toDoubleOrNull() ?: return@mapNotNull null
+            minOf(a, b)..maxOf(a, b)
+        } else p.toDoubleOrNull()?.let { it..it }
+    }.also { require(it.isNotEmpty()) { "Digite um ou mais valores, separados por ; (faixa: 100~200)" } }
 
-private fun matchesAny(value: String, type: String, wanted: List<Double>): Boolean {
+internal fun matchesAny(value: String, type: String, wanted: List<ClosedFloatingPointRange<Double>>): Boolean {
     val x = value.toDoubleOrNull() ?: return false
     // float guardado nunca é exato: 1.1 digitado vira 1.10000002 na memória
-    return wanted.any { w -> if (type.startsWith("f")) kotlin.math.abs(x - w) <= 1e-4 * maxOf(1.0, kotlin.math.abs(w)) else x == w }
+    val slack = if (type.startsWith("f")) 1e-4 else 0.0
+    return wanted.any { r -> x >= r.start - slack * maxOf(1.0, kotlin.math.abs(r.start)) && x <= r.endInclusive + slack * maxOf(1.0, kotlin.math.abs(r.endInclusive)) }
 }
 
 private val PROBLEM_WORDS = listOf("erro", "falha", "aviso", "fechou", "exception")

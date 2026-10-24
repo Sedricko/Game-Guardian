@@ -5,11 +5,14 @@ import android.content.Context
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import androidx.compose.runtime.mutableStateListOf
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class TinkerApp : Application() {
     override fun onCreate() {
@@ -34,6 +37,7 @@ object Diag {
         }
         val version = runCatching { c.packageManager.getPackageInfo(c.packageName, 0).versionName }.getOrNull()
         add("Tinker $version iniciado · Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT}) · ${Build.MANUFACTURER} ${Build.MODEL} · ${Build.SUPPORTED_ABIS.joinToString()}")
+        watchUi()
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { t, e ->
             // grava direto no arquivo: o processo vai morrer antes de qualquer post na UI
@@ -41,6 +45,20 @@ object Diag {
             previous?.uncaughtException(t, e)
         }
     }
+
+    /** Vigia a thread da tela: se ela não responder em 700 ms, registra por quanto tempo ficou travada. */
+    private fun watchUi() = Thread({
+        while (true) {
+            val sent = SystemClock.uptimeMillis()
+            val done = CountDownLatch(1)
+            main.post { done.countDown() }
+            if (!done.await(700, TimeUnit.MILLISECONDS)) {
+                done.await()
+                add("AVISO: a tela travou por ${SystemClock.uptimeMillis() - sent} ms")
+            }
+            Thread.sleep(1000)
+        }
+    }, "tinker-vigia").apply { isDaemon = true }.start()
 
     @Synchronized
     fun add(msg: String) {

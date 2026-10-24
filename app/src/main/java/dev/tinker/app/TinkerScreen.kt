@@ -215,14 +215,14 @@ private fun AppIcon(p: GameProcess?, size: Int) {
 }
 
 @Composable
-private fun ValueField(value: String, label: String, onChange: (String) -> Unit, modifier: Modifier = Modifier) {
+private fun ValueField(value: String, label: String, onChange: (String) -> Unit, modifier: Modifier = Modifier, keyboard: KeyboardType = KeyboardType.Decimal) {
     OutlinedTextField(
         value = value,
         onValueChange = onChange,
         label = { Text(label) },
         singleLine = true,
         textStyle = MaterialTheme.typography.titleLarge,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+        keyboardOptions = KeyboardOptions(keyboardType = keyboard),
         modifier = modifier.fillMaxWidth(),
     )
 }
@@ -272,7 +272,8 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                         }, label = { Text(label) })
                     }
                 }
-                ValueField(s.value, "Valor (ex.: 100)", { s.value = it })
+                // teclado de texto: o numérico não tem o ~ da faixa (100~200)
+                ValueField(s.value, "Valor (ex.: 100 ou faixa 100~200)", { s.value = it }, keyboard = KeyboardType.Ascii)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = { run { engine.search(s.types, s.value) } }, enabled = enabled && s.value.isNotBlank(), modifier = Modifier.weight(1f)) {
                         Text("Nova busca")
@@ -283,6 +284,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                         modifier = Modifier.weight(1f),
                     ) { Text("Refinar") }
                 }
+                if (s.canUndo) TextButton(onClick = { run { engine.undo() } }, enabled = enabled) { Text("↶ Desfazer último refino") }
                 Text(s.status, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 TextButton(onClick = { s.view = null; s.tab = TAB_MEMORY }, enabled = s.process != null) { Text("Ir para endereço…") }
             }
@@ -659,6 +661,7 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
         if (s.process != null) runCatching { s.regions = engine.regions() }.onFailure { onError(it.message ?: "Erro") }
     }
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        item { HelpPanel() }
         item {
             Panel {
                 Text("Busca", style = MaterialTheme.typography.titleSmall)
@@ -716,6 +719,38 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                         scope.launch { runCatching { s.regions = engine.setRegion(r.code, on) }.onFailure { onError(it.message ?: "Erro") } }
                     })
                 }
+            }
+        }
+    }
+}
+
+private val HELP = listOf(
+    "Como achar um valor" to "1. Escolha o jogo. 2. Digite o número que aparece na tela (ex.: moedas) e toque em Nova busca. " +
+        "3. Faça o número mudar no jogo, digite o novo e toque em Refinar. 4. Repita até sobrar 1 ou poucos resultados.",
+    "Tipos de valor" to "Auto procura Dword, Float, Qword e Double de uma vez. Se souber o tipo, marque só ele: a busca fica mais rápida " +
+        "e com menos resultados. Vida e velocidade costumam ser Float; moedas, Dword.",
+    "Faixa (100~200)" to "Use quando o jogo mostra o número arredondado ou abreviado (1.2K = 1150~1250) ou quando você não sabe o valor exato. " +
+        "Faixas servem para buscar e refinar, não para escrever.",
+    "Desfazer refino" to "Refinou com o número errado e sobrou 0? Toque em Desfazer para voltar à lista anterior. Tocar de novo refaz.",
+    "Salvar e congelar" to "Marque os resultados e toque em Salvar ou Congelar. Congelar reescreve o valor várias vezes por segundo. " +
+        "Na aba Salvos dá para dar nome, editar vários, exportar e importar. Cada jogo tem sua lista.",
+    "Memória e Buscar perto" to "Em um resultado, toque em Ver próximos para ver os valores vizinhos. Buscar perto procura um valor " +
+        "(ex.: a prata) nas linhas em volta de um ou vários endereços (ex.: o ouro).",
+    "O jogo fechou" to "Quase sempre é edição num endereço que não era o valor certo, ou de outro tipo. Refine até sobrar 1 resultado " +
+        "antes de editar e evite Qword/Double se o valor for Dword. O motivo da queda fica na aba Registro.",
+    "Endereços mudaram" to "Quando o jogo reinicia, os endereços mudam: os salvos antigos deixam de valer. Faça a busca de novo.",
+    "Reportar um problema" to "Na aba Registro, toque em Compartilhar relatório e envie o arquivo .txt. Ele tem tudo que é preciso para investigar.",
+)
+
+@Composable
+private fun HelpPanel() {
+    var open by remember { mutableStateOf<Int?>(null) }
+    Panel {
+        Text("Ajuda", style = MaterialTheme.typography.titleSmall)
+        HELP.forEachIndexed { i, (title, body) ->
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { open = if (open == i) null else i }.padding(vertical = 6.dp)) {
+                Text((if (open == i) "▾ " else "▸ ") + title, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary)
+                if (open == i) Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
             }
         }
     }
