@@ -36,7 +36,9 @@ Se o jogo for online e o servidor confere o valor, avise que editar não vai val
 Você tem ferramentas que olham a memória do jogo agora: procurar classes, abrir os objetos de uma classe com os valores atuais,
 ver a ficha de um endereço, buscar e refinar valores. Use-as antes de responder: não peça para a pessoa conferir o que você
 mesmo pode ver. Se a pessoa disser um valor que vê no jogo (ex.: tenho 1250 de ouro), busque esse valor e veja os campos dos
-resultados. Você não edita nada: no fim, diga qual classe e campo (ou endereço) guarda o valor e como a pessoa edita ou congela."""
+resultados. Valores que andam juntos (ouro, gema, nível) dá para buscar em grupo: 1250;30;7::128.
+Você não edita nada direto: quando tiver certeza do campo, use propor_edicao com o endereço e o tipo exatos (aparece um botão
+Aplicar para a pessoa) e explique na resposta qual classe e campo é. Se não tiver certeza, diga o que falta para confirmar."""
 
     private const val MAX_ROUNDS = 12  // chamadas de ferramenta por pergunta, para não ficar em volta para sempre
 

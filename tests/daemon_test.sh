@@ -146,6 +146,13 @@ grep -qx "obj $oaddr" <<<"$objs" && [ "$(grep -c '^obj ' <<<"$objs")" = 2 ] && g
 cl=$(printf '%s\n' "attach $pid" "il2classes" | "$out/tinkerd")
 grep -qE "^class Game.Player [0-9a-f]+ 3$" <<<"$cl" || { echo "FALHOU: il2classes"; echo "$cl" | head; exit 1; }
 
+# Busca em grupo: hp (99.5) e gold (4321) do mesmo objeto, a 4 bytes; distância curta demais não acha; um valor só vira busca normal
+grp=$(printf '%s\n' "attach $pid" "group i32,f32 4321;99.5 16" "list 10" "group i32,f32 4321;99.5 2" "group i32 4321 16" "group i32 4321;1 0" | "$out/tinkerd")
+echo "$grp"
+mapfile -t g < <(grep -E '^(ok|err)' <<<"$grp")
+[ "${g[2]}" = "ok 2" ] && grep -qE "^$(printf '%x' $((0x$oaddr + 0x14))) i32 (Ch|A) 4321$" <<<"$grp" && grep -qE "^$(printf '%x' $((0x$oaddr + 0x10))) f32 (Ch|A) 99.5$" <<<"$grp" \
+    && [ "${g[4]}" = "ok 0" ] && [[ "${g[5]}" =~ ^ok\ [1-9] ]] && [[ "${g[6]}" =~ ^err\ distância ]] || { echo "FALHOU: busca em grupo"; exit 1; }
+
 # Valor que não cabe no tipo não é escrito cortado (10000000000 num Dword virava 1410065408)
 big2=$(printf '%s\n' "attach $pid" "write $iaddr i32 10000000000" "write $iaddr i32 4294967295" "write $iaddr i8 300" "read $iaddr i32" "write $iaddr i32 987654000" | "$out/tinkerd")
 echo "$big2"

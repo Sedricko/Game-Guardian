@@ -22,6 +22,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -44,6 +45,7 @@ fun AiBox(
     var answer by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
     var steps by remember { mutableStateOf(listOf<String>()) }
+    var applied by remember { mutableStateOf<String?>(null) }
     TextButton(onClick = { open = !open }) { Text((if (open) "▾ " else "▸ ") + "✨ $title") }
     if (!open) return
     if (!Assistant.ready()) {
@@ -57,6 +59,7 @@ fun AiBox(
         loading = true
         answer = null
         steps = emptyList()
+        applied = null
         scope.launch {
             answer = runCatching { engine.askAi(context(), q) { st -> steps = steps + st } }.getOrElse { it.message ?: "Erro" }
             loading = false
@@ -89,6 +92,18 @@ fun AiBox(
             TextButton(onClick = {
                 ctx.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Resposta da IA", a))
             }) { Text("⧉ Copiar resposta") }
+            // edições sugeridas: só acontecem com o toque
+            s.aiProposals.toList().forEach { p ->
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("${p.label.ifEmpty { "0x" + p.addr }} → ${p.value}${if (p.freeze) " ❄" else ""}", Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyMedium)
+                        Button(onClick = { scope.launch { applied = runCatching { engine.applyProposal(p) }.getOrElse { it.message } } }) { Text("Aplicar") }
+                    }
+                    if (p.why.isNotBlank()) Text(p.why, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            applied?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
         }
     }
 }

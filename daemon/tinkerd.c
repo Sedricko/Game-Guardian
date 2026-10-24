@@ -120,19 +120,30 @@ static int parse_one(int t, const char *s, value_t *v) {
 
 // Vários valores/faixas separados por ";" (ex.: 20000;50000 ou 100;200~300): casa se qualquer um casar.
 #define MAXV 16
-typedef struct { value_t v[MAXV]; int n; } vset_t;
+typedef struct { value_t v[MAXV]; int n; uint8_t idx[MAXV]; } vset_t;  // idx: posição do valor no texto (busca em grupo)
 
 static int matches(int t, const unsigned char *p, const value_t *v);
 
-static int parse_set(int t, const char *s, vset_t *set) {
+// lenient: um item que não serve no tipo (99.5 num Dword) só fica de fora dele, em vez de excluir o tipo
+static int parse_set_as(int t, const char *s, vset_t *set, int lenient) {
     char buf[256], *save = NULL;
     snprintf(buf, sizeof buf, "%s", s);
     set->n = 0;
-    for (char *tok = strtok_r(buf, ";", &save); tok; tok = strtok_r(NULL, ";", &save)) {
-        if (set->n == MAXV || !parse_value(t, tok, &set->v[set->n])) return 0;  // um item que não serve no tipo exclui o tipo
-        set->n++;
+    int pos = 0;
+    for (char *tok = strtok_r(buf, ";", &save); tok; tok = strtok_r(NULL, ";", &save), pos++) {
+        if (pos == MAXV) return 0;
+        if (!parse_value(t, tok, &set->v[set->n])) { if (lenient) continue; return 0; }  // senão: um item que não serve exclui o tipo
+        set->idx[set->n++] = (uint8_t)pos;
     }
     return set->n > 0;
+}
+
+static int parse_set(int t, const char *s, vset_t *set) { return parse_set_as(t, s, set, 0); }
+
+static int count_items(const char *s) {
+    int n = 1;
+    for (; *s; s++) n += *s == ';';
+    return n;
 }
 
 static int matches_set(int t, const unsigned char *p, const vset_t *set) {
@@ -439,33 +450,82 @@ static void cmd_snapshot(const char *name) {
     printf("ok %zu\n", snapn);
 }
 
-static void cmd_search(const char *types, const char *value) {
+// Faz a busca e deixa os resultados em res; devolve -1 (já com o erro impresso) se não deu.
+static int run_search(const char *types, const char *value, scan_t *out_sc, int lenient) {
     scan_t sc = {.ntypes = 0};
     // vários tipos separados por vírgula (ex.: f32,f64); "auto" = Dword, Float, Qword e Double, como no GG
     char list[128], *save = NULL;
     snprintf(list, sizeof list, "%s", strcmp(types, "auto") ? types : "i32,f32,i64,f64");
     for (char *tok = strtok_r(list, ",", &save); tok; tok = strtok_r(NULL, ",", &save)) {
         int t = find_type(tok);
-        if (t < 0 || sc.ntypes == 2 * NTYPES) { printf("err tipo inválido: %s\n", tok); return; }
-        if (!parse_set(B(t), value, &sc.v[B(t)])) continue;  // ex.: 1.5 não entra como Dword
+        if (t < 0 || sc.ntypes == 2 * NTYPES) { printf("err tipo inválido: %s\n", tok); return -1; }
+        if (!parse_set_as(B(t), value, &sc.v[B(t)], lenient)) continue;  // ex.: 1.5 não entra como Dword
         // menores primeiro: no mesmo endereço ganha o tipo menor, que não invade bytes vizinhos
         int k = sc.ntypes++;
         while (k > 0 && TYPES[B(sc.types[k - 1])].size > TYPES[B(t)].size) { sc.types[k] = sc.types[k - 1]; k--; }
         sc.types[k] = t;
     }
-    if (!sc.ntypes) { printf("err valor inválido: %s\n", value); return; }
+    if (!sc.ntypes) { printf("err valor inválido: %s\n", value); return -1; }
     sc.step = 8;
     for (int k = 0; k < sc.ntypes; k++) if (TYPES[B(sc.types[k])].size < sc.step) sc.step = TYPES[B(sc.types[k])].size;
     drop_snap();
     nres = 0;
     nprev = 0;  // nova busca: não há refino para desfazer
     sc.cs.want = ranges;
-    if (each_region(add_chunks, &sc.cs)) { puts("err não leu o mapa de memória"); return; }
+    if (each_region(add_chunks, &sc.cs)) { puts("err não leu o mapa de memória"); return -1; }
     sc.out = calloc(sc.cs.n ? sc.cs.n : 1, sizeof *sc.out);
     if (!sc.out) { puts("err sem memória"); exit(1); }
     parallel(sc.cs.n, scan_chunk, &sc);
     collect(sc.out, sc.cs.n);
     free(sc.cs.c);
+    if (out_sc) *out_sc = sc;
+    return 0;
+}
+
+static void cmd_search(const char *types, const char *value) {
+    if (!run_search(types, value, NULL, 0)) printf("ok %zu\n", nres);
+}
+
+static int cmp_hit(const void *a, const void *b) {
+    uint64_t x = ((const hit_t *)a)->addr, y = ((const hit_t *)b)->addr;
+    return x < y ? -1 : x > y;
+}
+
+// Busca em grupo (como o 100;250;7::64 do GameGuardian): todos os valores precisam aparecer dentro de uma janela de
+// "range" bytes; ficam só os resultados que fazem parte de algum grupo assim (ex.: ouro, gema e nível no mesmo objeto).
+static void cmd_group(const char *types, const char *value, const char *range) {
+    uint64_t win = strtoull(range, NULL, 0);
+    if (!win || win > 0x10000) { puts("err distância inválida (1 a 65536 bytes)"); return; }
+    scan_t sc;
+    int nv = count_items(value);
+    if (nv > MAXV) { printf("err valor inválido: %s\n", value); return; }
+    if (run_search(types, value, &sc, 1)) return;
+    if (nv < 2) { printf("ok %zu\n", nres); return; }
+    qsort(res, nres, sizeof *res, cmp_hit);
+    // qual dos valores cada resultado é (o primeiro que casar)
+    uint8_t *which = malloc(nres + 1);
+    int *mark = calloc(nres + 1, sizeof *mark);
+    if (!which || !mark) { puts("err sem memória"); exit(1); }
+    for (size_t i = 0; i < nres; i++) {
+        const vset_t *v = &sc.v[B(res[i].type)];
+        which[i] = 0xff;
+        for (int j = 0; j < v->n; j++)
+            if (matches(B(res[i].type), (const unsigned char *)&res[i].old, &v->v[j])) { which[i] = v->idx[j]; break; }
+    }
+    // janela deslizante: para cada começo l vai até onde cabe; com todos os valores dentro, marca [l, r) por diferenças
+    int cnt[MAXV] = {0}, have = 0;
+    size_t r = 0;
+    for (size_t l = 0; l < nres; l++) {
+        while (r < nres && res[r].addr - res[l].addr <= win) { if (which[r] < MAXV && cnt[which[r]]++ == 0) have++; r++; }
+        if (have == nv) { mark[l]++; mark[r]--; }
+        if (which[l] < MAXV && --cnt[which[l]] == 0) have--;
+    }
+    size_t n = 0;
+    int on = 0;
+    for (size_t i = 0; i < nres; i++) { on += mark[i]; if (on > 0) res[n++] = res[i]; }
+    nres = n;
+    free(which);
+    free(mark);
     printf("ok %zu\n", nres);
 }
 
@@ -1241,6 +1301,7 @@ int main(void) {
         if (!strcmp(cmd, "regions")) cmd_regions();
         else if (!strcmp(cmd, "ranges")) puts(set_ranges(a1) ? "ok" : "err região inválida");
         else if (!strcmp(cmd, "search")) cmd_search(a1, a2);
+        else if (!strcmp(cmd, "group")) cmd_group(a1, a2, a3);
         else if (!strcmp(cmd, "refine")) cmd_compare("eq", a1);
         else if (!strcmp(cmd, "compare")) cmd_compare(a1, a2);
         else if (!strcmp(cmd, "snapshot")) cmd_snapshot(a1);

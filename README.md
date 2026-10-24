@@ -106,7 +106,7 @@ em aistudio.google.com, com limite por dia; ao colar a chave, o Tinker pergunta 
 mandam o que está na tela e mostram a resposta: na Busca, *qual desses é o valor certo?* e *qual o próximo passo?*; na lista de classes, *onde fica o ouro?* (as classes citadas viram atalho para
 abrir a ficha); na ficha, *o que cada campo faz?*; no Registro, *o que deu errado?*. Nada é enviado sem tocar em **Perguntar**.
 A IA também olha a memória sozinha: procura classes pelo nome, abre os objetos com os valores de agora, vê a ficha de um
-endereço e faz busca e refino (aparecem na aba Busca). Ela não edita nem congela: diz qual campo é e você decide. Cada
+endereço e faz busca e refino (aparecem na aba Busca). Ela não edita nem congela sozinha: quando acha o campo, mostra a edição sugerida com um botão **Aplicar** (❄ se for congelar). Cada
 ferramenta usada aparece embaixo da pergunta (🔧) e fica no Registro, junto com o começo da resposta.
 
 ## Motor do jogo
@@ -126,6 +126,11 @@ acha rápido (`gem`). Campos que são listas (`OwnedWeapons`) abrem a lista, com
 da classe (Unity IL2CPP), senão pelo ponteiro 🎯, senão pela assinatura de bytes que o Tinker aprende sozinho — nunca pelo
 endereço: **Aplicar** escreve tudo de uma vez e congela os ❄, em qualquer vez que o jogo abrir;
 **ao abrir** aplica sozinha quando o jogo carrega; **Copiar** manda como texto, e **Colar lista** recebe.
+
+## Busca em grupo
+
+Valores que ficam juntos (ouro, gema, nível no mesmo objeto): `1250;30;7::128` acha só os lugares onde os três aparecem a até
+128 bytes um do outro. O teclado do Tinker tem a tecla `::`.
 
 ## Busca por bytes (AOB)
 

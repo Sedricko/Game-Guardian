@@ -110,6 +110,9 @@ data class Recipe(val id: String = java.util.UUID.randomUUID().toString(), val n
 data class FichaRow(val addr: String, val off: Long, val type: String, val label: String, val value: String)
 data class Recent(val types: Set<String>, val value: String)
 
+/** Edição sugerida pela IA: só acontece quando você toca em Aplicar. */
+data class AiProposal(val addr: String, val type: String, val value: String, val freeze: Boolean, val label: String, val why: String)
+
 /** Estado da tela; fica fora da Activity para a janela flutuante e a Activity verem o mesmo. */
 object Session {
     var process by mutableStateOf<GameProcess?>(null)
@@ -138,6 +141,7 @@ object Session {
     var tab by mutableIntStateOf(0)  // índice em TABS  // visualizador de memória: endereço e tipo  // segurando o "olho": painel quase invisível
     val saved = mutableStateListOf<SavedItem>()
     val recipes = mutableStateListOf<Recipe>()
+    val aiProposals = mutableStateListOf<AiProposal>()
     var engine by mutableStateOf<GameEngine?>(null)
     var aiKey by mutableStateOf("")  // chave da API do Claude para o assistente; vazia = assistente desligado
     var aiProvider by mutableStateOf("claude")  // "claude" ou "gemini"
@@ -430,7 +434,14 @@ class Engine private constructor(private val app: Context) {
         val base = TYPES.map { it.first }.filter { it in types }.ifEmpty { listOf("i32", "f32", "i64", "f64") }
         // cifrados junto, sem o usuário precisar saber: Dword 🔒 quando busca Dword, Float 🔒 quando busca Float
         val list = (base + if (Session.findEncrypted) base.filter { it == "i32" || it == "f32" }.map { "x$it" } else emptyList()).joinToString(",")
-        val n = d.frozenGame { d.send("search $list ${value.arg()}") }.status
+        // "100;250::64": busca em grupo, os valores todos a até 64 bytes um do outro (como no GameGuardian)
+        val group = value.substringAfter("::", "").trim()
+        if ("::" in value) require(Regex("""\d{1,5}""").matches(group) && ';' in value.substringBefore("::")) {
+            "Busca em grupo: valores separados por ; e a distância em bytes depois de ::, ex.: 100;250::64"
+        }
+        val n = d.frozenGame {
+            if ("::" in value) d.send("group $list ${value.substringBefore("::").arg()} $group") else d.send("search $list ${value.arg()}")
+        }.status
         Session.canUndo = false
         addRecent(Recent(types, value.trim()))
         inFile = false
@@ -616,6 +627,7 @@ class Engine private constructor(private val app: Context) {
      */
     suspend fun askAi(context: String, question: String, onStep: (String) -> Unit = {}): String = withContext(Dispatchers.IO) {
         Diag.add("Assistente (${Session.aiProvider}): ${question.take(200)} (${context.length / 1024} KB de contexto)")
+        withContext(Dispatchers.Main) { Session.aiProposals.clear() }
         val tools = if (Session.process != null) aiTools() else emptyList()
         Assistant.ask(context, question, tools, onStep).also {
             saveSettings()  // o Gemini pode ter trocado de modelo sozinho
@@ -670,14 +682,30 @@ class Engine private constructor(private val app: Context) {
             val addr = parseAddress(a.optString("endereco")) ?: return@AiTool "Endereço inválido."
             objectText(addr)
         },
-        AiTool("buscar_valor", "Nova busca na memória pelo valor que a pessoa vê no jogo. Substitui os resultados atuais.",
-            mapOf("valor" to "número, faixa (100~200) ou vários com ; (100;250)", "tipos" to "opcional: i32,f32,i64,f64 separados por vírgula; vazio = Auto"),
+        AiTool("buscar_valor", "Nova busca na memória pelo valor que a pessoa vê no jogo. Substitui os resultados atuais. " +
+            "Busca em grupo: vários valores que ficam juntos no mesmo objeto (ouro;gema;nível) com ::distância em bytes, ex.: 1250;30;7::128.",
+            mapOf("valor" to "número, faixa (100~200), vários com ; (100;250) ou grupo (100;250;7::128)", "tipos" to "opcional: i32,f32,i64,f64 separados por vírgula; vazio = Auto"),
             listOf("valor")) { a ->
             val types = a.optString("tipos").split(',').map { it.trim() }.filter { it in TYPE_SIZES && !it.startsWith("x") }.toSet()
             resultsText(search(types, a.optString("valor")))
         },
         AiTool("refinar", "Refina os resultados atuais pelo valor novo (depois que a pessoa mudou o valor no jogo).",
             mapOf("valor" to "o valor de agora"), listOf("valor")) { a -> resultsText(refine(a.optString("valor"))) },
+        AiTool("propor_edicao", "Sugere à pessoa uma edição (aparece um botão Aplicar; nada muda sem ela tocar). Use o endereço exato " +
+            "que você viu numa ficha ou nos resultados, com o tipo dele.",
+            mapOf("endereco" to "endereço em hexadecimal", "tipo" to "i32, f32, i64, f64, xi32 ou xf32 (o tipo que a ficha ou o resultado mostrou)",
+                "valor" to "valor novo", "congelar" to "sim para manter o valor fixo, não para só escrever", "nome" to "nome curto do campo (ex.: Ouro)",
+                "motivo" to "por que este é o campo certo, em uma frase"),
+            listOf("endereco", "tipo", "valor")) { a ->
+            val addr = parseAddress(a.optString("endereco")) ?: return@AiTool "Endereço inválido."
+            val type = a.optString("tipo").trim()
+            val value = normalizeNumbers(a.optString("valor"))
+            if (type !in TYPE_SIZES) return@AiTool "Tipo inválido: use i32, f32, i64, f64, xi32 ou xf32."
+            if (!Regex("""-?[0-9.eE+-]{1,40}""").matches(value)) return@AiTool "Valor inválido: um número só."
+            val p = AiProposal(addr, type, value, a.optString("congelar").trim().lowercase().startsWith("s"), a.optString("nome").take(40), a.optString("motivo").take(200))
+            withContext(Dispatchers.Main) { Session.aiProposals.add(p) }
+            "Sugestão mostrada para a pessoa com o botão Aplicar."
+        },
         AiTool("ver_resultados", "Mostra os resultados atuais da busca, com o campo IL2CPP quando há até 20.", emptyMap(), emptyList()) { resultsText(Session.status) },
     )
 
@@ -691,6 +719,20 @@ class Engine private constructor(private val app: Context) {
         saveSettings()
         Diag.add("Gemini: ${ms.size} modelos na chave; usando ${Session.geminiModel}")
         if (before != Session.geminiModel) "Chave ok: ${ms.size} modelos. Escolhido ${Session.geminiModel}." else "Chave ok: ${ms.size} modelos. Mantido ${Session.geminiModel}."
+    }
+
+    /** Aplica a sugestão da IA: escreve e, se pedido, congela (vira salvo com o nome sugerido). */
+    suspend fun applyProposal(p: AiProposal): String {
+        write(p.addr, p.type, p.value)
+        if (p.freeze) {
+            addSaved(listOf(Hit(p.addr, p.type, "?", p.value)), frozen = true)
+            if (p.label.isNotBlank()) Session.saved.indexOfFirst { it.addr == p.addr && it.type == p.type }.takeIf { it >= 0 }?.let { i ->
+                Session.saved[i] = Session.saved[i].copy(name = Session.saved[i].name.ifEmpty { p.label })
+            }
+        }
+        Session.aiProposals.remove(p)
+        Diag.add("Sugestão da IA aplicada: ${p.label.ifEmpty { p.addr }} = ${p.value}${if (p.freeze) " ❄" else ""} (0x${p.addr} ${p.type})")
+        return "${p.label.ifEmpty { "0x" + p.addr }} = ${p.value}" + if (p.freeze) " ❄ congelado." else "."
     }
 
     private fun gameLine() = "Jogo: ${Session.process?.let { "${it.label} (${it.pkg})" } ?: "nenhum"} · motor ${Session.engine ?: "?"}"

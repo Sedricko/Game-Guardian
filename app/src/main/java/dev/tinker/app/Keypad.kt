@@ -22,14 +22,14 @@ private val KEYS = listOf(
     listOf("7", "8", "9", "⌫"),
     listOf("4", "5", "6", "~"),
     listOf("1", "2", "3", ";"),
-    listOf("-", "0", ".", "OK"),
+    listOf("-", "0", ".", "::", "OK"),
 )
 
 /** Uma tecla aplicada ao texto: ⌫ apaga a última, o resto escreve. */
 internal fun applyKey(text: String, key: String) = if (key == "⌫") text.dropLast(1) else text + key
 
 /**
- * Teclado do Tinker: números, faixa (~) e vários valores (;). Fica dentro do painel, bem menor que o do
+ * Teclado do Tinker: números, faixa (~), vários valores (;) e grupo (::distância). Fica dentro do painel, bem menor que o do
  * telefone, que abria por cima do jogo e escondia o número que você queria ler.
  */
 @Composable

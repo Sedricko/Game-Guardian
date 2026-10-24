@@ -386,7 +386,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                     }
                 }
                 // teclado de texto: o numérico não tem o ~ da faixa (100~200)
-                ValueField(s.value, "Valor (ex.: 100 ou faixa 100~200)", { s.value = it }, keyboard = KeyboardType.Ascii)
+                ValueField(s.value, "Valor (100, faixa 100~200, grupo 100;250::64)", { s.value = it }, keyboard = KeyboardType.Ascii)
                 if (s.history.isNotEmpty()) {
                     // últimas buscas: um toque repete valor e tipos
                     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1480,9 +1480,13 @@ private val HELP = listOf(
         "Sem nenhum caminho? Aumente os níveis ou a distância, ou desligue \"Ponteiros só nas libs do jogo\" em Ajustes.",
     "O jogo fechou" to "Quando o jogo fecha sozinho (queda ou fechado pelo Android), o Tinker percebe em alguns segundos, abre o menu " +
         "flutuante e pergunta se quer reabrir. Reabrindo, ele se liga ao jogo e os salvos voltam sozinhos. O motivo da queda fica na aba Registro.",
+    "Busca em grupo" to "Valores que ficam juntos no mesmo objeto (ouro, gema, nível) dá para buscar de uma vez: digite os valores com ; " +
+        "e, depois de ::, a distância máxima em bytes (ex.: 1250;30;7::128). Ficam só os que aparecem todos perto um do outro, " +
+        "o que corta milhares de resultados soltos. Funciona em qualquer jogo, com ou sem IL2CPP.",
     "Assistente (IA)" to "Em Ajustes → Assistente (IA), escolha Claude ou Gemini e coloque a chave (a do Gemini é grátis em aistudio.google.com). Depois, toque em ✨: na Busca, qual resultado é o certo e o próximo passo; na lista de classes, pergunte onde " +
         "está o valor (as classes citadas viram atalho para abrir); na ficha, o que cada campo faz; no Registro, o que deu errado. " +
-        "A IA também olha a memória sozinha (🔧): procura classes, abre objetos com os valores, busca e refina; ela não edita nada. " +
+        "A IA também olha a memória sozinha (🔧): procura classes, abre objetos com os valores, busca (inclusive em grupo) e refina. " +
+        "Ela não edita sozinha: quando acha o campo, aparece um botão Aplicar com a edição sugerida (e ❄ se for para congelar). " +
         "Só o que está na tela e o que ela consulta é enviado, e só quando você toca em Perguntar. Precisa de internet; no Claude cada pergunta é cobrada; no Gemini gratuito há limite por dia.",
     "Reportar um problema" to "Na aba Registro, toque em Compartilhar relatório e envie o arquivo .txt. Ele tem tudo que é preciso para investigar.",
 )
