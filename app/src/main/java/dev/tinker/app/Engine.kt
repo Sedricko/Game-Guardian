@@ -855,6 +855,21 @@ class Engine private constructor(private val app: Context) {
             val op = compareOp(a.optString("como"), a.optString("quanto")) ?: return@AiTool "Use aumentou, diminuiu, igual ou mudou."
             aiBusy { resultsText(compare(op, a.optString("quanto"))) }
         },
+        AiTool("buscar_bytes", "Busca AOB: procura uma sequência de bytes (hex, ?? = qualquer byte) nos dados ou no código do jogo. " +
+            "Os lugares viram os resultados da busca. Bom para achar de novo um valor pelos bytes em volta (assinatura) quando o endereço muda.",
+            mapOf("padrao" to "pares hex com ?? de curinga, ex.: 1F 20 ?? D5 00 00", "onde" to "dados (memória do jogo, padrão) ou codigo (instruções)"),
+            listOf("padrao")) { a ->
+            aiBusy { resultsText(searchAob(a.optString("padrao"), a.optString("onde").trim().lowercase().startsWith("c"))) }
+        },
+        AiTool("ler_bytes", "Mostra os bytes crus (hex) a partir de um endereço, para montar um padrão AOB em volta de um valor.",
+            mapOf("endereco" to "endereço em hexadecimal (ex.: de um resultado, menos alguns bytes)", "quantidade" to "quantos bytes, até 64 (padrão 32)"),
+            listOf("endereco")) { a ->
+            val addr = parseAddress(a.optString("endereco")) ?: return@AiTool "Endereço inválido."
+            val n = (a.optString("quantidade").toIntOrNull() ?: 32).coerceIn(1, 64)
+            // byte que não deu para ler (página sem mapa) vira ??
+            val bytes = call { d -> d.send("dump $addr i8 $n", quiet = true).lines.map { l -> l.substringAfter(' ').toIntOrNull()?.let { "%02x".format(it and 0xff) } ?: "??" } }
+            "0x$addr: " + bytes.joinToString(" ")
+        },
         AiTool("ver_salvos", "Mostra os salvos (com ponteiro, assinatura, histórico e se voltaram ao reabrir) e as receitas.", emptyMap(), emptyList()) { savedContext() },
         AiTool("propor_receita", "Sugere criar uma receita com salvos (aplica tudo de uma vez, e sozinha ao abrir o jogo). Aparece um botão para a pessoa.",
             mapOf("nome" to "nome da receita", "salvos" to "nomes ou endereços dos salvos, separados por vírgula, ou todos", "ao_abrir" to "sim para aplicar sozinha quando o jogo abrir"),

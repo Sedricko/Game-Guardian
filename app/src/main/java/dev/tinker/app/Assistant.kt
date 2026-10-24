@@ -59,6 +59,8 @@ Para achar um recurso pelo nome: procurar_classes procura também nos campos (go
 na lista de nomes: abra as classes candidatas e mostre o campo com o valor de agora (ex.: PlayerData.Gold = 550). Se a classe tem
 muitos objetos, use abrir_classe com o valor que a pessoa vê (ou pergunte o valor) para achar o objeto certo. Sempre que recomendar
 classes, chame mostrar_classes para elas aparecerem no topo da lista da pessoa.
+Busca AOB: com ler_bytes você vê os bytes em volta de um valor e monta um padrão (troque por ?? os bytes que mudam, como o
+próprio valor); buscar_bytes acha o lugar de novo quando o endereço muda, ou acha código no jogo.
 Use ver_salvos para saber o que já foi achado e se os ponteiros voltaram. Quando descobrir algo que vale para a próxima vez
 (classe e campo de um recurso, tipo do valor, se é cifrado), use anotar. Para deixar várias edições prontas para toda vez que o
 jogo abrir, use propor_receita com os salvos."""
