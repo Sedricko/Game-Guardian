@@ -107,8 +107,12 @@ fun AiBox(
         Button(onClick = { s.tab = TABS.indexOf("Ajustes") }) { Text("Configurar IA") }
         return
     }
+    val going = turns.isNotEmpty()
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            // a IA lê os números na tela do jogo e já busca: nada para digitar
+            AssistChip(onClick = { ask("Veja a tela do jogo (ver_tela), leia os valores de recursos que aparecem, busque e ache os campos certos.", fresh = !going) },
+                enabled = !loading && s.process != null, label = { Text("📷 Ler a tela e achar", maxLines = 1) })
             presets.forEach { p -> AssistChip(onClick = { ask(p, fresh = true) }, enabled = !loading, label = { Text(p, maxLines = 1) }) }
         }
         // a conversa rola dentro da própria caixa: em telas sem rolagem (Memória → Ficha) o texto ficava cortado
@@ -163,7 +167,6 @@ fun AiBox(
         }
         // o que a IA olhou sozinha na memória (procurar classe, abrir objeto, buscar)
         steps.takeLast(8).forEach { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        val going = turns.isNotEmpty()
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             OutlinedTextField(question, { question = it }, label = { Text(if (going) "Responder ou perguntar mais" else "Sua pergunta") }, modifier = Modifier.weight(1f))
             Button(onClick = { ask(question, fresh = false) }, enabled = !loading && question.isNotBlank()) { Text(if (going) "Enviar" else "Perguntar") }

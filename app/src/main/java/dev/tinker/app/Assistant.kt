@@ -6,7 +6,9 @@ import com.anthropic.errors.AnthropicIoException
 import com.anthropic.errors.AnthropicServiceException
 import com.anthropic.errors.RateLimitException
 import com.anthropic.errors.UnauthorizedException
+import com.anthropic.models.beta.messages.BetaBase64ImageSource
 import com.anthropic.models.beta.messages.BetaCacheControlEphemeral
+import com.anthropic.models.beta.messages.BetaImageBlockParam
 import com.anthropic.models.beta.messages.BetaContentBlockParam
 import com.anthropic.models.beta.messages.BetaMessageParam
 import com.anthropic.models.beta.messages.BetaStopReason
@@ -67,11 +69,17 @@ muitos objetos, use abrir_classe com o valor que a pessoa vê (ou pergunte o val
 classes, chame mostrar_classes para elas aparecerem no topo da lista da pessoa.
 Busca AOB: com ler_bytes você vê os bytes em volta de um valor e monta um padrão (troque por ?? os bytes que mudam, como o
 próprio valor); buscar_bytes acha o lugar de novo quando o endereço muda, ou acha código no jogo.
+Veja a tela: ver_tela te mostra um print do jogo. Use no começo para ler os números (ouro, gemas, vida) e já buscar, sem pedir
+para a pessoa digitar; e depois de uma edição, para conferir se mudou na tela. Para ponteiros, preparar_ponteiros busca agora e
+diz se ficaram bons (o Tinker também busca sozinho quando a edição é aplicada).
 Use ver_salvos para saber o que já foi achado e se os ponteiros voltaram. Quando descobrir algo que vale para a próxima vez
 (classe e campo de um recurso, tipo do valor, se é cifrado), use anotar. Para deixar várias edições prontas para toda vez que o
 jogo abrir, use propor_receita com os salvos."""
 
-    private const val MAX_ROUNDS = 20  // chamadas de ferramenta por pergunta, para não ficar em volta para sempre
+    private const val MAX_ROUNDS = 20
+
+    /** Imagem (JPEG em base64) que uma ferramenta pediu para mandar junto da resposta dela (ver_tela). */
+    @Volatile internal var pendingImage: String? = null  // chamadas de ferramenta por pergunta, para não ficar em volta para sempre
 
     /** O provedor escolhido tem chave? */
     fun ready() = if (Session.aiProvider == "gemini") Session.geminiKey.isNotBlank() else Session.aiKey.isNotBlank()
@@ -140,7 +148,13 @@ jogo abrir, use propor_receita com os salvos."""
                     val args = runCatching { JSONObject(u._input().convert(Map::class.java) as Map<*, *>) }.getOrDefault(JSONObject())
                     BetaContentBlockParam.ofToolResult(BetaToolResultBlockParam.builder().toolUseId(u.id()).content(runTool(tools, u.name(), args, onStep)).build())
                 }
-                messages += BetaMessageParam.builder().role(BetaMessageParam.Role.USER).contentOfBetaContentBlockParams(results).build()
+                // print da tela (ver_tela): vai na mesma mensagem, depois das respostas das ferramentas
+                val image = pendingImage?.also { pendingImage = null }?.let {
+                    BetaContentBlockParam.ofImage(BetaImageBlockParam.builder().source(
+                        BetaBase64ImageSource.builder().data(it).mediaType(BetaBase64ImageSource.MediaType.IMAGE_JPEG).build(),
+                    ).build())
+                }
+                messages += BetaMessageParam.builder().role(BetaMessageParam.Role.USER).contentOfBetaContentBlockParams(results + listOfNotNull(image)).build()
             }
             "Parei depois de $MAX_ROUNDS consultas sem chegar a uma resposta. Tente uma pergunta mais específica."
         } catch (e: UnauthorizedException) {
@@ -214,6 +228,7 @@ jogo abrir, use propor_receita com os salvos."""
                     val out = runTool(tools, c.optString("name"), c.optJSONObject("args") ?: JSONObject(), onStep)
                     answers.put(JSONObject().put("functionResponse", JSONObject().put("name", c.optString("name")).put("response", JSONObject().put("result", out))))
                 }
+                pendingImage?.also { pendingImage = null }?.let { answers.put(JSONObject().put("inlineData", JSONObject().put("mimeType", "image/jpeg").put("data", it))) }
                 contents.put(JSONObject().put("role", "user").put("parts", answers))
             }
             "Parei depois de $MAX_ROUNDS consultas sem chegar a uma resposta. Tente uma pergunta mais específica."

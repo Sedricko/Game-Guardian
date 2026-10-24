@@ -1391,7 +1391,8 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
             Panel {
                 Text("Assistente (IA)", style = MaterialTheme.typography.titleSmall)
                 Text("O botão ✨ na Busca, na Ficha, na lista de classes e no Registro manda o que está na tela para a IA e mostra a resposta: " +
-                    "onde está o valor, o que cada campo faz, o que deu errado. Precisa de internet. Nada é enviado sem você tocar em Perguntar.",
+                    "onde está o valor, o que cada campo faz, o que deu errado. Ela também pode tirar um print do jogo para ler os números da tela " +
+                    "(📷 Ler a tela e achar). Precisa de internet. Nada é enviado sem você tocar em Perguntar.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf("claude" to "Claude", "gemini" to "Gemini").forEach { (id, label) ->

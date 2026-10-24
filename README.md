@@ -113,6 +113,8 @@ valor e compara (↑ ↓ = ≠), lê os bytes em volta e faz busca AOB, vê os s
 Ela também **espera a mudança sozinha**: diz o que fazer no jogo (gastar, levar dano), você minimiza e joga, e ela refina quando o
 valor muda. Com **IA pode testar valores** ligado em Ajustes, ela confirma qual resultado é o verdadeiro escrevendo um valor de
 teste por 2 segundos e voltando o original.
+**📷 Ler a tela e achar**: o Tinker tira um print do jogo (com root), a IA lê os números que aparecem e já busca, sem digitar;
+depois de uma edição, ela confere na tela. Também prepara e avalia os **ponteiros** dos salvos quando pedido.
 Aparece sozinha quando a busca dá 0, quando o jogo fecha e quando um salvo não volta ao reabrir. Cada
 ferramenta usada aparece embaixo da pergunta (🔧) e fica no Registro, junto com o começo da resposta.
 

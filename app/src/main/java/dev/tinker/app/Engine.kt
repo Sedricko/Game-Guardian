@@ -756,6 +756,30 @@ class Engine private constructor(private val app: Context) {
     }
 
 
+    /**
+     * Print do jogo para a IA ler os números da tela: o painel fica quase invisível por um instante (o "olho") para não sair
+     * na foto; a imagem vai reduzida (cerca de 1/3) em JPEG, o bastante para ler textos e bem mais leve para enviar.
+     */
+    private suspend fun screenshotJpeg(): String {
+        withContext(Dispatchers.Main) { Session.peek = true }
+        val r = try {
+            delay(350)
+            call { d -> d.send("screencap", quiet = true) }
+        } finally {
+            withContext(Dispatchers.Main) { Session.peek = false }
+        }
+        return withContext(Dispatchers.Default) {
+            val png = android.util.Base64.decode(r.lines.joinToString("") { it.removePrefix("| ") }, android.util.Base64.DEFAULT)
+            val bmp = android.graphics.BitmapFactory.decodeByteArray(png, 0, png.size, android.graphics.BitmapFactory.Options().apply { inSampleSize = 2 })
+                ?: throw IOException("o print veio vazio")
+            val scale = minOf(1f, 1400f / maxOf(bmp.width, bmp.height))
+            val small = if (scale < 1f) Bitmap.createScaledBitmap(bmp, (bmp.width * scale).toInt(), (bmp.height * scale).toInt(), true) else bmp
+            val out = java.io.ByteArrayOutputStream()
+            small.compress(Bitmap.CompressFormat.JPEG, 75, out)
+            android.util.Base64.encodeToString(out.toByteArray(), android.util.Base64.NO_WRAP)
+        }
+    }
+
     /** Busca feita pela IA: espera a sua terminar e trava os botões e as rotinas de fundo enquanto roda, como uma busca sua. */
     private suspend fun aiBusy(work: suspend () -> String): String {
         while (Session.busy) delay(200)
@@ -947,6 +971,21 @@ class Engine private constructor(private val app: Context) {
                 }
             } finally {
                 write(addr, type, old)  // sempre volta o original, mesmo se der erro no meio
+            }
+        },
+        AiTool("ver_tela", "Tira um print do jogo agora e te mostra a imagem: leia os números que aparecem (ouro, gemas, vida, nível) para " +
+            "buscar sem a pessoa digitar, ou para conferir se uma edição apareceu na tela.", emptyMap(), emptyList()) {
+            Assistant.pendingImage = screenshotJpeg()
+            "Print da tela anexado logo abaixo. Leia os valores que aparecem e diga o que é cada um."
+        },
+        AiTool("preparar_ponteiros", "Procura agora os ponteiros de salvos (o caminho que acha o valor de novo quando o jogo reabre) e diz se ficaram bons. " +
+            "Leva alguns segundos por salvo e pausa o jogo nesse tempo.",
+            mapOf("salvos" to "nomes ou endereços dos salvos, separados por vírgula, ou todos"), listOf("salvos")) { a ->
+            val items = matchSaved(a.optString("salvos"), Session.saved.toList()).filter { it.anchor.isEmpty() }.take(5)
+            if (items.isEmpty()) return@AiTool "Nenhum salvo com esses nomes (os que seguem outro pelo offset já vêm junto com ele)."
+            aiBusy {
+                items.joinToString("\n") { item -> "${label(item)}: " + runCatching { scanPointers(item) }.getOrElse { "erro: ${it.message}" } } +
+                    "\n\nEstado agora:\n" + items.mapNotNull { i -> Session.saved.firstOrNull { it.id == i.id } }.joinToString("\n") { savedLine(it) }
             }
         },
         AiTool("ver_resultados", "Mostra os resultados atuais da busca, com o campo IL2CPP quando há até 20.", emptyMap(), emptyList()) { resultsText(Session.status) },

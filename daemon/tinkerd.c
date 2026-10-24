@@ -1251,6 +1251,41 @@ static void run_logcat(const char *args) {
     puts("ok");
 }
 
+// Print da tela (para a IA ler os valores que o jogo mostra): PNG do screencap, em base64, 76 letras por linha com "| ".
+// Vai pelo protocolo em vez de arquivo: um arquivo criado pelo root nem sempre pode ser lido pelo app com o SELinux ligado.
+static size_t read_full(FILE *f, unsigned char *buf, size_t n) {
+    size_t got = 0, r;
+    while (got < n && (r = fread(buf + got, 1, n - got, f)) > 0) got += r;
+    return got;
+}
+
+static void cmd_screencap(void) {
+    static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    FILE *p = popen("screencap -p 2>/dev/null", "r");
+    if (!p) { printf("err screencap indisponível: %s\n", strerror(errno)); return; }
+    unsigned char in[57];
+    char out[80];
+    size_t n, total = 0;
+    // blocos cheios de 57 bytes (76 letras): o "=" de enchimento só pode aparecer no último
+    while ((n = read_full(p, in, sizeof in)) > 0) {
+        size_t o = 0;
+        for (size_t i = 0; i < n; i += 3) {
+            unsigned v = in[i] << 16 | (i + 1 < n ? in[i + 1] << 8 : 0) | (i + 2 < n ? in[i + 2] : 0);
+            out[o++] = b64[v >> 18 & 63];
+            out[o++] = b64[v >> 12 & 63];
+            out[o++] = i + 1 < n ? b64[v >> 6 & 63] : '=';
+            out[o++] = i + 2 < n ? b64[v & 63] : '=';
+        }
+        out[o] = 0;
+        printf("| %s\n", out);
+        total += n;
+        if (n < sizeof in) break;
+    }
+    pclose(p);
+    if (!total) { puts("err o screencap não devolveu imagem"); return; }
+    printf("ok %zu\n", total);
+}
+
 static void cmd_ps(void) {
     DIR *d = opendir("/proc");
     struct dirent *e;
@@ -1292,6 +1327,7 @@ int main(void) {
         a1[0] = a2[0] = a3[0] = a4[0] = 0;
         if (sscanf(line, "%31s %399s %127s %127s %127s", cmd, a1, a2, a3, a4) < 1) continue;
         if (!strcmp(cmd, "ps")) { cmd_ps(); continue; }
+        if (!strcmp(cmd, "screencap")) { cmd_screencap(); continue; }
         if (!strcmp(cmd, "info")) {
             // para o relatório: confirma root, kernel, tamanho de página e SELinux
             struct utsname u;

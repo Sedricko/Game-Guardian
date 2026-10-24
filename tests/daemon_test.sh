@@ -146,6 +146,13 @@ grep -qx "obj $oaddr" <<<"$objs" && [ "$(grep -c '^obj ' <<<"$objs")" = 2 ] && g
 cl=$(printf '%s\n' "attach $pid" "il2classes" | "$out/tinkerd")
 grep -qE "^class Game.Player [0-9a-f]+ 3 hp,gold,instances$" <<<"$cl" || { echo "FALHOU: il2classes"; echo "$cl" | head; exit 1; }
 
+# Print da tela: no PC não há screencap → erro claro; com um screencap falso, o base64 volta igual ao arquivo
+sc=$(printf 'screencap\n' | "$out/tinkerd" | tail -1)
+[ "$sc" = "err o screencap não devolveu imagem" ] || { echo "FALHOU: screencap sem programa ($sc)"; exit 1; }
+mkdir -p "$out/bin"; head -c 1000 /dev/urandom > "$out/img"; printf '#!/bin/sh\ncat %s\n' "$out/img" > "$out/bin/screencap"; chmod +x "$out/bin/screencap"
+printf 'screencap\n' | PATH="$out/bin:$PATH" "$out/tinkerd" | grep '^| ' | cut -c3- | base64 -d > "$out/img2"
+cmp -s "$out/img" "$out/img2" || { echo "FALHOU: screencap base64"; exit 1; }
+
 # Busca em grupo: hp (99.5) e gold (4321) do mesmo objeto, a 4 bytes; distância curta demais não acha; um valor só vira busca normal
 grp=$(printf '%s\n' "attach $pid" "group i32,f32 4321;99.5 16" "list 10" "group i32,f32 4321;99.5 2" "group i32 4321 16" "group i32 4321;1 0" | "$out/tinkerd")
 # itens repetidos: 4321;4321 precisa de dois 4321 perto (só há um) → 0; item que nenhum tipo entende (abc) não é exigido
