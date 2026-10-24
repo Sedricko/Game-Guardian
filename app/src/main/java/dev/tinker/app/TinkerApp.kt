@@ -70,11 +70,27 @@ object Diag {
         }
     }
 
-    fun export(): String = runCatching { file.readText().takeLast(100_000) }.getOrDefault("")
+    /** O registro para o relatório: o logcat copiado no meio é encurtado, senão ele empurra as ações do Tinker para fora. */
+    fun export(): String = runCatching { compactLog(file.readLines()).takeLast(3000).joinToString("\n") }.getOrDefault("")
 
     @Synchronized
     fun clear() {
         runCatching { file.writeText("") }
         main.post { lines.clear() }
     }
+}
+
+/** Encurta cada trecho seguido de linhas "| " (logcat) para as primeiras `keep`; o logcat inteiro já tem seção própria no relatório. */
+internal fun compactLog(lines: List<String>, keep: Int = 40): List<String> {
+    val out = ArrayList<String>(lines.size)
+    var run = 0
+    var cut = 0
+    for (line in lines) {
+        val logcat = line.substringAfter(' ').substringAfter(' ').startsWith("|")  // depois de data e hora
+        if (!logcat && cut > 0) { out += "($cut linhas do logcat omitidas aqui; veja a seção Logcat do jogo)"; cut = 0 }
+        run = if (logcat) run + 1 else 0
+        if (logcat && run > keep) cut++ else out += line
+    }
+    if (cut > 0) out += "($cut linhas do logcat omitidas aqui; veja a seção Logcat do jogo)"
+    return out
 }

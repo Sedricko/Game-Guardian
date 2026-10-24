@@ -69,4 +69,14 @@ class ValuesTest {
         assertTrue(matchesAny("1.10000002", "xf32", parseValues("1.1")))
         assertEquals("i32", plain("xi32"))
     }
+
+    @Test
+    fun compactLogMantemAsAcoesDoTinker() {
+        val log = listOf("24/10 01:00:00.000 > search i32 5") + List(100) { "24/10 01:00:01.000 | linha $it" } + "24/10 01:00:02.000 < ok 3"
+        val out = compactLog(log, keep = 2)
+        assertEquals(listOf(
+            "24/10 01:00:00.000 > search i32 5", "24/10 01:00:01.000 | linha 0", "24/10 01:00:01.000 | linha 1",
+            "(98 linhas do logcat omitidas aqui; veja a seção Logcat do jogo)", "24/10 01:00:02.000 < ok 3",
+        ), out)
+    }
 }
