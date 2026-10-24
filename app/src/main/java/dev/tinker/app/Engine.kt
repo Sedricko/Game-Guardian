@@ -300,6 +300,11 @@ class Engine private constructor(private val app: Context) {
         Session.panelSize = prefs.getInt("panelSize2", Session.panelSize).coerceIn(0, PANEL_SIZES.lastIndex)  // chave nova: quem já usava volta uma vez para tela cheia, o novo padrão
         loadSaved()
         loadHistory()
+        // instalação nova (ou dados limpos): a memória da IA volta sozinha do backup em Download/Tinker
+        if (!lessonsFile.exists() && noteFiles.isEmpty()) scope.launch(Dispatchers.IO) {
+            val r = restoreMemory()
+            if (r.startsWith("Memória importada")) Diag.add("Memória da IA restaurada do backup: $r")
+        }
         scope.launch { freezeLoop() }
         scope.launch { checkUpdate() }
         // o jogo reabriu (PID novo): escolhe de novo sozinho e os salvos voltam pela restauração
@@ -774,6 +779,80 @@ class Engine private constructor(private val app: Context) {
         lessonsFile.delete()
         notesFile?.delete()
         Diag.add("Aprendizado da IA apagado")
+        backupMemorySoon()
+    }
+
+    // Backup da memória da IA: Download/Tinker/tinker-memoria-ia.json, atualizado sozinho a cada coisa aprendida.
+    // Atualizar o app não apaga os dados (mesma assinatura); o backup cobre desinstalar, limpar dados ou outro aparelho.
+
+    private val noteFiles get() = app.filesDir.listFiles { f -> f.name.startsWith("notas-") && f.name.endsWith(".txt") }.orEmpty()
+
+    /** Toda a memória (lições + notas de cada jogo) em JSON, para backup e exportação. */
+    fun memoryJson(): String = JSONObject().put("tinker", "memoria-ia").put("versao", 1)
+        .put("criado", java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US).format(java.util.Date()))
+        .put("licoes", lessons())
+        .put("notas", JSONObject().apply { noteFiles.forEach { put(it.name.removePrefix("notas-").removeSuffix(".txt"), it.readText()) } })
+        .toString(2)
+
+    /** Junta uma memória exportada com a de agora (não apaga nada, não repete linha). */
+    fun importMemory(text: String): String {
+        val j = runCatching { JSONObject(text) }.getOrNull()?.takeIf { it.optString("tinker") == "memoria-ia" }
+            ?: return "Não é uma memória do Tinker (arquivo tinker-memoria-ia.json)."
+        lessonsFile.writeText(mergeLines(lessons(), j.optString("licoes")))
+        val notes = j.optJSONObject("notas") ?: JSONObject()
+        var games = 0
+        notes.keys().forEach { pkg ->
+            if (!Regex("""[A-Za-z0-9._]{1,120}""").matches(pkg)) return@forEach  // vira nome de arquivo: nada de / ou ..
+            val f = File(app.filesDir, "notas-$pkg.txt")
+            f.writeText(mergeLines(f.takeIf { it.exists() }?.readText().orEmpty(), notes.optString(pkg)))
+            games++
+        }
+        backupMemorySoon()
+        val n = lessons().lines().count { it.isNotBlank() }
+        Diag.add("Memória da IA importada: $n lições, notas de $games jogos")
+        return "Memória importada: $n lições e notas de $games jogos."
+    }
+
+    private fun memoryUri(create: Boolean): android.net.Uri? {
+        if (android.os.Build.VERSION.SDK_INT < 29) return null
+        val col = android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI
+        app.contentResolver.query(
+            col, arrayOf(android.provider.MediaStore.Downloads._ID),
+            "${android.provider.MediaStore.Downloads.DISPLAY_NAME}=? AND ${android.provider.MediaStore.Downloads.RELATIVE_PATH} LIKE ?",
+            arrayOf(MEMORY_FILE, "Download/Tinker%"), null,
+        )?.use { c -> if (c.moveToFirst()) return android.content.ContentUris.withAppendedId(col, c.getLong(0)) }
+        if (!create) return null
+        return app.contentResolver.insert(col, android.content.ContentValues().apply {
+            put(android.provider.MediaStore.Downloads.DISPLAY_NAME, MEMORY_FILE)
+            put(android.provider.MediaStore.Downloads.MIME_TYPE, "application/json")
+            put(android.provider.MediaStore.Downloads.RELATIVE_PATH, "Download/Tinker")
+        })
+    }
+
+    var lastMemoryBackup by mutableStateOf("")
+        private set
+
+    /** Grava o backup agora (sobrescreve o mesmo arquivo). */
+    fun backupMemory(): Boolean = runCatching {
+        val uri = memoryUri(create = true) ?: return false
+        app.contentResolver.openOutputStream(uri, "wt")!!.use { it.write(memoryJson().toByteArray()) }
+        lastMemoryBackup = java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.US).format(java.util.Date())
+        true
+    }.onFailure { Diag.add("Backup da memória da IA falhou: ${it.message}") }.getOrDefault(false)
+
+    private var backupJob: kotlinx.coroutines.Job? = null
+
+    /** Várias coisas aprendidas seguidas viram um backup só. */
+    private fun backupMemorySoon() {
+        backupJob?.cancel()
+        backupJob = scope.launch(Dispatchers.IO) { delay(3000); backupMemory() }
+    }
+
+    /** Lê o backup de Download/Tinker e junta com a memória de agora. */
+    fun restoreMemory(): String {
+        val uri = memoryUri(create = false) ?: return "Nenhum backup em Download/Tinker/$MEMORY_FILE."
+        val text = runCatching { app.contentResolver.openInputStream(uri)!!.use { it.reader().readText() } }.getOrElse { return "Não li o backup: ${it.message}" }
+        return importMemory(text)
     }
 
     private fun appendNote(f: File, text: String, max: Int) = runCatching {
@@ -781,6 +860,7 @@ class Engine private constructor(private val app: Context) {
         if (f.exists() && f.readLines().any { it.substringAfter(' ') == line.substringAfter(' ') }) return@runCatching  // já sabe
         f.appendText(line + "\n")
         if (f.length() > max) f.writeText(f.readText().takeLast(max / 2).substringAfter('\n'))
+        backupMemorySoon()
     }
 
     /** Linhas do logcat do jogo que indicam servidor/antitrapaça recusando valores (ex.: PBC_SHOULD_BE_LESS_THAN_EQUAL no Sonic Forces). */
@@ -2399,6 +2479,16 @@ internal fun readable(value: String, cipherType: String): String? {
     val short = if (type == "f32") d.toFloat().toString() else d.toString()
     val abs = kotlin.math.abs(d)
     return if (abs == 0.0 || abs in 1e-6..1e15) java.math.BigDecimal(short).stripTrailingZeros().toPlainString() else short
+}
+
+const val MEMORY_FILE = "tinker-memoria-ia.json"
+
+/** Linhas de memória: as de agora mais as novas que ainda não estavam (a data do começo não conta). */
+internal fun mergeLines(old: String, new: String): String {
+    val have = old.lines().filter { it.isNotBlank() }
+    val seen = have.map { it.substringAfter(' ') }.toHashSet()
+    val add = new.lines().filter { it.isNotBlank() && seen.add(it.substringAfter(' ')) }
+    return (have + add).joinToString("\n", postfix = if (have.isEmpty() && add.isEmpty()) "" else "\n")
 }
 
 /** Logcat do jogo: sinais de servidor ou antitrapaça conferindo valores. */

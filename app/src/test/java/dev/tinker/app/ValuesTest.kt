@@ -221,4 +221,12 @@ class ValuesTest {
         assertEquals(null, classMatch(GameClass("AppInfo", 2, listOf("InfoString", "m_runnersRequired")), searchWords("ring")))  // String não é ring
         assertEquals(listOf("Player", "Data", "m", "ring", "Count", "UI"), nameWords("PlayerData.m_ringCount UI"))
     }
+
+    @Test
+    fun memoryMergeKeepsAndAddsWithoutRepeating() {
+        val old = "01/10 lição A\n02/10 lição B\n"
+        assertEquals("01/10 lição A\n02/10 lição B\n05/10 lição C\n", mergeLines(old, "03/10 lição B\n05/10 lição C"))  // B já tinha, com outra data
+        assertEquals("09/10 só nova\n", mergeLines("", "09/10 só nova"))
+        assertEquals("", mergeLines("", ""))
+    }
 }

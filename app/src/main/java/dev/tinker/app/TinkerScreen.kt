@@ -1462,6 +1462,22 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                     Text(text.ifBlank { "Nada ainda: ela aprende uma lição no fim de cada tarefa." }, style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace, modifier = Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState()))
                     if (text.isNotBlank()) TextButton(onClick = { engine.clearLessons(); showLessons = false }) { Text("Apagar o aprendizado") }
+                    // backup: sozinho em Download/Tinker a cada coisa aprendida; volta sozinho numa instalação nova
+                    Text("Backup automático em Download/Tinker/$MEMORY_FILE" + if (engine.lastMemoryBackup.isEmpty()) "" else " (último: ${engine.lastMemoryBackup})",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedButton(onClick = { keyInfo = if (engine.backupMemory()) "Backup feito em Download/Tinker." else "Backup não deu certo (veja o Registro)." }) { Text("Fazer backup") }
+                        OutlinedButton(onClick = {
+                            val file = File(clipCtx.cacheDir, "reports").apply { mkdirs() }.let { File(it, MEMORY_FILE) }.apply { writeText(engine.memoryJson()) }
+                            shareFile(clipCtx, file, "application/json")
+                        }) { Text("Exportar") }
+                        OutlinedButton(onClick = {
+                            val clip = clipCtx.getSystemService(ClipboardManager::class.java).primaryClip
+                            val t = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(clipCtx)?.toString().orEmpty()
+                            keyInfo = if (t.isBlank()) "Copie o conteúdo do arquivo $MEMORY_FILE e toque de novo." else engine.importMemory(t)
+                        }) { Text("Importar (colar)") }
+                        OutlinedButton(onClick = { keyInfo = engine.restoreMemory() }) { Text("Restaurar do backup") }
+                    }
                 }
                 Toggle("IA pode testar valores", "Para saber se um resultado é o verdadeiro, ela escreve um valor de teste por 2 segundos e depois volta o original. " +
                     "Desligado: ela só olha.", s.aiCanTest) { s.aiCanTest = it; engine.saveSettings() }

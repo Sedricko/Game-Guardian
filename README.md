@@ -122,7 +122,9 @@ esperar o toque) e *controlar o jogo* (a IA vê a tela, toca e arrasta no jogo p
 é bloqueado se o que está na frente não for o jogo (ex.: compra na Play Store). **⏹ Parar** a qualquer momento: abra a bolinha.
 **Aprende com o uso**: no fim de cada tarefa ela guarda uma lição geral (vale para todos os jogos) e anota o que é deste jogo;
 uma edição que você desfaz vira um ERRO anotado, para ela não repetir. Tudo isso entra no começo das próximas conversas.
-Em Ajustes → **O que a IA aprendeu** dá para ler e apagar. Ela também avisa quando o logcat do jogo mostra o servidor ou o
+Em Ajustes → **O que a IA aprendeu** dá para ler e apagar. A memória tem **backup automático** em
+`Download/Tinker/tinker-memoria-ia.json` (atualizado a cada coisa aprendida) e volta sozinha numa instalação nova; também dá para
+**Exportar**, **Importar (colar)** e **Restaurar do backup**. Atualizar o app normalmente não apaga nada. Ela também avisa quando o logcat do jogo mostra o servidor ou o
 antitrapaça conferindo valores, e cada resposta mostra o gasto (consultas, tempo e tokens).
 Aparece sozinha quando a busca dá 0, quando o jogo fecha e quando um salvo não volta ao reabrir. Cada
 ferramenta usada aparece embaixo da pergunta (🔧) e fica no Registro, junto com o começo da resposta.
