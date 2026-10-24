@@ -47,6 +47,12 @@ class OverlayService : Service() {
     private var bubble: ComposeView? = null
     private var panel: ComposeView? = null
     private var panelParams: LayoutParams? = null
+    private var bar: ComposeView? = null
+    // começa sem foco: o jogo continua recebendo as teclas; só pega o teclado enquanto o campo é usado
+    private val barParams = LayoutParams(
+        LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT,
+        LayoutParams.TYPE_APPLICATION_OVERLAY, LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT,
+    ).apply { gravity = Gravity.TOP or Gravity.START; x = 16; y = 120 }
 
     private val bubbleParams = LayoutParams(
         LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT,
@@ -72,6 +78,7 @@ class OverlayService : Service() {
     override fun onDestroy() {
         bubble?.let(wm::removeView)
         panel?.let(wm::removeView)
+        bar?.let(wm::removeView)
         owner.stop()
         Diag.add("Menu flutuante fechado")
         super.onDestroy()
@@ -95,12 +102,48 @@ class OverlayService : Service() {
                             bubble?.let { wm.updateViewLayout(it, bubbleParams) }
                         }
                     }
-                    .clickable { openPanel() },
+                    .clickable { if (Session.useBar) showBar() else openPanel() },
                 contentAlignment = Alignment.Center,
             ) { Image(painterResource(R.drawable.ic_launcher_foreground), contentDescription = "Abrir Tinker", modifier = Modifier.size(56.dp)) }
         }
         bubble = view
         wm.addView(view, bubbleParams)
+    }
+
+    private fun showBar() {
+        if (bar != null) return
+        bubble?.let { wm.removeView(it) }
+        bubble = null
+        Session.useBar = true
+        val view = compose {
+            QuickBar(
+                Engine.get(this@OverlayService),
+                onDrag = { dx, dy ->
+                    barParams.x += dx.toInt()
+                    barParams.y += dy.toInt()
+                    bar?.let { wm.updateViewLayout(it, barParams) }
+                },
+                onKeyboard = ::barFocus,
+                onOpenPanel = { closeBar(); Session.useBar = false; openPanel() },
+                onBubble = { closeBar(); showBubble() },
+            )
+        }
+        bar = view
+        barParams.flags = LayoutParams.FLAG_NOT_FOCUSABLE
+        wm.addView(view, barParams)
+    }
+
+    private fun barFocus(on: Boolean) {
+        val view = bar ?: return
+        val flags = if (on) LayoutParams.FLAG_NOT_TOUCH_MODAL else LayoutParams.FLAG_NOT_FOCUSABLE
+        if (barParams.flags == flags) return
+        barParams.flags = flags
+        wm.updateViewLayout(view, barParams)
+    }
+
+    private fun closeBar() {
+        bar?.let { wm.removeView(it) }
+        bar = null
     }
 
     private fun openPanel() {
@@ -120,6 +163,10 @@ class OverlayService : Service() {
                 TinkerPanel(Engine.get(this@OverlayService), overlay = true, onMinimize = ::closePanel, onResize = ::resizePanel, onExit = {
                     Engine.get(this@OverlayService).shutdown()
                     stopSelf()
+                }, onQuickBar = {
+                    panel?.let { wm.removeView(it) }
+                    panel = null
+                    showBar()
                 })
             }
         }

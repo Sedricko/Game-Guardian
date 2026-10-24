@@ -64,7 +64,8 @@ object Session {
     var panelSize by mutableIntStateOf(1)  // índice em PANEL_SIZES
     var peek by mutableStateOf(false)
     var autoPause by mutableStateOf(true)
-    var findEncrypted by mutableStateOf(true)  // a busca também procura valores cifrados (🔒)
+    var findEncrypted by mutableStateOf(true)
+    var useBar by mutableStateOf(false)  // a bolinha abre a barra rápida em vez do painel  // a busca também procura valores cifrados (🔒)
     var canUndo by mutableStateOf(false)  // há um refino para desfazer  // pausa o jogo durante busca/refino, para o valor não mudar no meio
     var view by mutableStateOf<Pair<String, String>?>(null)
     var tab by mutableIntStateOf(0)  // índice em TABS  // visualizador de memória: endereço e tipo  // segurando o "olho": painel quase invisível

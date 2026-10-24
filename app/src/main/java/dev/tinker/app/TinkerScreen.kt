@@ -77,22 +77,15 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-/**
- * A tela inteira do Tinker. Usada na Activity e no painel flutuante, por isso não abre
- * diálogos nem bottom sheets (janelas extras não funcionam dentro de um overlay).
- */
+/** Toda ação: trava os botões, roda no daemon, atualiza os resultados e passa o erro (null = sem erro). */
 @Composable
-fun TinkerPanel(engine: Engine, overlay: Boolean, onMinimize: () -> Unit = {}, onOpenOverlay: () -> Unit = {}, onResize: () -> Unit = {}, onExit: () -> Unit = {}) {
+fun rememberRun(engine: Engine, onError: (String?) -> Unit): (suspend () -> String) -> Unit {
     val s = Session
     val scope = rememberCoroutineScope()
-    var picking by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-
-    // Toda ação: trava os botões, roda no daemon, atualiza os resultados e mostra o erro se houver.
-    val run: (suspend () -> String) -> Unit = { work ->
+    return { work ->
         scope.launch {
             s.busy = true
-            error = null
+            onError(null)
             try {
                 s.status = work()
                 val (count, hits) = engine.list()
@@ -100,16 +93,31 @@ fun TinkerPanel(engine: Engine, overlay: Boolean, onMinimize: () -> Unit = {}, o
                 s.results = hits
             } catch (e: Exception) {
                 val msg = e.message ?: "Erro desconhecido"
-                error = if (msg.startsWith("valor inválido")) "$msg. Use um número (20000 ou 20.000), uma faixa (100~200) ou vários com ; (20000;50000)." else msg
+                onError(if (msg.startsWith("valor inválido")) "$msg. Use um número (20000 ou 20.000), uma faixa (100~200) ou vários com ; (20000;50000)." else msg)
             } finally {
                 s.busy = false
             }
         }
     }
+}
+
+/**
+ * A tela inteira do Tinker. Usada na Activity e no painel flutuante, por isso não abre
+ * diálogos nem bottom sheets (janelas extras não funcionam dentro de um overlay).
+ */
+@Composable
+fun TinkerPanel(
+    engine: Engine, overlay: Boolean, onMinimize: () -> Unit = {}, onOpenOverlay: () -> Unit = {}, onResize: () -> Unit = {}, onExit: () -> Unit = {},
+    onQuickBar: (() -> Unit)? = null,
+) {
+    val s = Session
+    var picking by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val run = rememberRun(engine) { error = it }
 
     Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
         Column {
-            Header(overlay, onPick = { picking = true }, onMinimize = onMinimize, onOpenOverlay = onOpenOverlay, onExit = onExit, run = run)
+            Header(overlay, onPick = { picking = true }, onMinimize = onMinimize, onOpenOverlay = onOpenOverlay, onExit = onExit, run = run, onQuickBar = onQuickBar)
             error?.let { Banner(it) { error = null } }
             if (s.busy) LinearProgressIndicator(Modifier.fillMaxWidth()) else Box(Modifier.padding(top = 4.dp))
             if (picking) {
@@ -166,7 +174,10 @@ private fun TabBar() {
 }
 
 @Composable
-private fun Header(overlay: Boolean, onPick: () -> Unit, onMinimize: () -> Unit, onOpenOverlay: () -> Unit, onExit: () -> Unit, run: (suspend () -> String) -> Unit) {
+private fun Header(
+    overlay: Boolean, onPick: () -> Unit, onMinimize: () -> Unit, onOpenOverlay: () -> Unit, onExit: () -> Unit, run: (suspend () -> String) -> Unit,
+    onQuickBar: (() -> Unit)?,
+) {
     val s = Session
     val engine = Engine.get(LocalContext.current)
     val p = s.process
@@ -208,6 +219,8 @@ private fun Header(overlay: Boolean, onPick: () -> Unit, onMinimize: () -> Unit,
                 }
             }
             if (!overlay) Button(onClick = onOpenOverlay, contentPadding = small) { Text("Menu flutuante", maxLines = 1) }
+            // painel pequeno sobre o jogo: refinar sem abrir tudo
+            if (onQuickBar != null) OutlinedButton(onClick = onQuickBar, contentPadding = small) { Text("Barra rápida", maxLines = 1) }
         }
     }
 }
@@ -877,6 +890,9 @@ private val HELP = listOf(
     "Valores cifrados (🔒)" to "Muitos jogos guardam moedas e vida trancadas com uma chave, para ninguém achar o número. A busca já procura " +
         "esses valores sozinha e mostra o número real com 🔒. Ao editar ou congelar um 🔒, o Tinker tranca o valor novo com a mesma chave, " +
         "como o jogo faria. Se aparecer o mesmo número normal e com 🔒, edite o 🔒: o normal costuma ser só uma cópia (às vezes uma isca do antitrapaça).",
+    "Barra rápida" to "No menu flutuante, toque em Barra rápida: uma barra pequena fica sobre o jogo, com o campo de valor, Refinar e ↑ ↓ = ≠ " +
+        "(aumentou, diminuiu, não mudou, mudou). Arraste pelo ⠿. ▢ abre o painel completo para editar e congelar; – volta para a bolinha, " +
+        "e a bolinha passa a abrir a barra.",
     "Endereços mudaram" to "Quando o jogo reinicia, os endereços mudam. Para um salvo continuar valendo, use um ponteiro (abaixo).",
     "Ponteiros" to "Como no Cheat Engine. 1. Abra o salvo e toque em Buscar ponteiros. 2. Feche e abra o jogo e abra o mesmo salvo. " +
         "3. Digite o valor que o jogo mostra agora e toque em Filtrar pelo valor (repita mudando o valor se sobrar muitos). 4. Toque em Usar. " +

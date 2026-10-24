@@ -34,6 +34,7 @@ Cada versão instala por cima da anterior, sem perder os salvos.
 | **Ajustes** | Ajuda, pausa automática, tamanho e transparência do painel, fechar jogo, regiões de memória (Jh, Ch, Ca, Cd, Cb, A…). |
 
 No menu flutuante, segure **👁 Espiar** para ver o jogo através do painel.
+**Barra rápida**: uma barra pequena sobre o jogo com valor, **Refinar** e **↑ ↓ = ≠**, para refinar sem abrir o painel; **▢** abre o painel completo.
 
 ## Passo a passo: achar um valor
 
