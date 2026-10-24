@@ -73,7 +73,8 @@ Quando o jogo reinicia, os endereços mudam. O Tinker cuida disso sozinho:
 3. **Ao reabrir o jogo**, o Tinker escolhe ele sozinho (se estava aberto, ou ao abrir o Tinker) e cada salvo volta sozinho:
    ponteiro guardado (confirmado com o último valor e daí em diante fixo) → caminhos de reserva
    (testados com o último valor) → assinatura. Os da mesma ficha vêm junto. O resultado aparece no topo da aba Salvos.
-   Enquanto o jogo ainda carrega o save, o Tinker tenta de novo sozinho por 5 minutos.
+   Enquanto o jogo ainda carrega o save, o Tinker tenta de novo sozinho por 2 minutos; o botão **↻** nos Salvos procura na hora.
+   Se o valor mudou com o jogo fechado (ou enquanto você joga), vale o consenso dos caminhos de ponteiro.
 4. Sobrou dúvida entre vários caminhos? Abra o salvo, digite o valor que o jogo mostra e toque em **Filtrar pelo valor**.
 
 Salvo com **⚠ de outra vez do jogo** não é lido nem escrito até voltar (escrever no endereço velho pode derrubar o jogo);

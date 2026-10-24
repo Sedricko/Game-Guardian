@@ -634,6 +634,9 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
             }
             info?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 4.dp)) }
             if (s.restoreInfo.isNotEmpty()) Text(s.restoreInfo, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 4.dp))
+            if (s.process != null && s.saved.any(engine::stale)) {
+                TextButton(onClick = { run { engine.retryNow() } }, enabled = !s.busy) { Text("↻ Procurar os salvos ⚠ agora") }
+            }
         }
         if (s.saved.isEmpty()) {
             item {
@@ -1024,7 +1027,8 @@ private val HELP = listOf(
         "Ao reabrir o jogo e escolher ele no Tinker, cada salvo volta sozinho (ponteiro → caminhos guardados → assinatura); os da mesma ficha " +
         "vêm junto pelo offset. Sobrou dúvida entre vários caminhos? Abra o salvo, digite o valor que o jogo mostra e toque em Filtrar pelo valor. " +
         "Salvo com ⚠ é de outra vez do jogo e não é lido nem escrito até voltar; se estava congelado, volta congelado. " +
-        "Com o Tinker aberto, quando o jogo reabre ele é escolhido de novo sozinho; enquanto o jogo carrega, o Tinker tenta de novo por 5 minutos. " +
+        "Com o Tinker aberto, quando o jogo reabre ele é escolhido de novo sozinho; enquanto o jogo carrega, o Tinker tenta de novo por 2 minutos " +
+        "(e o botão ↻ nos Salvos procura na hora). " +
         "Sem nenhum caminho? Aumente os níveis ou a distância, ou desligue \"Ponteiros só nas libs do jogo\" em Ajustes.",
     "O jogo fechou" to "Quando o jogo fecha sozinho (queda ou fechado pelo Android), o Tinker percebe em alguns segundos, abre o menu " +
         "flutuante e pergunta se quer reabrir. Reabrindo, ele se liga ao jogo e os salvos voltam sozinhos. O motivo da queda fica na aba Registro.",
@@ -1057,6 +1061,7 @@ private fun LogTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, onE
     val scope = rememberCoroutineScope()
     var info by remember { mutableStateOf<String?>(null) }
     var working by remember { mutableStateOf(false) }
+    var confirmClear by remember { mutableStateOf(false) }
     fun fetch(work: suspend () -> Unit) = scope.launch {
         working = true
         runCatching { work() }.onFailure { onError(it.message ?: "Erro") }
@@ -1090,7 +1095,11 @@ private fun LogTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, onE
             }, enabled = !working) { Text("Copiar tudo") }
             OutlinedButton(onClick = { fetch { engine.crashLog() } }, enabled = !working) { Text("Ver falhas") }
             OutlinedButton(onClick = { fetch { engine.gameLog() } }, enabled = !working && Session.process != null) { Text("Ver logcat do jogo") }
-            TextButton(onClick = { Diag.clear(); info = null }) { Text("Limpar") }
+            // dois toques: apagar o registro não tem volta
+            if (confirmClear) {
+                Button(onClick = { Diag.clear(); info = "Registro apagado."; confirmClear = false }) { Text("Apagar mesmo") }
+                TextButton(onClick = { confirmClear = false }) { Text("Cancelar") }
+            } else OutlinedButton(onClick = { confirmClear = true }) { Text("Limpar registro") }
         }
         if (working) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
         info?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp)) }

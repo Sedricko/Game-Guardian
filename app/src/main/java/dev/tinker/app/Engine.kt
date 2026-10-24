@@ -308,6 +308,7 @@ class Engine private constructor(private val app: Context) {
         runCatching { lastGameFile.writeText(p.pkg) }
         attachedAt = System.currentTimeMillis()
         retries = 0
+        gaveUp = false
         d.send("attach ${p.pid}")
         Session.process = p
         Session.paused = false
@@ -545,23 +546,36 @@ class Engine private constructor(private val app: Context) {
         }
         if (back.isEmpty() && (lost.isEmpty() || retry)) return ""  // nova tentativa sem novidade: não repete o aviso
         val msg = (if (back.isEmpty()) "" else "Voltaram sozinhos: ${back.joinToString()}. ") +
-            (if (lost.isEmpty()) "" else "Ainda não achados (o Tinker tenta de novo por 5 min; depois, busque de novo): ${lost.joinToString()}.")
+            (if (lost.isEmpty()) "" else "Ainda não achados (o Tinker tenta de novo por 2 minutos): ${lost.joinToString()}.")
         Diag.add("Restauração dos salvos: $msg")
         return msg.trim()
     }
 
     /**
      * O jogo acabou de abrir e ainda carrega o save: o ponteiro não chega no valor ainda. Tenta de novo a cada 3 s
-     * (assinatura a cada 30 s, que lê a memória toda) durante 5 minutos depois de escolher o jogo.
+     * (assinatura a cada 15 s, que lê a memória toda) durante 2 minutos depois de escolher o jogo; no fim registra o motivo de cada um.
      */
     private suspend fun retryRestore() {
         val pid = currentPid
-        if (pid == 0 || daemon == null || System.currentTimeMillis() - attachedAt > 5 * 60_000) return
+        if (pid == 0 || daemon == null || gaveUp) return
         if (Session.saved.none { stale(it) && (it.pointer.isNotEmpty() || it.anchor.isNotEmpty() || it.chains.isNotEmpty() || sigUseful(it.sig)) }) return
+        if (System.currentTimeMillis() - attachedAt > 2 * 60_000) {
+            // acabou o tempo: registra uma vez por que cada um não voltou, com o que o jogo tem agora
+            gaveUp = true
+            call(start = false) { d -> d.restoreAll(pid) }.let { if (it.isNotEmpty()) Session.restoreInfo = "$it Toque em ↻ para procurar de novo." }
+            return
+        }
         retries++
-        val msg = call(start = false) { d -> d.restoreAll(pid, signature = retries % 10 == 0, retry = true) }
+        val msg = call(start = false) { d -> d.restoreAll(pid, signature = retries % 5 == 0, retry = true) }
         if (msg.isNotEmpty()) Session.restoreInfo = msg
     }
+
+    /** Botão ↻ nos Salvos: procura agora os que estão de outra vez do jogo (com assinatura) e diz por que não voltaram. */
+    suspend fun retryNow(): String = call { d ->
+        d.restoreAll(currentPid).ifEmpty { "Nada para procurar." }.also { Session.restoreInfo = it }
+    }
+
+    private var gaveUp = false
 
     private var attachedAt = 0L
     private var retries = 0
@@ -620,11 +634,16 @@ class Engine private constructor(private val app: Context) {
         val best = groups.firstOrNull().orEmpty()
         val second = groups.getOrNull(1)?.size ?: 0
         val bases = best.map { it.first.substringBefore(' ') }.distinct().size
-        if (best.size >= 3 && bases >= 2 && best.size >= 2 * second) {
+        // o ponteiro escolhido concorda com outro caminho: dois caminhos independentes chegando no mesmo lugar já bastam
+        val withChosen = item.pointer.isNotEmpty() && best.any { it.first == item.pointer } && best.size >= 2 && best.size > second
+        if ((best.size >= 3 && bases >= 2 && best.size >= 2 * second) || withChosen) {
             val moved = moveTo(item, best.first().second, "Consenso")
             if (moved.pid == pid) {
-                // ainda não confirmado: o próximo descarte (enquanto você joga) e a próxima abertura conferem
-                replace(item) { it.copy(pointer = best.first().first, verified = false) }
+                // ainda não confirmado: o próximo descarte (enquanto você joga) e a próxima abertura conferem;
+                // o valor guardado passa a ser o de agora (o do jogo fechado não serve mais para conferir)
+                val now = runCatching { send("read ${moved.addr} ${item.type}", quiet = true).status }.getOrNull()
+                val pick = if (withChosen) item.pointer else best.first().first
+                replace(item) { it.copy(pointer = pick, verified = false, value = now ?: it.value) }
                 Diag.add("${label(item)} achado por consenso: ${best.size} caminhos de $bases bases chegam em 0x${moved.addr} (valor mudou com o jogo fechado)")
                 return "${best.size} caminhos concordam"
             }
