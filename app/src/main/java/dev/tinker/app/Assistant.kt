@@ -232,24 +232,29 @@ jogo abrir, use propor_receita com os salvos."""
                     .apply { if (think) put("generationConfig", JSONObject().put("thinkingConfig", JSONObject().put("thinkingLevel", "low"))) }
                     .toString()
                 var body = body(lowThinking)
-                var (code, reply) = http("models/${Session.geminiModel.trim()}:generateContent", key, body)
+                var (code, reply) = http("models/${Session.geminiModel.trim()}:generateContent", Session.geminiKey, body)
                 // modelo que não conhece o nível de pensamento (2.x): manda sem e lembra
                 if (code == 400 && "think" in reply.lowercase()) {
                     lowThinking = false
                     body = body(false)
-                    http("models/${Session.geminiModel.trim()}:generateContent", key, body).let { code = it.first; reply = it.second }
+                    http("models/${Session.geminiModel.trim()}:generateContent", Session.geminiKey, body).let { code = it.first; reply = it.second }
                 }
                 // servidor cheio (503/500): é passageiro, tenta de novo duas vezes antes de mostrar erro
                 for (wait in listOf(3000L, 6000L)) {
                     if (code != 503 && code != 500) break
                     kotlinx.coroutines.delay(wait)
-                    http("models/${Session.geminiModel.trim()}:generateContent", key, body).let { code = it.first; reply = it.second }
+                    http("models/${Session.geminiModel.trim()}:generateContent", Session.geminiKey, body).let { code = it.first; reply = it.second }
                 }
                 // modelo saiu de linha ou nome errado: escolhe sozinho o melhor da conta e tenta de novo
-                if (code == 404) geminiModels(key).firstOrNull()?.let { m ->
+                if (code == 404) geminiModels(Session.geminiKey).firstOrNull()?.let { m ->
                     Diag.add("Gemini: modelo ${Session.geminiModel} não existe mais, usando $m")
                     Session.geminiModel = m
-                    http("models/$m:generateContent", key, body).let { code = it.first; reply = it.second }
+                    http("models/$m:generateContent", Session.geminiKey, body).let { code = it.first; reply = it.second }
+                }
+                // cota acabou ou chave recusada: passa para a próxima chave da lista e refaz o mesmo pedido (cada uma uma vez)
+                var spare = Session.geminiKeys.size - 1
+                while (spare-- > 0 && keyProblem(code, reply) && nextGeminiKey("código $code")) {
+                    http("models/${Session.geminiModel.trim()}:generateContent", Session.geminiKey, body).let { code = it.first; reply = it.second }
                 }
                 val j = runCatching { JSONObject(reply) }.getOrNull() ?: return "Gemini respondeu $code sem conteúdo.".also { drop(); Diag.ai("API Gemini: código $code sem JSON: ${reply.take(500)}") }
                 Diag.ai("API Gemini rodada ${it + 1} (${Session.geminiModel}): código $code, tokens ${j.optJSONObject("usageMetadata")?.let { u -> "entrada ${u.optInt("promptTokenCount")}, saída ${u.optInt("candidatesTokenCount")}" } ?: "?"}" +
@@ -260,8 +265,8 @@ jogo abrir, use propor_receita com os salvos."""
                     return when (code) {
                         400, 401, 403 -> "Gemini recusou a chave ou o pedido: ${e.optString("message")}"
                         429 -> if ("quota" in e.optString("message").lowercase() || e.optString("status") == "RESOURCE_EXHAUSTED")
-                            "A cota grátis do Gemini acabou (limite por dia ou por minuto). Espere (a diária volta à meia-noite do horário do Pacífico) " +
-                                "ou troque de chave/modelo em Ajustes; o Claude não tem esse limite."
+                            "A cota grátis do Gemini acabou em ${if (Session.geminiKeys.size > 1) "todas as ${Session.geminiKeys.size} chaves" else "a chave"} " +
+                                "(limite por dia ou por minuto). Espere (a diária volta à meia-noite do horário do Pacífico) ou adicione outra chave em Ajustes."
                         else "Limite do Gemini atingido (no gratuito há limite por minuto e por dia). Espere e tente de novo."
                         else -> "Gemini respondeu com erro $code: ${e.optString("message")}"
                     }
@@ -288,6 +293,21 @@ jogo abrir, use propor_receita com os salvos."""
             drop()
             "Sem conexão com o Gemini: ${e.message}"
         }
+    }
+
+    private fun keyProblem(code: Int, reply: String) =
+        code == 429 || code == 401 || code == 403 || (code == 400 && "api key" in reply.lowercase())
+
+    /** Troca para a próxima chave do Gemini; false se só há uma. */
+    private fun nextGeminiKey(why: String): Boolean {
+        val n = Session.geminiKeys.size
+        if (n < 2) return false
+        val old = Session.geminiKeyIndex
+        Session.geminiKeyIndex = (old + 1) % n
+        val msg = "Gemini: chave ${old + 1} sem uso agora ($why); passando para a chave ${Session.geminiKeyIndex + 1} de $n"
+        Diag.add(msg)
+        Diag.ai(msg)
+        return true
     }
 
     /** Modelos Gemini que a chave pode usar para texto, o melhor primeiro (vazio: chave errada ou sem internet). */

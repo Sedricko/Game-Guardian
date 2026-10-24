@@ -1381,6 +1381,7 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
     val s = Session
     val clipCtx = LocalContext.current
     var keyInfo by remember { mutableStateOf<String?>(null) }
+    var newKey by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
     var confirmKill by remember { mutableStateOf(false) }
     LaunchedEffect(s.process) {
@@ -1407,25 +1408,42 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                     else "Chave em console.anthropic.com (API Keys), paga por uso; a assinatura do claude.ai não vale aqui.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                fun clipText(): String {
+                    val clip = clipCtx.getSystemService(ClipboardManager::class.java).primaryClip
+                    return clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(clipCtx)?.toString().orEmpty().filterNot { it.isWhitespace() }
+                }
+                val noClip = "Não consegui ler a área de transferência. Copie a chave de novo, ou abra o Tinker pelo ícone e cole na tela principal."
+                if (gemini) {
+                    // várias chaves: quando a cota de uma acaba (ou ela é recusada), o Tinker passa para a próxima sozinho
+                    Text("Chaves (quando a cota de uma acaba, o Tinker passa para a próxima):", style = MaterialTheme.typography.bodySmall)
+                    s.geminiKeys.forEachIndexed { i, k ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("${i + 1}. ${k.take(4)}…${k.takeLast(4)}" + if (i == s.geminiKeyIndex) "  · em uso" else "", Modifier.weight(1f),
+                                fontFamily = FontFamily.Monospace, color = if (i == s.geminiKeyIndex) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                            if (i != s.geminiKeyIndex) TextButton(onClick = { s.geminiKeyIndex = i; engine.saveSettings() }) { Text("Usar") }
+                            TextButton(onClick = { engine.removeGeminiKey(i) }) { Text("✕") }
+                        }
+                    }
+                    if (s.geminiKeys.isEmpty()) Text("Nenhuma chave ainda.", style = MaterialTheme.typography.bodySmall)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedTextField(newKey, { newKey = it.trim() }, label = { Text("Nova chave do Gemini") }, placeholder = { Text("AIza… ou AQ.…") },
+                            singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.weight(1f))
+                        // no menu flutuante o Android não mostra "Colar" ao segurar o campo: o botão lê a área de transferência direto
+                        Button(onClick = { val t = clipText(); if (t.isEmpty()) keyInfo = noClip else newKey = t }) { Text("Colar") }
+                    }
+                    Button(onClick = { keyInfo = engine.addGeminiKey(newKey); newKey = "" }, enabled = newKey.isNotBlank()) { Text("+ Adicionar chave") }
+                } else Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     OutlinedTextField(
-                        if (gemini) s.geminiKey else s.aiKey,
-                        { if (gemini) s.geminiKey = it.trim() else s.aiKey = it.trim(); engine.saveSettings() },
-                        label = { Text(if (gemini) "Chave do Gemini" else "Chave do Claude") }, placeholder = { Text(if (gemini) "AIza… ou AQ.…" else "sk-ant-…") },
+                        s.aiKey, { s.aiKey = it.trim(); engine.saveSettings() },
+                        label = { Text("Chave do Claude") }, placeholder = { Text("sk-ant-…") },
                         singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.weight(1f),
                     )
-                    // no menu flutuante o Android não mostra "Colar" ao segurar o campo: o botão lê a área de transferência direto
                     Button(onClick = {
-                        val clip = clipCtx.getSystemService(ClipboardManager::class.java).primaryClip
-                        val text = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(clipCtx)?.toString().orEmpty().filterNot { it.isWhitespace() }
-                        keyInfo = when {
-                            text.isEmpty() -> "Não consegui ler a área de transferência. Copie a chave de novo, ou abra o Tinker pelo ícone e cole na tela principal."
-                            else -> {
-                                if (gemini) s.geminiKey = text else s.aiKey = text
-                                engine.saveSettings()
-                                val ok = if (gemini) text.startsWith("AIza") || text.startsWith("AQ.") else text.startsWith("sk-ant-")  // AQ.: formato novo do Google
-                                if (ok) "Chave colada." else "Colado, mas não parece uma chave do ${if (gemini) "Gemini (começa com AIza ou AQ.)" else "Claude (começa com sk-ant-)"}."
-                            }
+                        val text = clipText()
+                        keyInfo = if (text.isEmpty()) noClip else {
+                            s.aiKey = text
+                            engine.saveSettings()
+                            if (text.startsWith("sk-ant-")) "Chave colada." else "Colado, mas não parece uma chave do Claude (começa com sk-ant-)."
                         }
                     }) { Text("Colar") }
                 }
@@ -1438,10 +1456,7 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                     "ou com senha na Play Store. ⏹ Parar a qualquer momento.", s.aiControl) { s.aiControl = it; engine.saveSettings() }
                 Toggle("IA pode testar valores", "Para saber se um resultado é o verdadeiro, ela escreve um valor de teste por 2 segundos e depois volta o original. " +
                     "Desligado: ela só olha.", s.aiCanTest) { s.aiCanTest = it; engine.saveSettings() }
-                if ((if (gemini) s.geminiKey else s.aiKey).isNotBlank()) TextButton(onClick = {
-                    if (gemini) s.geminiKey = "" else s.aiKey = ""
-                    engine.saveSettings()
-                }) { Text("Apagar chave") }
+                if (!gemini && s.aiKey.isNotBlank()) TextButton(onClick = { s.aiKey = ""; engine.saveSettings() }) { Text("Apagar chave") }
             }
         }
         item {

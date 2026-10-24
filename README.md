@@ -102,7 +102,9 @@ ganham o nome do campo sozinhos. Na lista de endereços da aba Memória, o que m
 ## Assistente de IA (Claude ou Gemini)
 
 Em **Ajustes → Assistente (IA)**, escolha **Claude** (chave em console.anthropic.com, paga por uso) ou **Gemini** (chave grátis
-em aistudio.google.com, com limite por dia; ao colar a chave, o Tinker pergunta ao Google quais modelos ela pode usar, escolhe o melhor e mostra os outros para trocar). Os botões **✨**
+em aistudio.google.com, com limite por dia; ao colar a chave, o Tinker pergunta ao Google quais modelos ela pode usar, escolhe o melhor e mostra os outros para trocar). Dá para
+cadastrar **várias chaves do Gemini** (+ Adicionar chave): quando a cota de uma acaba ou ela é recusada, o Tinker passa sozinho
+para a próxima e refaz o pedido. Os botões **✨**
 mandam o que está na tela e mostram a resposta: na Busca, *qual desses é o valor certo?* e *qual o próximo passo?*; na lista de classes, *onde fica o ouro?* (as classes citadas viram atalho para
 abrir a ficha); na ficha, *o que cada campo faz?*; no Registro, *o que deu errado?*. Nada é enviado sem tocar em **Perguntar**.
 A IA também olha a memória sozinha: procura classes pelo nome, abre os objetos com os valores de agora, vê a ficha de um

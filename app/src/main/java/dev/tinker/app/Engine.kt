@@ -228,7 +228,9 @@ object Session {
     var aiAuto by mutableStateOf(false)  // modo autônomo 1: a IA aplica, congela, testa e cria receitas sem esperar o toque
     var aiControl by mutableStateOf(false)  // modo autônomo 2: a IA toca e arrasta na tela do jogo para fazer o valor mudar
     var aiHidePanel by mutableStateOf(false)  // a IA vai tocar no jogo: o painel se minimiza para os toques chegarem nele
-    var geminiKey by mutableStateOf("")
+    var geminiKeys by mutableStateOf(listOf<String>())  // em ordem: a cota de uma acabou, o Tinker passa para a próxima
+    var geminiKeyIndex by mutableIntStateOf(0)
+    val geminiKey get() = geminiKeys.getOrNull(geminiKeyIndex) ?: geminiKeys.firstOrNull().orEmpty()
     var geminiModels by mutableStateOf(listOf<String>())  // os que a chave do Gemini pode usar, o melhor primeiro
     var geminiModel by mutableStateOf("gemini-2.5-flash")  // se sair de linha, o assistente troca sozinho pelo Flash mais novo
     val classes = mutableStateListOf<String>()  // classes IL2CPP abertas por nome neste jogo (atalhos)
@@ -265,7 +267,8 @@ class Engine private constructor(private val app: Context) {
         prefs.edit().putBoolean("autoPause", Session.autoPause).putBoolean("findEncrypted", Session.findEncrypted)
             .putBoolean("autoPointers", Session.autoPointers).putBoolean("gameLibsOnly", Session.gameLibsOnly)
             .putBoolean("autoOverlay", Session.autoOverlay).putBoolean("ownKeypad", Session.ownKeypad).putFloat("alpha", Session.alpha).putInt("panelSize2", Session.panelSize)
-            .putString("aiKey", Session.aiKey).putString("aiProvider", Session.aiProvider).putBoolean("aiCanTest", Session.aiCanTest).putBoolean("aiAuto", Session.aiAuto).putBoolean("aiControl", Session.aiControl).putString("geminiKey", Session.geminiKey)
+            .putString("aiKey", Session.aiKey).putString("aiProvider", Session.aiProvider).putBoolean("aiCanTest", Session.aiCanTest).putBoolean("aiAuto", Session.aiAuto).putBoolean("aiControl", Session.aiControl)
+            .putString("geminiKeys", Session.geminiKeys.joinToString("\n")).putInt("geminiKeyIndex", Session.geminiKeyIndex)
             .putString("geminiModel", Session.geminiModel).apply()
     }
 
@@ -284,11 +287,13 @@ class Engine private constructor(private val app: Context) {
         Session.aiCanTest = prefs.getBoolean("aiCanTest", false)
         Session.aiAuto = prefs.getBoolean("aiAuto", false)
         Session.aiControl = prefs.getBoolean("aiControl", false)
-        Session.geminiKey = prefs.getString("geminiKey", "").orEmpty()
+        // antes era uma chave só ("geminiKey"): vira a primeira da lista
+        Session.geminiKeys = (prefs.getString("geminiKeys", null) ?: prefs.getString("geminiKey", "")).orEmpty().split('\n').filter { it.isNotBlank() }
+        Session.geminiKeyIndex = prefs.getInt("geminiKeyIndex", 0).coerceIn(0, (Session.geminiKeys.size - 1).coerceAtLeast(0))
         // chave pré-definida (repositório privado, uso pessoal): entra uma vez só; apagou ou trocou, não volta
         if (!prefs.getBoolean("defaultKeyGiven", false)) {
-            if (Session.geminiKey.isBlank()) { Session.geminiKey = DEFAULT_GEMINI_KEY; Session.aiProvider = "gemini" }
-            prefs.edit().putBoolean("defaultKeyGiven", true).putString("geminiKey", Session.geminiKey).putString("aiProvider", Session.aiProvider).apply()
+            if (Session.geminiKeys.isEmpty()) { Session.geminiKeys = listOf(DEFAULT_GEMINI_KEY); Session.aiProvider = "gemini" }
+            prefs.edit().putBoolean("defaultKeyGiven", true).putString("geminiKeys", Session.geminiKeys.joinToString("\n")).putString("aiProvider", Session.aiProvider).apply()
         }
         Session.geminiModel = prefs.getString("geminiModel", Session.geminiModel).orEmpty().ifBlank { "gemini-2.5-flash" }
         Session.alpha = prefs.getFloat("alpha", Session.alpha)
@@ -1073,6 +1078,26 @@ class Engine private constructor(private val app: Context) {
         },
         AiTool("ver_resultados", "Mostra os resultados atuais da busca, com o campo IL2CPP quando há até 20.", emptyMap(), emptyList()) { resultsText(Session.status) },
     )
+
+    /** Mais uma chave do Gemini no fim da lista (a de agora continua sendo usada até a cota acabar). */
+    fun addGeminiKey(raw: String): String {
+        val k = raw.filterNot { it.isWhitespace() }
+        if (k.isEmpty()) return "Chave vazia."
+        if (k in Session.geminiKeys) return "Essa chave já está na lista."
+        Session.geminiKeys = Session.geminiKeys + k
+        saveSettings()
+        val ok = k.startsWith("AIza") || k.startsWith("AQ.")
+        return "Chave ${Session.geminiKeys.size} adicionada." + if (ok) "" else " Não parece uma chave do Gemini (começa com AIza ou AQ.)."
+    }
+
+    fun removeGeminiKey(i: Int) {
+        Session.geminiKeys = Session.geminiKeys.filterIndexed { j, _ -> j != i }
+        Session.geminiKeyIndex = when {
+            Session.geminiKeyIndex > i -> Session.geminiKeyIndex - 1
+            else -> Session.geminiKeyIndex.coerceAtMost((Session.geminiKeys.size - 1).coerceAtLeast(0))
+        }
+        saveSettings()
+    }
 
     /** Pergunta ao Google quais modelos a chave pode usar; se o escolhido não está entre eles, troca pelo melhor. */
     suspend fun detectGeminiModels(): String = withContext(Dispatchers.IO) {
