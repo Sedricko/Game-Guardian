@@ -60,6 +60,8 @@ data class SavedItem(
     // trusted=false: voltou por consenso/assinatura/faixa, sem conferir o valor; não ensina o histórico até ser confirmado
     // (no teste, a Arma voltou com o jogo carregando, leu 0, e a faixa 0–0 depois recusou o valor certo)
     val trusted: Boolean = true,
+    // il2: "Namespace.Classe+offset" do objeto IL2CPP onde o valor mora; com ele o salvo volta procurando o objeto pela classe
+    val il2: String = "",
 )
 
 const val MAX_CHAINS = 200
@@ -442,7 +444,7 @@ class Engine private constructor(private val app: Context) {
     }
 
     /** Lê a ficha: `bytes` a partir de start, numa leitura só; os tipos vêm do IL2CPP quando há, senão são adivinhados. */
-    suspend fun ficha(start: String, bytes: Int, il2: Il2Class?): List<FichaRow> = call { d ->
+    suspend fun ficha(start: String, bytes: Int, il2: Il2Class?, center: String): List<FichaRow> = call { d ->
         val s0 = start.toLong(16) / 8 * 8
         val words = (bytes + 7) / 8
         val raw = ByteArray(words * 8)
@@ -450,19 +452,49 @@ class Engine private constructor(private val app: Context) {
             val v = l.substringAfter(' ').toLongOrNull() ?: 0L
             for (k in 0 until 8) raw[i * 8 + k] = (v shr (8 * k)).toByte()
         }
-        val base = il2?.start?.toLong(16) ?: s0
+        // sem IL2CPP, o offset conta do próprio valor (0 = ele; + depois, - antes)
+        val base = il2?.start?.toLong(16) ?: center.toLong(16)
         fichaRows(s0, raw, base, il2)
     }
 
     /** Salvo novo dentro de um objeto IL2CPP: ganha o nome do campo (ex.: Player.hp) se ainda não tem nome. */
-    private suspend fun nameFromIl2cpp(item: SavedItem) {
-        if (item.name.isNotEmpty()) return
-        val c = runCatching { il2cpp(item.addr) }.getOrNull() ?: return
+    private suspend fun nameFromIl2cpp(item: SavedItem) = call { d -> d.tagIl2(item) }
+
+    /** Marca o salvo com a classe e o offset IL2CPP (e o nome do campo, se ele não tem nome). */
+    private fun Daemon.tagIl2(item: SavedItem) {
+        val c = il2(item.addr) ?: return
         val off = item.addr.toLong(16) - c.start.toLong(16)
         val f = c.fields.firstOrNull { it.offset.toLong() == off } ?: c.fields.lastOrNull { it.offset <= off && off < it.offset + 8 } ?: return
         val name = "${c.name.substringAfterLast('.')}.${f.name}"
-        Diag.add("Salvo 0x${item.addr} é o campo $name (IL2CPP)")
-        replace(item) { if (it.name.isEmpty()) it.copy(name = name) else it }
+        val tag = "${c.name}+${off.toString(16)}"
+        if (!IL2.matches(tag)) return
+        if (item.name.isEmpty()) Diag.add("Salvo 0x${item.addr} é o campo $name (IL2CPP)")
+        replace(item) { it.copy(name = it.name.ifEmpty { name }, il2 = tag) }
+    }
+
+    /**
+     * IL2CPP: procura os objetos da classe pelo nome e vai ao mesmo offset. Não depende de caminho de ponteiro
+     * (no teste, o UpgradeStone tinha só 6 caminhos e nenhum sobreviveu ao reabrir). Vale o único objeto com o
+     * último valor, ou o único dentro do histórico, ou o único objeto da classe (as classes de dados do jogador costumam ter um só).
+     */
+    private fun Daemon.fromIl2cpp(item: SavedItem, pid: Int, why: MutableList<String>): String? {
+        if (item.il2.isEmpty()) return null
+        val cls = item.il2.substringBeforeLast('+')
+        val off = item.il2.substringAfterLast('+').toLongOrNull(16) ?: return null
+        val objs = runCatching { send("il2objs $cls", quiet = true).lines }.getOrElse { return null.also { _ -> why += "IL2CPP: ${it.message}" } }
+            .mapNotNull { it.removePrefix("obj ").toLongOrNull(16) }
+        if (objs.isEmpty()) return null.also { why += "IL2CPP: nenhum objeto $cls agora" }
+        val at = objs.map { (it + off).toString(16) }
+        fun read(a: String) = runCatching { send("read $a ${item.type}", quiet = true).status }.getOrDefault("?")
+        val wanted = telling(item)
+        val same = if (wanted == null) emptyList() else at.filter { matchesAny(read(it), item.type, wanted) }
+        val fits = at.filter { a -> read(a).let { it != "?" && plausible(item, it) } }
+        val addr = same.singleOrNull() ?: fits.singleOrNull() ?: at.singleOrNull()
+            ?: return null.also { why += "IL2CPP: ${objs.size} objetos $cls (${same.size} com o último valor, ${fits.size} dentro do histórico)" }
+        if (moveTo(item, addr, "IL2CPP").pid != pid) return null
+        replace(item) { it.copy(trusted = same.singleOrNull() == addr) }
+        Diag.add("${label(item)} achado pela classe IL2CPP $cls em 0x$addr")
+        return "classe $cls"
     }
 
     // Ponteiros, offsets e assinatura: como um salvo volta a valer depois de reiniciar o jogo
@@ -593,7 +625,7 @@ class Engine private constructor(private val app: Context) {
                 item.pointer.isNotEmpty() -> confirmPointer(item, pid, why)
                 item.anchor.isNotEmpty() -> "offset".takeIf { resolve(item).pid == pid }.also { if (it == null) why += "o salvo que ele segue não voltou" }
                 else -> null
-            } ?: fromChains(item, pid, why) ?: (if (signature) fromSignature(item, pid, why) else null)
+            } ?: fromChains(item, pid, why) ?: (if (signature) fromIl2cpp(item, pid, why) ?: fromSignature(item, pid, why) else null)
             when {
                 how != null -> back += "${label(item)} ($how)"
                 item.pid != 0 || item.chains.isNotEmpty() || item.sig.isNotEmpty() -> {
@@ -901,6 +933,7 @@ class Engine private constructor(private val app: Context) {
         if (it.pointer.isNotEmpty()) append(" · ponteiro ${it.pointer}${if (it.verified) "" else " (a confirmar)"}")
         if (it.anchor.isNotEmpty()) append(" · segue ${Session.saved.firstOrNull { a -> a.id == it.anchor }?.let(::label) ?: "?"} ${offsetText(it.offset)}")
         append(" · reservas ${it.chains.size} · assinatura ${if (sigUseful(it.sig)) "pronta" else "aprendendo"}")
+        if (it.il2.isNotEmpty()) append(" · IL2CPP ${it.il2}")
         historyText(it, System.currentTimeMillis()).takeIf { h -> h.isNotEmpty() }?.let { h -> append(" · histórico $h") }
     }
 
@@ -1025,10 +1058,19 @@ class Engine private constructor(private val app: Context) {
     suspend fun setSaved(items: List<SavedItem>, value: String): String {
         val live = items.filterNot(::stale)
         if (live.isEmpty()) return "Esses salvos são de outra vez do jogo: busque o valor de novo (ou use ponteiro) antes de editar."
-        val msg = writeMany(live.map { it.addr to it.type }, value)
+        // só guarda o valor nos que o jogo aceitou: antes um valor recusado (ex.: grande demais para Dword) ia para o
+        // salvo e o congelamento ficava reescrevendo ele
+        var error: String? = null
+        val ok = call { d ->
+            live.filter { item ->
+                runCatching { d.send("write ${item.addr} ${item.type} ${value.arg()}", quiet = true) }.onFailure { error = it.message }.isSuccess
+            }
+        }
+        Diag.add("Editados ${ok.size} de ${live.size} salvos para $value" + (error?.let { " ($it)" } ?: ""))
         // o congelamento reescreve o valor guardado: tem que ser o número já normalizado ("20.000" → 20000), nunca faixa
         val v = normalizeNumbers(value)
-        if ('~' !in v && ';' !in v) live.forEach { item -> replace(item) { recordValue(it.copy(trusted = true), v, System.currentTimeMillis()) } }
+        if ('~' !in v && ';' !in v) ok.forEach { item -> replace(item) { recordValue(it.copy(trusted = true), v, System.currentTimeMillis()) } }
+        val msg = if (ok.size == live.size) "${ok.size} valores alterados." else "${ok.size} de ${live.size} alterados. ${error.orEmpty()}"
         return msg + if (live.size < items.size) " ${items.size - live.size} de outra vez do jogo ficaram de fora." else ""
     }
 
@@ -1078,6 +1120,7 @@ class Engine private constructor(private val app: Context) {
             val item = d.resolve(old)
             if (stale(item)) return@forEach  // endereço de outra vez do jogo: não lê lixo
             if (item.pid == currentPid) d.learnSig(item)
+            if (item.pid == currentPid && item.il2.isEmpty() && (refreshTick + item.id.hashCode()) % 30 == 0) d.tagIl2(item)
             // confere os caminhos de reserva de tempos em tempos e quando o valor muda (o jogo mudou de estado)
             val check = item.chains.isNotEmpty() && item.pid == currentPid
             if (item.frozen) {
@@ -1177,7 +1220,9 @@ internal fun normalizeNumbers(input: String): String =
 private fun SavedItem.toJson() = JSONObject().put("addr", addr).put("type", type).put("region", region).put("value", value).put("name", name).put("frozen", frozen)
     .put("pointer", pointer).put("id", id).put("anchor", anchor).put("offset", offset).put("pid", pid)
     .put("chains", JSONArray(chains)).put("sig", sig).put("sigOff", sigOff).put("verified", verified)
-    .put("trusted", trusted).put("history", JSONArray(history)).apply { if (!seenMin.isNaN()) put("seenMin", seenMin).put("seenMax", seenMax) }  // JSON não aceita NaN
+    .put("trusted", trusted).put("il2", il2).put("history", JSONArray(history)).apply { if (!seenMin.isNaN()) put("seenMin", seenMin).put("seenMax", seenMax) }  // JSON não aceita NaN
+
+private val IL2 = Regex("""[A-Za-z0-9_.<>`]{1,120}\+[0-9a-f]{1,6}""")  // vai para o daemon: sem espaço nem quebra de linha
 
 private val AOB = Regex("""([0-9a-f]{2}|\?\?){1,192}""")
 
@@ -1353,6 +1398,7 @@ private fun JSONObject.toSaved(): SavedItem {
         pid = optInt("pid", 0), chains = chains, sig = sig, sigOff = optInt("sigOff", 0).coerceIn(0, 191), verified = optBoolean("verified", true),
         history = optJSONArray("history")?.let { a -> List(a.length()) { a.getString(it) } }.orEmpty().takeLast(20),
         seenMin = optDouble("seenMin", Double.NaN), seenMax = optDouble("seenMax", Double.NaN), trusted = optBoolean("trusted", true),
+        il2 = optString("il2", "").takeIf { IL2.matches(it) }.orEmpty(),
     )
 }
 

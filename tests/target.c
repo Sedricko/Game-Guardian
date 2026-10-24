@@ -10,6 +10,8 @@ struct fi { const char *name; struct ty *type; void *parent; int32_t offset; uin
 struct klass { void *image, *gc; const char *name, *ns; void *pad[4]; struct fi *fields; };
 static struct ty t_r4 = {0, 0x0cu << 16}, t_i4 = {0, 0x08u << 16}, t_static = {0, (0x08u << 16) | 0x10};
 static struct klass player;
+// nomes separados por \0, como no metadata do IL2CPP (o daemon procura \0Nome\0)
+static const char names[] = "\0Player\0Game";
 static struct fi player_fields[3];
 
 // em .data (dentro do arquivo do programa): base fixa, como a de uma .so de jogo
@@ -33,7 +35,7 @@ int main(void) {
     x[0] = 0x5A3C9D21;
     x[1] = 777777 ^ 0x5A3C9D21;
     // objeto IL2CPP: Game.Player { float hp em +0x10; int gold em +0x14 } e um campo estático que não aparece
-    player = (struct klass){0, 0, "Player", "Game", {0}, player_fields};
+    player = (struct klass){0, 0, names + 1, names + 8, {0}, player_fields};
     player_fields[0] = (struct fi){"hp", &t_r4, &player, 0x10, 0};
     player_fields[1] = (struct fi){"gold", &t_i4, &player, 0x14, 0};
     player_fields[2] = (struct fi){"instances", &t_static, &player, 0, 0};

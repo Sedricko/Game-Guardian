@@ -886,7 +886,7 @@ private fun FichaView(engine: Engine, center: String, run: (suspend () -> String
             val c = il2
             val start = c?.start?.toLong(16) ?: (center.toLong(16) - 0x40 + page * 0x80L).coerceAtLeast(0)
             val bytes = if (c != null) ((c.fields.maxOfOrNull { it.offset } ?: 0) + 8).coerceIn(16, 0x400) else 0x80
-            runCatching { engine.ficha(start.toString(16), bytes, c) }.onSuccess { new ->
+            runCatching { engine.ficha(start.toString(16), bytes, c, center) }.onSuccess { new ->
                 val now = System.currentTimeMillis()
                 new.forEach { r ->
                     val before = last.put(r.addr, r.value)

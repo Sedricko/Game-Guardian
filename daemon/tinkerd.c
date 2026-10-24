@@ -107,10 +107,12 @@ static int parse_one(int t, const char *s, value_t *v) {
     } else {
         double d = strtod(s, &end);
         if (end == s || (*end && *end != '\n') || d != floor(d)) return 0;  // "1.5" não é inteiro
-        v->f = d;
-        v->raw = (uint64_t)strtoll(s, &end, 0);
-        v->ilo = (int64_t)v->raw;
         int bits = TYPES[t].size * 8;
+        // não cabe no tipo: antes 10000000000 num Dword virava 1410065408 (o resto) e estragava o valor do jogo
+        if (bits < 64 ? d < -ldexp(1, bits - 1) || d > ldexp(1, bits) - 1 : d < -ldexp(1, 63) || d >= ldexp(1, 64)) return 0;
+        v->f = d;
+        v->raw = d >= ldexp(1, 63) ? strtoull(s, &end, 0) : (uint64_t)strtoll(s, &end, 0);
+        v->ilo = (int64_t)v->raw;
         if (bits < 64) v->raw &= (1ULL << bits) - 1;  // -1 e 4294967295 viram o mesmo dword
     }
     return end != s && (*end == 0 || *end == '\n');
@@ -192,6 +194,7 @@ static int region_of(const char *perms, const char *name) {
 }
 
 static int region_exec;  // 1: percorre o código (r-x) em vez das regiões graváveis, para a busca AOB no código
+static int region_all;   // 1: tudo que dá para ler (os nomes das classes IL2CPP ficam no metadata, só leitura)
 
 // Chama fn para cada região gravável do alvo. Devolve -1 se não abriu o maps.
 static int each_region(void (*fn)(uint64_t s, uint64_t e, int region, void *ctx), void *ctx) {
@@ -204,7 +207,7 @@ static int each_region(void (*fn)(uint64_t s, uint64_t e, int region, void *ctx)
         char perms[8];
         int off = 0;
         if (sscanf(line, "%llx-%llx %7s %*s %*s %*s %n", &s, &e, perms, &off) < 3) continue;
-        if (perms[0] != 'r' || (region_exec ? perms[2] != 'x' : perms[1] != 'w')) continue;
+        if (perms[0] != 'r' || (!region_all && (region_exec ? perms[2] != 'x' : perms[1] != 'w'))) continue;
         char *name = off ? line + off : line + strlen(line);
         name[strcspn(name, "\n")] = 0;
         fn(s, e, region_of(perms, name), ctx);
@@ -617,12 +620,23 @@ static void cmd_dump(const char *addr, const char *name, const char *count) {
     puts("ok");
 }
 
+// Por que o valor não serve para escrever nesse tipo, numa frase que o app mostra como está.
+static void bad_value(int t, const char *value) {
+    static const char *NAMES[] = {"Byte", "Word", "Dword", "Qword", "Float", "Double"};
+    char *end;
+    double d = strtod(value, &end);
+    int bits = TYPES[t].size * 8;
+    if (end != value && !*end && d == floor(d) && !TYPES[t].isfloat && bits < 64)
+        printf("err valor fora do tipo: %s não cabe em %s (de %.0f a %.0f); use um tipo maior (Qword)\n", value, NAMES[t], -ldexp(1, bits - 1), ldexp(1, bits) - 1);
+    else printf("err valor inválido: %s\n", value);
+}
+
 static void cmd_write(const char *addr, const char *name, const char *value) {
     int t = find_type(name);
     value_t v;
     unsigned char b[8];
     if (t < 0) { printf("err tipo inválido: %s\n", name); return; }
-    if (!parse_value(B(t), value, &v) || v.range) { printf("err valor inválido: %s\n", value); return; }
+    if (!parse_value(B(t), value, &v) || v.range) { bad_value(B(t), value); return; }
     encode(B(t), &v, b);
     if (store(strtoull(addr, NULL, 16), t, b)) printf("err falhou ao escrever: %s\n", strerror(errno));
     else puts("ok");
@@ -1002,6 +1016,87 @@ static void cmd_aob(const char *pat, const char *mode, int keep) {
     free(p);
 }
 
+// Objetos de uma classe IL2CPP pelo nome ("Game.Player"): acha o nome no metadata, a classe que aponta para ele e os
+// objetos que apontam para a classe. Não depende de caminho de ponteiro: serve para trazer um salvo de volta quando o
+// jogo reabre e os caminhos quebraram. Lista até 100 objetos (o app escolhe pelo valor do campo).
+static void find_values(const tgt_t *t, size_t nt, hits_t **out, chunks_t *cs) {
+    pscan_t ps = {t, nt, t[0].addr, t[nt - 1].addr, 0, *cs, NULL};
+    ps.out = calloc(cs->n ? cs->n : 1, sizeof *ps.out);
+    if (!ps.out) { puts("err sem memória"); exit(1); }
+    parallel(cs->n, ptr_chunk, &ps);
+    *out = ps.out;
+}
+
+static void cmd_il2objs(const char *full) {
+    psize = ptr_size();
+    const char *dot = strrchr(full, '.');
+    char ns[128] = "", name[128];
+    if (dot) snprintf(ns, sizeof ns, "%.*s", (int)(dot - full), full);
+    snprintf(name, sizeof name, "%s", dot ? dot + 1 : full);
+    size_t nl = strlen(name);
+    if (!nl || nl > AOB_MAX - 2) { puts("err nome de classe inválido"); return; }
+    // 1) o nome no metadata: \0Nome\0 (o \0 antes evita achar o fim de outro nome)
+    aob_t *p = calloc(1, sizeof *p);
+    if (!p) { puts("err sem memória"); exit(1); }
+    p->n = (int)nl + 2;
+    memset(p->m, 0xff, p->n);
+    memcpy(p->b + 1, name, nl);
+    p->first = 1;
+    region_all = 1;
+    p->cs.want = ~(1u << R_V);
+    int r = each_region(add_chunks, &p->cs);
+    region_all = 0;
+    if (r) { puts("err não leu o mapa de memória"); free(p->cs.c); free(p); return; }
+    p->out = calloc(p->cs.n ? p->cs.n : 1, sizeof *p->out);
+    if (!p->out) { puts("err sem memória"); exit(1); }
+    parallel(p->cs.n, aob_chunk, p);
+    tgt_t strs[64];
+    size_t ns_n = 0;
+    for (size_t ci = 0; ci < p->cs.n; ci++) {
+        for (size_t k = 0; k < p->out[ci].n && ns_n < 64; k++) strs[ns_n++] = (tgt_t){p->out[ci].h[k].addr + 1, 0};
+        free(p->out[ci].h);
+    }
+    free(p->out);
+    free(p->cs.c);
+    free(p);
+    if (!ns_n) { puts("err classe não encontrada (o jogo não é IL2CPP, ou ainda não carregou essa classe)"); return; }
+    qsort(strs, ns_n, sizeof *strs, cmp_tgt);
+    // 2) a classe: tem um ponteiro para o nome em +2p (e o namespace certo em +3p)
+    chunks_t cs = {.want = ~((1u << R_V) | (1u << 7))};
+    if (each_region(add_chunks, &cs)) { puts("err não leu o mapa de memória"); return; }
+    hits_t *out;
+    find_values(strs, ns_n, &out, &cs);
+    tgt_t ks[16];
+    size_t nk = 0;
+    klass_t kl;
+    for (size_t ci = 0; ci < cs.n; ci++) {
+        for (size_t k = 0; k < out[ci].n; k++) {
+            uint64_t cand = out[ci].h[k].addr - 2 * psize;
+            if (nk < 16 && read_klass(cand, &kl) && !strcmp(kl.ns, ns) && !strcmp(kl.name, name)) ks[nk++] = (tgt_t){cand, 0};
+        }
+        free(out[ci].h);
+    }
+    free(out);
+    if (!nk) { free(cs.c); puts("err classe não encontrada (o nome existe, mas não achei a estrutura da classe)"); return; }
+    qsort(ks, nk, sizeof *ks, cmp_tgt);
+    // 3) os objetos: começam com o ponteiro da classe
+    find_values(ks, nk, &out, &cs);
+    size_t shown = 0;
+    for (size_t ci = 0; ci < cs.n; ci++) {
+        for (size_t k = 0; k < out[ci].n; k++) {
+            uint64_t o = out[ci].h[k].addr, pn;
+            char tmp[64];
+            // FieldInfo {nome, tipo, classe}: também aponta para a classe, mas tem um nome 2 ponteiros antes; não é objeto
+            if (!read_ptr(o - 2 * psize, &pn) && ident(pn, tmp, sizeof tmp) && tmp[0]) continue;
+            if (shown < 100) { printf("obj %" PRIx64 "\n", o); shown++; }
+        }
+        free(out[ci].h);
+    }
+    free(out);
+    free(cs.c);
+    printf("ok %zu\n", shown);
+}
+
 // Roda um logcat (como root vê todos os apps) e repassa cada linha com "| ".
 static void run_logcat(const char *args) {
     char cmd[256], line[1026];
@@ -1102,6 +1197,7 @@ int main(void) {
         else if (!strcmp(cmd, "aob")) cmd_aob(a1, a2, 1);
         else if (!strcmp(cmd, "aobfind")) cmd_aob(a1, "data", 0);
         else if (!strcmp(cmd, "il2cpp")) cmd_il2cpp(a1);
+        else if (!strcmp(cmd, "il2objs")) cmd_il2objs(a1);
         else if (!strcmp(cmd, "resolve")) cmd_resolve(strstr(line, "resolve") + 7);
         else if (!strcmp(cmd, "list")) cmd_list(strtoul(a1, NULL, 10));
         else if (!strcmp(cmd, "read")) cmd_read(a1, a2);

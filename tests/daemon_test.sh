@@ -138,6 +138,17 @@ il=$(printf '%s\n' "attach $pid" "il2cpp $(printf '%x' $((0x$oaddr + 0x14)))" "i
 echo "$il"
 grep -qx "class Game.Player $oaddr" <<<"$il" && grep -qx "field 10 0c hp" <<<"$il" && grep -qx "field 14 08 gold" <<<"$il" \
     && ! grep -q instances <<<"$il" && grep -q "^err não achei a classe IL2CPP" <<<"$il" || { echo "FALHOU: il2cpp"; exit 1; }
+objs=$(printf '%s\n' "attach $pid" "il2objs Game.Player" "il2objs Game.Ninguem" "il2objs Outro.Player" | "$out/tinkerd")
+echo "$objs"
+grep -qx "obj $oaddr" <<<"$objs" && [ "$(grep -c '^obj ' <<<"$objs")" = 1 ] && grep -q "^err classe não encontrada (o jogo" <<<"$objs" && grep -q "^err classe não encontrada (o nome existe" <<<"$objs" \
+    || { echo "FALHOU: il2objs"; exit 1; }
+
+# Valor que não cabe no tipo não é escrito cortado (10000000000 num Dword virava 1410065408)
+big2=$(printf '%s\n' "attach $pid" "write $iaddr i32 10000000000" "write $iaddr i32 4294967295" "write $iaddr i8 300" "read $iaddr i32" "write $iaddr i32 987654000" | "$out/tinkerd")
+echo "$big2"
+mapfile -t w < <(sed 1,2d <<<"$big2")
+[[ "${w[0]}" =~ ^err\ valor\ fora\ do\ tipo:\ 10000000000\ não\ cabe\ em\ Dword ]] && [ "${w[1]}" = "ok" ] && [[ "${w[2]}" =~ ^err\ valor\ fora\ do\ tipo ]] \
+    && [ "${w[3]}" = "ok -1" ] || { echo "FALHOU: valor fora do tipo"; exit 1; }
 
 # Daemon saindo com o jogo pausado (app caiu no meio da busca): o jogo tem que voltar a rodar
 printf '%s\n' "attach $pid" "pause" | "$out/tinkerd" >/dev/null

@@ -76,6 +76,8 @@ Quando o jogo reinicia, os endereços mudam. O Tinker cuida disso sozinho:
    Enquanto o jogo ainda carrega o save, o Tinker tenta de novo sozinho por 2 minutos; o botão **↻** nos Salvos procura na hora.
    Se o valor mudou com o jogo fechado (ou enquanto você joga), vale o consenso dos caminhos de ponteiro e o **histórico**:
    cada salvo guarda as últimas mudanças e a faixa que o valor já teve; caminho que cai fora da faixa é descartado.
+   Em jogos Unity IL2CPP, o salvo guarda também a classe e o offset (`PlayerData+30`): se os caminhos quebram,
+   o Tinker procura os objetos dessa classe pelo nome e vai ao mesmo campo.
 4. Sobrou dúvida entre vários caminhos? Abra o salvo, digite o valor que o jogo mostra e toque em **Filtrar pelo valor**.
 
 Salvo com **⚠ de outra vez do jogo** não é lido nem escrito até voltar (escrever no endereço velho pode derrubar o jogo);
