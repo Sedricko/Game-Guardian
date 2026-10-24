@@ -576,6 +576,14 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
                 Checkbox(checked = selected.containsAll(all), onCheckedChange = { selected = if (it) all else emptySet() })
                 Text("${s.saved.size} salvos · ${s.saved.count { it.frozen }} congelados", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
+            // calculadora de offset: marque dois e veja a distância entre eles
+            if (chosen.size == 2) {
+                val (a, b) = chosen
+                val d = b.addr.toLong(16) - a.addr.toLong(16)
+                Text("${b.name.ifEmpty { "0x" + b.addr }} = ${a.name.ifEmpty { "0x" + a.addr }} ${offsetText(d)} ($d bytes)" +
+                    if (kotlin.math.abs(d) <= SAME_STRUCT) " · mesma ficha" else "",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+            }
         }
         item {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -597,7 +605,11 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
             val key = item.addr + item.type
             val open = editing == key
             ResultCard(
-                shown(item.value, item.type), "0x${item.addr}" + if (item.pointer.isNotEmpty()) " · 🔗 ponteiro" else "", "${TYPE_NAMES[item.type]} · ${item.region}",
+                shown(item.value, item.type), "0x${item.addr}" + when {
+                    item.pointer.isNotEmpty() -> " · 🔗 ponteiro"
+                    item.anchor.isNotEmpty() -> " · ↳ " + (s.saved.firstOrNull { it.id == item.anchor }?.let { it.name.ifEmpty { "0x" + it.addr } } ?: "?") + " " + offsetText(item.offset)
+                    else -> ""
+                }, "${TYPE_NAMES[item.type]} · ${item.region}",
                 onClick = { editing = if (open) null else key },
                 checked = key in selected, onCheck = { selected = if (it) selected + key else selected - key }, title = item.name,
                 trailing = {
@@ -615,7 +627,11 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
                     NameEditor(item.name) { engine.rename(item, it) }
                     Text("Ler como outro tipo:", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     TypeChips(item.type) { t -> engine.changeType(item, t); editing = null }
-                    PointerPanel(engine, item, run)
+                    if (item.anchor.isNotEmpty()) {
+                        Text("Segue outro salvo pelo offset ${offsetText(item.offset)}: muda de endereço junto com ele, sem buscar de novo.",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        TextButton(onClick = { engine.unlink(item) }) { Text("Desligar") }
+                    } else PointerPanel(engine, item, run)
                 }
             }
         }
@@ -666,10 +682,10 @@ private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(
-                value = goTo, onValueChange = { goTo = it.removePrefix("0x").trim() }, label = { Text("Endereço (hex)") },
+                value = goTo, onValueChange = { goTo = it.removePrefix("0x").trim() }, label = { Text("Endereço (ex.: 7a0010 ou 7a0010+8)") },
                 singleLine = true, modifier = Modifier.weight(1f),
             )
-            Button(onClick = { if (goTo.toLongOrNull(16) != null) s.view = goTo.lowercase() to type else error = "Endereço inválido: $goTo" }) { Text("Ir") }
+            Button(onClick = { parseAddress(goTo)?.let { s.view = it to type } ?: run { error = "Endereço inválido: $goTo" } }) { Text("Ir") }
         }
         TypeChips(type) { t -> s.view = center to t }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -893,6 +909,9 @@ private val HELP = listOf(
     "Barra rápida" to "No menu flutuante, toque em Barra rápida: uma barra pequena fica sobre o jogo, com o campo de valor, Refinar e ↑ ↓ = ≠ " +
         "(aumentou, diminuiu, não mudou, mudou). Arraste pelo ⠿. ▢ abre o painel completo para editar e congelar; – volta para a bolinha, " +
         "e a bolinha passa a abrir a barra.",
+    "Offset e ficha" to "Valores do mesmo objeto do jogo (ouro, gema, energia) ficam sempre à mesma distância (offset). Quando um salvo ganha " +
+        "ponteiro, os salvos a até 4 KB dele passam a segui-lo sozinhos (↳ Ouro +0x8): ao reabrir o jogo, achando um, os outros vêm juntos. " +
+        "Marque dois salvos para ver a distância entre eles. Na aba Memória dá para ir a 7a0010+8.",
     "Endereços mudaram" to "Quando o jogo reinicia, os endereços mudam. Para um salvo continuar valendo, use um ponteiro (abaixo).",
     "Ponteiros" to "Como no Cheat Engine. 1. Abra o salvo e toque em Buscar ponteiros. 2. Feche e abra o jogo e abra o mesmo salvo. " +
         "3. Digite o valor que o jogo mostra agora e toque em Filtrar pelo valor (repita mudando o valor se sobrar muitos). 4. Toque em Usar. " +

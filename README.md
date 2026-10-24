@@ -73,6 +73,9 @@ por exemplo `[[libil2cpp.so+1A2B30]+18]+40`, que o Tinker segue sozinho toda vez
 
 Também dá para achar o valor de novo, salvar e tocar em **Filtrar por este endereço** no novo salvo.
 
+Os outros salvos a até 4 KB do que ganhou ponteiro (a mesma "ficha": ouro, gema, energia) passam a segui-lo pelo offset (**↳ Ouro +0x8**):
+ao reabrir o jogo, achando um, os outros vêm juntos. Marque dois salvos para ver a distância; na aba Memória dá para ir a `7a0010+8`.
+
 Sem resultado? Aumente **Níveis** (até 7) ou **Distância máx.** Jogos 32 bits são reconhecidos sozinhos.
 
 ## Reportar um problema

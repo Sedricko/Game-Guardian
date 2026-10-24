@@ -46,7 +46,14 @@ data class GameProcess(val pid: Int, val pkg: String, val label: String, val ico
 data class Hit(val addr: String, val type: String, val region: String, val value: String, val base: String = "", val asDword: String = "")
 data class Region(val code: String, val count: Long, val bytes: Long, val enabled: Boolean)
 // pointer: caminho "lib.so+1a2b 18 40"; com ele o addr é recalculado sozinho, mesmo depois de reiniciar o jogo
-data class SavedItem(val addr: String, val type: String, val region: String, val value: String, val frozen: Boolean = false, val name: String = "", val pointer: String = "")
+// anchor/offset: segue outro salvo (id) a offset bytes dele, como gema = ouro + 8; muda de endereço junto com ele
+data class SavedItem(
+    val addr: String, val type: String, val region: String, val value: String, val frozen: Boolean = false, val name: String = "", val pointer: String = "",
+    val id: String = java.util.UUID.randomUUID().toString(), val anchor: String = "", val offset: Long = 0,
+)
+
+/** Distância máxima para dois salvos serem da mesma "ficha" do jogo (estrutura/objeto). */
+const val SAME_STRUCT = 4096L
 data class Recent(val types: Set<String>, val value: String)
 
 /** Estado da tela; fica fora da Activity para a janela flutuante e a Activity verem o mesmo. */
@@ -333,16 +340,40 @@ class Engine private constructor(private val app: Context) {
 
     fun setPointer(item: SavedItem, chain: String) {
         Diag.add("Salvo 0x${item.addr} ${if (chain.isEmpty()) "sem ponteiro" else "agora segue o ponteiro $chain"}")
-        replace(item) { it.copy(pointer = chain) }
+        replace(item) { it.copy(pointer = chain, anchor = "", offset = 0) }
+        if (chain.isNotEmpty()) linkNear(item.copy(pointer = chain))
+    }
+
+    /** Liga os salvos soltos perto de um com ponteiro (mesma ficha): eles passam a segui-lo pelo offset. */
+    private fun linkNear(anchor: SavedItem) {
+        val base = anchor.addr.toLong(16)
+        val linked = Session.saved.filter {
+            it.id != anchor.id && it.pointer.isEmpty() && it.anchor.isEmpty() && kotlin.math.abs(it.addr.toLong(16) - base) <= SAME_STRUCT
+        }
+        linked.forEach { item -> replace(item) { it.copy(anchor = anchor.id, offset = it.addr.toLong(16) - base) } }
+        if (linked.isNotEmpty()) Diag.add("${linked.size} salvos agora seguem ${anchor.name.ifEmpty { "0x" + anchor.addr }}: " +
+            linked.joinToString { "${it.name.ifEmpty { "0x" + it.addr }} ${offsetText(it.addr.toLong(16) - base)}" })
+    }
+
+    fun unlink(item: SavedItem) {
+        Diag.add("Salvo 0x${item.addr} não segue mais outro salvo")
+        replace(item) { it.copy(anchor = "", offset = 0) }
     }
 
     /** Recalcula o endereço de um salvo com ponteiro; devolve o salvo atualizado. */
     private fun Daemon.resolve(item: SavedItem): SavedItem {
-        if (item.pointer.isEmpty() || !isAttached) return item
-        val a = runCatching { send("resolve ${item.pointer}", quiet = true).status }.getOrNull() ?: return item
+        if (!isAttached) return item
+        val a = if (item.anchor.isNotEmpty()) {
+            // resolve a âncora antes: depois de reiniciar, escrever no offset da âncora velha seria escrever em lugar errado
+            val anchor = Session.saved.firstOrNull { it.id == item.anchor }?.let { resolve(it) } ?: return item
+            (anchor.addr.toLong(16) + item.offset).toString(16)
+        } else {
+            if (item.pointer.isEmpty()) return item
+            runCatching { send("resolve ${item.pointer}", quiet = true).status }.getOrNull() ?: return item
+        }
         // outro salvo já está nesse endereço: não duplica (a lista usa endereço+tipo como chave)
         if (a == item.addr || Session.saved.any { it.addr == a && it.type == item.type }) return item
-        Diag.add("Ponteiro ${item.name.ifEmpty { item.pointer }}: 0x${item.addr} → 0x$a")
+        Diag.add("${if (item.anchor.isNotEmpty()) "Offset" else "Ponteiro"} ${item.name.ifEmpty { item.pointer.ifEmpty { "0x" + item.addr } }}: 0x${item.addr} → 0x$a")
         replace(item) { it.copy(addr = a) }
         return item.copy(addr = a)
     }
@@ -522,13 +553,18 @@ class Engine private constructor(private val app: Context) {
             if (i < 0) Session.saved.add(SavedItem(hit.addr, hit.type, hit.region, hit.value, frozen))
             else if (frozen) Session.saved[i] = Session.saved[i].copy(frozen = true)
         }
+        // salvo novo perto de um com ponteiro: entra na mesma ficha sozinho
+        Session.saved.filter { it.pointer.isNotEmpty() }.forEach(::linkNear)
         Diag.add("${if (frozen) "Congelados" else "Salvos"} ${hits.size} endereços")
         storeSaved()
     }
 
     fun removeSaved(items: List<SavedItem>) {
         val keys = items.map { it.addr + it.type }.toSet()
+        val gone = items.map { it.id }.toSet()
         Session.saved.removeAll { it.addr + it.type in keys }
+        // quem seguia um removido fica solto, no endereço atual
+        Session.saved.replaceAll { if (it.anchor in gone) it.copy(anchor = "", offset = 0) else it }
         Diag.add("Removidos ${items.size} salvos")
         storeSaved()
     }
@@ -668,12 +704,24 @@ internal fun normalizeNumbers(input: String): String =
     }.filter { it.isNotEmpty() }.joinToString(";")
 
 private fun SavedItem.toJson() = JSONObject().put("addr", addr).put("type", type).put("region", region).put("value", value).put("name", name).put("frozen", frozen)
-    .put("pointer", pointer)
+    .put("pointer", pointer).put("id", id).put("anchor", anchor).put("offset", offset)
 
 /** Caminho de ponteiro aceito: vai direto para o daemon, então nada de espaço extra, quebra de linha ou outro comando. */
 private val POINTER = Regex("""[^\s+]{1,100}\+[0-9a-f]{1,16}( [0-9a-f]{1,8}){0,7}""")
 
 val COMPARE_NAMES = mapOf("inc" to "aumentou", "dec" to "diminuiu", "same" to "não mudou", "changed" to "mudou", "incby" to "aumentou", "decby" to "diminuiu")
+
+fun offsetText(o: Long) = (if (o < 0) "-0x" else "+0x") + kotlin.math.abs(o).toString(16).uppercase()
+
+/** "7a0010", "7a0010+8", "0x7a0010-0x20": endereço com offset (hex) para a aba Memória; null se não for válido. */
+fun parseAddress(text: String): String? {
+    val t = text.replace(" ", "").lowercase()
+    val m = Regex("""(?:0x)?([0-9a-f]+)(?:([+-])(?:0x)?([0-9a-f]+))?""").matchEntire(t) ?: return null
+    val base = m.groupValues[1].toLongOrNull(16) ?: return null
+    val off = m.groupValues[3].takeIf { it.isNotEmpty() }?.toLongOrNull(16) ?: 0
+    val a = if (m.groupValues[2] == "-") base - off else base + off
+    return if (a < 0) null else a.toString(16)
+}
 
 /** "lib.so+1a2b 18 40" como o Cheat Engine mostra: [[lib.so+1A2B]+18]+40 */
 fun pointerText(chain: String): String {
@@ -688,7 +736,8 @@ private fun JSONObject.toSaved(): SavedItem {
     require(addr.toLongOrNull(16) != null) { "Endereço inválido na lista: $addr" }
     val pointer = optString("pointer", "")
     require(pointer.isEmpty() || POINTER.matches(pointer)) { "Ponteiro inválido na lista: $pointer" }
-    return SavedItem(addr, type, optString("region", "?"), optString("value", "?"), optBoolean("frozen", false), optString("name", ""), pointer)
+    val base = SavedItem(addr, type, optString("region", "?"), optString("value", "?"), optBoolean("frozen", false), optString("name", ""), pointer)
+    return base.copy(id = optString("id", "").ifEmpty { base.id }, anchor = optString("anchor", ""), offset = optLong("offset", 0))
 }
 
 /** "50;75" ou "100~200" ou misturado ("50;100~200"); cada item vira uma faixa (um número é a faixa dele mesmo). */

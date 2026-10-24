@@ -79,4 +79,15 @@ class ValuesTest {
             "(98 linhas do logcat omitidas aqui; veja a seção Logcat do jogo)", "24/10 01:00:02.000 < ok 3",
         ), out)
     }
+
+    @Test
+    fun enderecoComOffset() {
+        assertEquals("7a0018", parseAddress("7A0010+8"))
+        assertEquals("79fff0", parseAddress("0x7a0010-0x20"))
+        assertEquals("7a0010", parseAddress(" 7a0010 "))
+        assertEquals(null, parseAddress("xyz"))
+        assertEquals(null, parseAddress("10-20"))
+        assertEquals("+0x8", offsetText(8))
+        assertEquals("-0x20", offsetText(-32))
+    }
 }
