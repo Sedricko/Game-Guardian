@@ -8,6 +8,8 @@ on:
 jobs:
   apk:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # para publicar o APK na página de releases
     steps:
       - uses: actions/checkout@v7
 
@@ -41,3 +43,18 @@ jobs:
         with:
           name: tinker-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+
+      # página fixa de download: uma release por versão (versionName), atualizada a cada push
+      - name: Publica na página de releases
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+          cp app/build/outputs/apk/release/app-release.apk "Tinker-$v.apk"
+          if gh release view "v$v" >/dev/null 2>&1; then
+            gh release upload "v$v" "Tinker-$v.apk" --clobber
+          else
+            gh release create "v$v" "Tinker-$v.apk" --target "$GITHUB_SHA" --title "Tinker $v" \
+              --notes "APK do Tinker $v (arm64). Instala por cima da versão anterior, sem perder os salvos."
+          fi
