@@ -1286,6 +1286,41 @@ static void cmd_screencap(void) {
     printf("ok %zu\n", total);
 }
 
+// Toques na tela para a IA controlar o jogo: só números passam (nada de texto vai para o shell).
+static void cmd_input(const char *kind, char *const args[], int n) {
+    int need = !strcmp(kind, "tap") ? 2 : !strcmp(kind, "swipe") ? 5 : !strcmp(kind, "keyevent") ? 1 : -1;
+    if (need < 0 || n < need) { puts("err uso: input tap X Y | input swipe X1 Y1 X2 Y2 MS | input keyevent N"); return; }
+    char cmd[160];
+    int len = snprintf(cmd, sizeof cmd, "input %s", kind);
+    for (int i = 0; i < need; i++) {
+        char *end;
+        long v = strtol(args[i], &end, 10);
+        if (*end || end == args[i] || v < 0 || v > 100000) { printf("err número inválido: %s\n", args[i]); return; }
+        len += snprintf(cmd + len, sizeof cmd - len, " %ld", v);
+    }
+    snprintf(cmd + len, sizeof cmd - len, " 2>&1");
+    FILE *p = popen(cmd, "r");
+    if (!p) { printf("err input indisponível: %s\n", strerror(errno)); return; }
+    char line[256];
+    int said = 0;
+    while (fgets(line, sizeof line, p)) { printf("| %s", line); said = 1; }
+    int st = pclose(p);
+    if (st != 0) { printf("err o comando input falhou%s\n", said ? " (veja acima)" : ""); return; }
+    puts("ok");
+}
+
+// App em primeiro plano (a janela com foco): antes de cada toque da IA, para nunca tocar fora do jogo (ex.: compra na Play Store).
+static void cmd_focus(void) {
+    FILE *p = popen("dumpsys window 2>/dev/null | grep -m1 mCurrentFocus", "r");
+    if (!p) { printf("err dumpsys indisponível: %s\n", strerror(errno)); return; }
+    char line[512] = "";
+    if (!fgets(line, sizeof line, p)) line[0] = 0;
+    pclose(p);
+    line[strcspn(line, "\n")] = 0;
+    if (!line[0]) { puts("err não deu para ver o app em primeiro plano"); return; }
+    printf("| %s\nok\n", line);
+}
+
 static void cmd_ps(void) {
     DIR *d = opendir("/proc");
     struct dirent *e;
@@ -1328,6 +1363,15 @@ int main(void) {
         if (sscanf(line, "%31s %399s %127s %127s %127s", cmd, a1, a2, a3, a4) < 1) continue;
         if (!strcmp(cmd, "ps")) { cmd_ps(); continue; }
         if (!strcmp(cmd, "screencap")) { cmd_screencap(); continue; }
+        if (!strcmp(cmd, "focus")) { cmd_focus(); continue; }
+        if (!strcmp(cmd, "input")) {
+            char x1[32] = "", x2[32] = "", x3[32] = "", x4[32] = "", x5[32] = "";
+            char *const xs[] = {x1, x2, x3, x4, x5};
+            char kind[16] = "";
+            int n = sscanf(line, "%*s %15s %31s %31s %31s %31s %31s", kind, x1, x2, x3, x4, x5);
+            cmd_input(kind, xs, n > 0 ? n - 1 : 0);
+            continue;
+        }
         if (!strcmp(cmd, "info")) {
             // para o relatório: confirma root, kernel, tamanho de página e SELinux
             struct utsname u;

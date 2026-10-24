@@ -79,6 +79,11 @@ próprio valor); buscar_bytes acha o lugar de novo quando o endereço muda, ou a
 Veja a tela: ver_tela te mostra um print do jogo. Use no começo para ler os números (ouro, gemas, vida) e já buscar, sem pedir
 para a pessoa digitar; e depois de uma edição, para conferir se mudou na tela. Para ponteiros, preparar_ponteiros busca agora e
 diz se ficaram bons (o Tinker também busca sozinho quando a edição é aplicada).
+Modo autônomo (quando ligado em Ajustes): com "aplicar sozinha", propor_edicao e propor_receita já aplicam (diga o que fez);
+com "controlar o jogo", você mesmo faz o valor mudar: ver_tela, ache um botão que gasta ou ganha o recurso, tocar nele, ver o
+número novo no print e refinar com ele; repita até sobrar 1. Jogue com cuidado: prefira ações baratas e reversíveis, nunca
+toque em compras com dinheiro real, preços em moeda real, assinaturas, Play Store, nem em "vender tudo"/"excluir". Se não achar
+um jeito seguro de mudar o valor, pare e diga à pessoa o que fazer.
 Use ver_salvos para saber o que já foi achado e se os ponteiros voltaram. Quando descobrir algo que vale para a próxima vez
 (classe e campo de um recurso, tipo do valor, se é cifrado), use anotar. Para deixar várias edições prontas para toda vez que o
 jogo abrir, use propor_receita com os salvos."""
@@ -87,6 +92,9 @@ jogo abrir, use propor_receita com os salvos."""
 
     /** Imagem (JPEG em base64) que uma ferramenta pediu para mandar junto da resposta dela (ver_tela). */
     @Volatile internal var pendingImage: String? = null
+
+    // controlando o jogo cada toque é uma rodada: precisa de mais
+    private fun rounds() = if (Session.aiControl) 40 else MAX_ROUNDS
 
     /** O provedor escolhido tem chave? */
     fun ready() = if (Session.aiProvider == "gemini") Session.geminiKey.isNotBlank() else Session.aiKey.isNotBlank()
@@ -126,7 +134,7 @@ jogo abrir, use propor_receita com os salvos."""
         val before = messages.size
         messages += BetaMessageParam.builder().role(BetaMessageParam.Role.USER).content(prompt).build()
         return try {
-            repeat(MAX_ROUNDS) {
+            repeat(rounds()) {
                 kotlin.coroutines.coroutineContext.ensureActive()
                 val params = MessageCreateParams.builder()
                     .model("claude-opus-5-5")
@@ -163,7 +171,7 @@ jogo abrir, use propor_receita com os salvos."""
                 }
                 messages += BetaMessageParam.builder().role(BetaMessageParam.Role.USER).contentOfBetaContentBlockParams(results + listOfNotNull(image)).build()
             }
-            "Parei depois de $MAX_ROUNDS consultas sem chegar a uma resposta. Tente uma pergunta mais específica."
+            "Parei depois de ${rounds()} consultas sem chegar a uma resposta. Tente uma pergunta mais específica."
         } catch (e: UnauthorizedException) {
             while (messages.size > before) messages.removeAt(messages.lastIndex)  // a pergunta que falhou não fica na conversa
             "Chave da API inválida. Confira em Ajustes → Assistente (IA)."
@@ -198,7 +206,7 @@ jogo abrir, use propor_receita com os salvos."""
         contents.put(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", prompt))))
         fun drop() { while (contents.length() > before) contents.remove(contents.length() - 1) }  // pergunta que falhou sai da conversa
         return try {
-            repeat(MAX_ROUNDS) {
+            repeat(rounds()) {
                 kotlin.coroutines.coroutineContext.ensureActive()
                 val body = JSONObject()
                     .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", SYSTEM))))
@@ -244,7 +252,7 @@ jogo abrir, use propor_receita com os salvos."""
                 pendingImage?.also { pendingImage = null }?.let { answers.put(JSONObject().put("inlineData", JSONObject().put("mimeType", "image/jpeg").put("data", it))) }
                 contents.put(JSONObject().put("role", "user").put("parts", answers))
             }
-            "Parei depois de $MAX_ROUNDS consultas sem chegar a uma resposta. Tente uma pergunta mais específica."
+            "Parei depois de ${rounds()} consultas sem chegar a uma resposta. Tente uma pergunta mais específica."
         } catch (e: java.io.IOException) {
             drop()
             "Sem conexão com o Gemini: ${e.message}"

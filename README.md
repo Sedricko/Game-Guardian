@@ -115,6 +115,9 @@ valor muda. Com **IA pode testar valores** ligado em Ajustes, ela confirma qual 
 teste por 2 segundos e voltando o original.
 **📷 Ler a tela e achar**: o Tinker tira um print do jogo (com root), a IA lê os números que aparecem e já busca, sem digitar;
 depois de uma edição, ela confere na tela. Também prepara e avalia os **ponteiros** dos salvos quando pedido.
+**Modo autônomo** (Ajustes → Assistente, desligado por padrão): *aplicar sozinha* (aplica, congela, testa e cria receitas sem
+esperar o toque) e *controlar o jogo* (a IA vê a tela, toca e arrasta no jogo para fazer o valor mudar e refina até achar). O toque
+é bloqueado se o que está na frente não for o jogo (ex.: compra na Play Store). **⏹ Parar** a qualquer momento: abra a bolinha.
 Aparece sozinha quando a busca dá 0, quando o jogo fecha e quando um salvo não volta ao reabrir. Cada
 ferramenta usada aparece embaixo da pergunta (🔧) e fica no Registro, junto com o começo da resposta.
 

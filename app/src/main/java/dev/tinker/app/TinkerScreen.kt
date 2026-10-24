@@ -130,6 +130,8 @@ fun TinkerPanel(
     val run = rememberRun(engine) { error = if (it == "o jogo fechou") null else it }
     // abriu o Tinker com o jogo da última vez aberto: já escolhe ele (e os salvos voltam sozinhos)
     LaunchedEffect(Unit) { if (s.process == null) runCatching { engine.followGame(startDaemon = true) }.getOrNull()?.let { s.status = it } }
+    // a IA vai tocar no jogo: o painel sai da frente (a conversa continua; a bolinha abre de novo para ver ou parar)
+    LaunchedEffect(s.aiHidePanel) { if (s.aiHidePanel && overlay) onMinimize() }
 
     Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
         Column {
@@ -1429,6 +1431,11 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                 }
                 keyInfo?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
                 if (gemini) GeminiModels(engine)
+                Toggle("Modo autônomo: aplicar sozinha", "A IA aplica, congela, testa e cria receitas sem esperar o seu toque. " +
+                    "O ↶ Desfazer continua na tela.", s.aiAuto) { s.aiAuto = it; engine.saveSettings() }
+                Toggle("Modo autônomo: controlar o jogo", "A IA toca e arrasta na tela do jogo para fazer o valor mudar e acha sozinha. " +
+                    "Toque bloqueado se outra coisa (compra na Play Store, anúncio) estiver na frente; mesmo assim, use em jogos sem compras " +
+                    "ou com senha na Play Store. ⏹ Parar a qualquer momento.", s.aiControl) { s.aiControl = it; engine.saveSettings() }
                 Toggle("IA pode testar valores", "Para saber se um resultado é o verdadeiro, ela escreve um valor de teste por 2 segundos e depois volta o original. " +
                     "Desligado: ela só olha.", s.aiCanTest) { s.aiCanTest = it; engine.saveSettings() }
                 if ((if (gemini) s.geminiKey else s.aiKey).isNotBlank()) TextButton(onClick = {

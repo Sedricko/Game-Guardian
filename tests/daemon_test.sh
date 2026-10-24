@@ -153,6 +153,16 @@ mkdir -p "$out/bin"; head -c 1000 /dev/urandom > "$out/img"; printf '#!/bin/sh\n
 printf 'screencap\n' | PATH="$out/bin:$PATH" "$out/tinkerd" | grep '^| ' | cut -c3- | base64 -d > "$out/img2"
 cmp -s "$out/img" "$out/img2" || { echo "FALHOU: screencap base64"; exit 1; }
 
+# Toques: só números chegam ao input (com um input falso que grava os argumentos); texto é recusado
+printf '#!/bin/sh\necho "$@" > %s\n' "$out/args" > "$out/bin/input"; chmod +x "$out/bin/input"
+tp=$(printf '%s\n' "input tap 100 200" "input tap 1;reboot 2" "input swipe 1 2 3 4 300" "input bla 1" | PATH="$out/bin:$PATH" "$out/tinkerd")
+mapfile -t t < <(grep -E '^(ok|err)' <<<"$tp")
+[ "${t[1]}" = "ok" ] && [[ "${t[2]}" =~ ^err\ número\ inválido ]] && [ "${t[3]}" = "ok" ] && [[ "${t[4]}" =~ ^err\ uso ]] \
+    && [ "$(cat "$out/args")" = "swipe 1 2 3 4 300" ] || { echo "FALHOU: input ($tp)"; exit 1; }
+printf '#!/bin/sh\necho "  mCurrentFocus=Window{1 u0 com.jogo/com.jogo.Main}"\n' > "$out/bin/dumpsys"; chmod +x "$out/bin/dumpsys"
+fc=$(printf 'focus\n' | PATH="$out/bin:$PATH" "$out/tinkerd")
+grep -q "^| *mCurrentFocus=Window{1 u0 com.jogo/com.jogo.Main}" <<<"$fc" || { echo "FALHOU: focus ($fc)"; exit 1; }
+
 # Busca em grupo: hp (99.5) e gold (4321) do mesmo objeto, a 4 bytes; distância curta demais não acha; um valor só vira busca normal
 grp=$(printf '%s\n' "attach $pid" "group i32,f32 4321;99.5 16" "list 10" "group i32,f32 4321;99.5 2" "group i32 4321 16" "group i32 4321;1 0" | "$out/tinkerd")
 # itens repetidos: 4321;4321 precisa de dois 4321 perto (só há um) → 0; item que nenhum tipo entende (abc) não é exigido

@@ -220,6 +220,9 @@ object Session {
     var aiKey by mutableStateOf("")  // chave da API do Claude para o assistente; vazia = assistente desligado
     var aiProvider by mutableStateOf("claude")  // "claude" ou "gemini"
     var aiCanTest by mutableStateOf(false)  // a IA pode escrever um valor de teste (e voltar o original) para saber se é o verdadeiro
+    var aiAuto by mutableStateOf(false)  // modo autônomo 1: a IA aplica, congela, testa e cria receitas sem esperar o toque
+    var aiControl by mutableStateOf(false)  // modo autônomo 2: a IA toca e arrasta na tela do jogo para fazer o valor mudar
+    var aiHidePanel by mutableStateOf(false)  // a IA vai tocar no jogo: o painel se minimiza para os toques chegarem nele
     var geminiKey by mutableStateOf("")
     var geminiModels by mutableStateOf(listOf<String>())  // os que a chave do Gemini pode usar, o melhor primeiro
     var geminiModel by mutableStateOf("gemini-2.5-flash")  // se sair de linha, o assistente troca sozinho pelo Flash mais novo
@@ -257,7 +260,7 @@ class Engine private constructor(private val app: Context) {
         prefs.edit().putBoolean("autoPause", Session.autoPause).putBoolean("findEncrypted", Session.findEncrypted)
             .putBoolean("autoPointers", Session.autoPointers).putBoolean("gameLibsOnly", Session.gameLibsOnly)
             .putBoolean("autoOverlay", Session.autoOverlay).putBoolean("ownKeypad", Session.ownKeypad).putFloat("alpha", Session.alpha).putInt("panelSize2", Session.panelSize)
-            .putString("aiKey", Session.aiKey).putString("aiProvider", Session.aiProvider).putBoolean("aiCanTest", Session.aiCanTest).putString("geminiKey", Session.geminiKey)
+            .putString("aiKey", Session.aiKey).putString("aiProvider", Session.aiProvider).putBoolean("aiCanTest", Session.aiCanTest).putBoolean("aiAuto", Session.aiAuto).putBoolean("aiControl", Session.aiControl).putString("geminiKey", Session.geminiKey)
             .putString("geminiModel", Session.geminiModel).apply()
     }
 
@@ -274,6 +277,8 @@ class Engine private constructor(private val app: Context) {
         Session.aiKey = prefs.getString("aiKey", "").orEmpty()
         Session.aiProvider = prefs.getString("aiProvider", "claude").orEmpty()
         Session.aiCanTest = prefs.getBoolean("aiCanTest", false)
+        Session.aiAuto = prefs.getBoolean("aiAuto", false)
+        Session.aiControl = prefs.getBoolean("aiControl", false)
         Session.geminiKey = prefs.getString("geminiKey", "").orEmpty()
         // chave pré-definida (repositório privado, uso pessoal): entra uma vez só; apagou ou trocou, não volta
         if (!prefs.getBoolean("defaultKeyGiven", false)) {
@@ -760,6 +765,36 @@ class Engine private constructor(private val app: Context) {
      * Print do jogo para a IA ler os números da tela: o painel fica quase invisível por um instante (o "olho") para não sair
      * na foto; a imagem vai reduzida (cerca de 1/3) em JPEG, o bastante para ler textos e bem mais leve para enviar.
      */
+    /** Tamanho do último print mandado para a IA e da tela de verdade. */
+    private data class Shot(val w: Int, val h: Int, val screenW: Int, val screenH: Int)
+    @Volatile private var shot: Shot? = null
+
+    /** Toque da IA: só com o jogo em primeiro plano (uma compra da Play Store ou outro app na frente bloqueia). */
+    private suspend fun aiInput(args: String): String {
+        if (!Session.aiControl) return "A pessoa não ligou \"IA controla o jogo\" em Ajustes. Peça para ela fazer no jogo."
+        val pkg = Session.process?.pkg ?: return "Nenhum jogo escolhido."
+        // painel em cima do jogo pegaria o toque: minimiza (a bolinha fica para a pessoa abrir e tocar em Parar)
+        withContext(Dispatchers.Main) { Session.aiHidePanel = true }
+        delay(700)
+        withContext(Dispatchers.Main) { Session.aiHidePanel = false }
+        val focus = call { d -> runCatching { d.send("focus", quiet = true).lines.joinToString(" ") }.getOrDefault("") }
+        if (pkg !in focus) return "Toque bloqueado: o que está na frente não é o jogo ($focus). Pode ser uma compra (Play Store), um anúncio ou outro app. " +
+            "Peça para a pessoa voltar ao jogo; nunca toque em compras."
+        call { d -> d.send("input $args") }
+        Diag.add("IA tocou no jogo: input $args")
+        delay(900)
+        Assistant.pendingImage = screenshotJpeg()  // a IA já vê o resultado do toque, sem gastar outra rodada
+        return "Feito (input $args). Print de depois do toque anexado."
+    }
+
+    private fun screenPoint(x: String, y: String): Pair<Int, Int>? {
+        val s = shot ?: return null
+        val px = x.toDoubleOrNull() ?: return null
+        val py = y.toDoubleOrNull() ?: return null
+        if (px < 0 || py < 0 || px > s.w || py > s.h) return null
+        return (px * s.screenW / s.w).toInt() to (py * s.screenH / s.h).toInt()
+    }
+
     private suspend fun screenshotJpeg(): String {
         withContext(Dispatchers.Main) { Session.peek = true }
         val r = try {
@@ -770,10 +805,14 @@ class Engine private constructor(private val app: Context) {
         }
         return withContext(Dispatchers.Default) {
             val png = android.util.Base64.decode(r.lines.joinToString("") { it.removePrefix("| ") }, android.util.Base64.DEFAULT)
+            val full = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                .also { android.graphics.BitmapFactory.decodeByteArray(png, 0, png.size, it) }
             val bmp = android.graphics.BitmapFactory.decodeByteArray(png, 0, png.size, android.graphics.BitmapFactory.Options().apply { inSampleSize = 2 })
                 ?: throw IOException("o print veio vazio")
             val scale = minOf(1f, 1400f / maxOf(bmp.width, bmp.height))
             val small = if (scale < 1f) Bitmap.createScaledBitmap(bmp, (bmp.width * scale).toInt(), (bmp.height * scale).toInt(), true) else bmp
+            // a IA toca em coordenadas da imagem que viu; o toque vai na tela de verdade
+            shot = Shot(small.width, small.height, full.outWidth, full.outHeight)
             val out = java.io.ByteArrayOutputStream()
             small.compress(Bitmap.CompressFormat.JPEG, 75, out)
             android.util.Base64.encodeToString(out.toByteArray(), android.util.Base64.NO_WRAP)
@@ -884,7 +923,9 @@ class Engine private constructor(private val app: Context) {
             if (!Regex("""-?[0-9.eE+-]{1,40}""").matches(value)) return@AiTool "Valor inválido: um número só."
             val p = AiProposal(addr, type, value, a.optString("congelar").trim().lowercase().startsWith("s"), a.optString("nome").take(40), a.optString("motivo").take(200), pid = currentPid)
             withContext(Dispatchers.Main) { Session.aiProposals.add(p) }
-            "Sugestão mostrada para a pessoa com o botão Aplicar."
+            // modo autônomo: aplica já (o ↶ Desfazer fica na tela)
+            if (Session.aiAuto) "Aplicado sozinho (modo autônomo): " + withContext(Dispatchers.Main) { applyProposal(p) }
+            else "Sugestão mostrada para a pessoa com o botão Aplicar."
         },
         AiTool("busca_sem_valor", "Começa uma busca sem saber o número (barra de vida, energia): guarda a memória para comparar depois com comparar.",
             mapOf("tipo" to "i32 (inteiro) ou f32 (decimal; barras costumam ser f32)"), emptyList()) { a ->
@@ -920,7 +961,8 @@ class Engine private constructor(private val app: Context) {
             val p = AiProposal("", "", "", a.optString("ao_abrir").trim().lowercase().startsWith("s"), a.optString("nome").take(40).ifBlank { "Receita" },
                 items.joinToString { label(it) }, recipe = items.map { it.id })
             withContext(Dispatchers.Main) { Session.aiProposals.add(p) }
-            "Sugestão de receita mostrada para a pessoa (${items.size} salvos)."
+            if (Session.aiAuto) "Criada sozinha (modo autônomo): " + withContext(Dispatchers.Main) { applyProposal(p) }
+            else "Sugestão de receita mostrada para a pessoa (${items.size} salvos)."
         },
         AiTool("anotar", "Guarda uma anotação sobre este jogo para as próximas conversas (ex.: Ouro = PlayerData.Gold, Float, cifrado).",
             mapOf("nota" to "uma linha curta"), listOf("nota")) { a ->
@@ -963,7 +1005,7 @@ class Engine private constructor(private val app: Context) {
             "valor original. Se o jogo desfez o teste, é cópia (ou é recalculado); se ficou, é o verdadeiro. Só funciona se a pessoa ligou " +
             "\"IA pode testar valores\" em Ajustes.",
             mapOf("endereco" to "endereço em hexadecimal", "tipo" to "i32, f32, i64, f64, xi32 ou xf32"), listOf("endereco", "tipo")) { a ->
-            if (!Session.aiCanTest) return@AiTool "A pessoa não deixou a IA testar valores (Ajustes → Assistente → IA pode testar valores). Use ver_endereco ou peça para ela conferir."
+            if (!Session.aiCanTest && !Session.aiAuto) return@AiTool "A pessoa não deixou a IA testar valores (Ajustes → Assistente → IA pode testar valores). Use ver_endereco ou peça para ela conferir."
             val addr = parseAddress(a.optString("endereco")) ?: return@AiTool "Endereço inválido."
             val type = a.optString("tipo").trim().takeIf { it in TYPE_SIZES } ?: return@AiTool "Tipo inválido."
             val old = call { d -> runCatching { d.send("read $addr $type", quiet = true).status }.getOrNull() } ?: return@AiTool "Não deu para ler 0x$addr."
@@ -986,8 +1028,21 @@ class Engine private constructor(private val app: Context) {
         AiTool("ver_tela", "Tira um print do jogo agora e te mostra a imagem: leia os números que aparecem (ouro, gemas, vida, nível) para " +
             "buscar sem a pessoa digitar, ou para conferir se uma edição apareceu na tela.", emptyMap(), emptyList()) {
             Assistant.pendingImage = screenshotJpeg()
-            "Print da tela anexado logo abaixo. Leia os valores que aparecem e diga o que é cada um."
+            "Print da tela anexado logo abaixo (${shot?.w}x${shot?.h}; tocar e arrastar usam coordenadas desta imagem). Leia os valores que aparecem e diga o que é cada um."
         },
+        AiTool("tocar", "Toca na tela do jogo num ponto do último print (x, y em pixels da imagem). Use para gastar ou ganhar o recurso e fazer o valor " +
+            "mudar. Depois do toque vem um print novo. NUNCA toque em compras com dinheiro real, preços em R$/US$, assinaturas ou na Play Store.",
+            mapOf("x" to "x no último print", "y" to "y no último print", "motivo" to "o que esse toque faz (ex.: botão Melhorar, custa 150 ouro)"), listOf("x", "y", "motivo")) { a ->
+            val (x, y) = screenPoint(a.optString("x"), a.optString("y")) ?: return@AiTool "Coordenada fora do último print. Use ver_tela antes e coordenadas dele."
+            aiInput("tap $x $y")
+        },
+        AiTool("arrastar", "Arrasta na tela do jogo de um ponto a outro do último print (rolar lista, mover mapa).",
+            mapOf("x1" to "x inicial", "y1" to "y inicial", "x2" to "x final", "y2" to "y final"), listOf("x1", "y1", "x2", "y2")) { a ->
+            val (x1, y1) = screenPoint(a.optString("x1"), a.optString("y1")) ?: return@AiTool "Ponto inicial fora do último print."
+            val (x2, y2) = screenPoint(a.optString("x2"), a.optString("y2")) ?: return@AiTool "Ponto final fora do último print."
+            aiInput("swipe $x1 $y1 $x2 $y2 400")
+        },
+        AiTool("voltar", "Aperta o botão Voltar do Android (fechar uma janela do jogo).", emptyMap(), emptyList()) { aiInput("keyevent 4") },
         AiTool("preparar_ponteiros", "Procura agora os ponteiros de salvos (o caminho que acha o valor de novo quando o jogo reabre) e diz se ficaram bons. " +
             "Leva alguns segundos por salvo e pausa o jogo nesse tempo.",
             mapOf("salvos" to "nomes ou endereços dos salvos, separados por vírgula, ou todos"), listOf("salvos")) { a ->

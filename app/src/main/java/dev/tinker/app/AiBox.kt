@@ -31,6 +31,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
@@ -43,6 +44,7 @@ class AiConversation {
     var loading by mutableStateOf(false)
     var steps by mutableStateOf(listOf<String>())
     var applied by mutableStateOf<String?>(null)
+    var job: Job? = null  // a pergunta em andamento, para ⏹ Parar
 }
 
 object AiConversations {
@@ -85,8 +87,9 @@ fun AiBox(
         steps = emptyList()
         applied = null
         // fora da tela também: a resposta chega mesmo com o painel minimizado
-        aiScope.launch {
-            val a = runCatching { engine.askAi(chat, context, q) { st -> c.steps = c.steps + st } }.getOrElse { it.message ?: "Erro" }
+        c.job = aiScope.launch {
+            val a = runCatching { engine.askAi(chat, context, q) { st -> c.steps = c.steps + st } }
+                .getOrElse { if (it is kotlinx.coroutines.CancellationException) "⏹ Parado." else it.message ?: "Erro" }
             c.turns = (c.turns + (q to a)).takeLast(6)
             c.loading = false
         }
@@ -163,7 +166,11 @@ fun AiBox(
         }
         if (loading) {
             LinearProgressIndicator(Modifier.fillMaxWidth())
-            Text("Pensando… (pode levar até um minuto)", style = MaterialTheme.typography.bodySmall)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(if (s.aiControl) "Trabalhando (pode tocar no jogo)…" else "Pensando… (pode levar até um minuto)", Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodySmall)
+                Button(onClick = { c.job?.cancel() }) { Text("⏹ Parar") }
+            }
         }
         // o que a IA olhou sozinha na memória (procurar classe, abrir objeto, buscar)
         steps.takeLast(8).forEach { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
