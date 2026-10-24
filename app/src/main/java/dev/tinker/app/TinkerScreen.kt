@@ -1377,6 +1377,8 @@ private fun NearSearch(engine: Engine, centers: List<String>, initialType: Strin
 @Composable
 private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, run: (suspend () -> String) -> Unit, onError: (String) -> Unit) {
     val s = Session
+    val clipCtx = LocalContext.current
+    var keyInfo by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     var confirmKill by remember { mutableStateOf(false) }
     LaunchedEffect(s.process) {
@@ -1402,12 +1404,29 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                     else "Chave em console.anthropic.com (API Keys), paga por uso; a assinatura do claude.ai não vale aqui.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                OutlinedTextField(
-                    if (gemini) s.geminiKey else s.aiKey,
-                    { if (gemini) s.geminiKey = it.trim() else s.aiKey = it.trim(); engine.saveSettings() },
-                    label = { Text(if (gemini) "Chave do Gemini (AIza…)" else "Chave da API do Claude (sk-ant-…)") }, singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(),
-                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedTextField(
+                        if (gemini) s.geminiKey else s.aiKey,
+                        { if (gemini) s.geminiKey = it.trim() else s.aiKey = it.trim(); engine.saveSettings() },
+                        label = { Text(if (gemini) "Chave do Gemini" else "Chave do Claude") }, placeholder = { Text(if (gemini) "AIza…" else "sk-ant-…") },
+                        singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.weight(1f),
+                    )
+                    // no menu flutuante o Android não mostra "Colar" ao segurar o campo: o botão lê a área de transferência direto
+                    Button(onClick = {
+                        val clip = clipCtx.getSystemService(ClipboardManager::class.java).primaryClip
+                        val text = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(clipCtx)?.toString().orEmpty().filterNot { it.isWhitespace() }
+                        keyInfo = when {
+                            text.isEmpty() -> "Não consegui ler a área de transferência. Copie a chave de novo, ou abra o Tinker pelo ícone e cole na tela principal."
+                            else -> {
+                                if (gemini) s.geminiKey = text else s.aiKey = text
+                                engine.saveSettings()
+                                val ok = if (gemini) text.startsWith("AIza") else text.startsWith("sk-ant-")
+                                if (ok) "Chave colada." else "Colado, mas não parece uma chave do ${if (gemini) "Gemini (começa com AIza)" else "Claude (começa com sk-ant-)"}."
+                            }
+                        }
+                    }) { Text("Colar") }
+                }
+                keyInfo?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
                 if (gemini) GeminiModels(engine)
                 if ((if (gemini) s.geminiKey else s.aiKey).isNotBlank()) TextButton(onClick = {
                     if (gemini) s.geminiKey = "" else s.aiKey = ""
