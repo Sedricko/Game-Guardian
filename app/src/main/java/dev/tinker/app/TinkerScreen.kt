@@ -1005,6 +1005,11 @@ private fun ClassOpener(engine: Engine) {
     var objs by remember { mutableStateOf(listOf<String>()) }
     var all by remember(s.process) { mutableStateOf<List<GameClass>?>(null) }
     var listing by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    fun copy(name: String) {
+        context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Classe", name))
+        info = "Copiado: $name"
+    }
     fun open(name: String) {
         if (loading || name.isBlank()) return
         cls = name
@@ -1027,6 +1032,7 @@ private fun ClassOpener(engine: Engine) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         OutlinedTextField(cls, { cls = it.trim() }, label = { Text("Classe (ex.: PlayerData)") }, singleLine = true, modifier = Modifier.weight(1f))
         Button(onClick = { open(cls) }, enabled = !loading && s.process != null && cls.isNotBlank(), contentPadding = PaddingValues(horizontal = 12.dp)) { Text("Abrir") }
+        if (cls.isNotBlank()) TextButton(onClick = { copy(cls) }, contentPadding = PaddingValues(0.dp), modifier = Modifier.size(40.dp)) { Text("⧉", fontSize = 18.sp) }
     }
     // atalhos: classes abertas antes e as dos salvos que têm nome IL2CPP
     val shortcuts = (s.classes + s.saved.mapNotNull { it.il2.substringBeforeLast('+', "").ifEmpty { null } }).distinct().take(10)
@@ -1065,6 +1071,7 @@ private fun ClassOpener(engine: Engine) {
                             color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     Text("${gc.fields} campos", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    TextButton(onClick = { copy(gc.name) }, contentPadding = PaddingValues(0.dp), modifier = Modifier.size(36.dp)) { Text("⧉", fontSize = 16.sp) }
                 }
             }
             if (shownClasses.size > 200) Text("…e mais ${shownClasses.size - 200}: digite parte do nome para filtrar.", style = MaterialTheme.typography.bodySmall)
