@@ -147,4 +147,15 @@ class ValuesTest {
         assertEquals(listOf("gold · int", "hp · float", "nome · string"), named.map { it.label })
         assertEquals(listOf("1331", "99.5"), named.take(2).map { it.value })
     }
+
+    @Test
+    fun crashesOnlyOfTheGame() {
+        val log = listOf(
+            "--------- beginning of crash", "F libc : Fatal signal 11 in tid 1 (UnityGfx)", "F DEBUG : >>> com.outro <<<",
+            "F libc : Fatal signal 6 in tid 2 (main)", "F DEBUG : >>> com.jogo <<<",
+        )
+        assertEquals(listOf("F libc : Fatal signal 6 in tid 2 (main)", "F DEBUG : >>> com.jogo <<<", "(1 falhas de outros apps omitidas)"), crashesOf(log, "com.jogo"))
+        assertEquals(listOf("Nenhuma falha de com.x (2 de outros apps omitidas)"), crashesOf(log, "com.x"))
+        assertEquals(log, crashesOf(log, null))
+    }
 }

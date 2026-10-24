@@ -248,7 +248,7 @@ class Engine private constructor(private val app: Context) {
         Session.saved.replaceAll { if (it.pid == 0) it.copy(frozen = false) else it }
         Session.status = "O jogo fechou. Veja a aba Registro para o motivo."
         Diag.add("=== O jogo ${p.label} (PID ${p.pid}) fechou. Falhas registradas pelo Android: ===")
-        runCatching { dedupe(d.call("crashlog").lines).forEach(Diag::add) }
+        runCatching { dedupe(crashesOf(d.call("crashlog").lines, p.pkg)).forEach(Diag::add) }
         Diag.add("=== Últimas linhas do logcat do jogo ===")
         runCatching { dedupe(d.call("logs").lines).forEach(Diag::add) }
         Diag.add("=== Fim do relatório da queda ===")
@@ -1129,7 +1129,7 @@ class Engine private constructor(private val app: Context) {
 
     suspend fun crashLog() = call { d ->
         Diag.add("=== Falhas registradas pelo Android (buffer crash) ===")
-        dedupe(d.send("crashlog", quiet = true).lines).forEach(Diag::add)
+        dedupe(crashesOf(d.send("crashlog", quiet = true).lines, Session.process?.pkg)).forEach(Diag::add)
         Diag.add("=== Fim ===")
     }
 
@@ -1142,7 +1142,7 @@ class Engine private constructor(private val app: Context) {
     /** Relatório completo num .txt: aparelho, jogo, registro do Tinker, falhas e logcat do jogo. */
     suspend fun report(): File = withContext(Dispatchers.IO) {
         suspend fun section(title: String, cmd: String) = "=== $title ===\n" + runCatching {
-            dedupe(call { d -> d.send(cmd, quiet = true).lines }).joinToString("\n")
+            dedupe(call { d -> d.send(cmd, quiet = true).lines }.let { if (cmd == "crashlog") crashesOf(it, Session.process?.pkg) else it }).joinToString("\n")
         }.getOrElse { "(não foi possível ler: ${it.message})" }
         val p = Session.process
         val crash = section("Falhas registradas pelo Android (crash)", "crashlog")
@@ -1751,6 +1751,20 @@ private val PROBLEM_WORDS = listOf("erro", "falha", "aviso", "fechou", "exceptio
 private val LOGCAT_PREFIX = Regex("""^\S+ \S+\s+\d+\s+\d+ """)
 
 /** Tira o "| " do protocolo e corta linhas repetidas (ex.: o SDK de anúncios do jogo tentando conectar sem parar). */
+/** Do buffer de falhas, só as do jogo (pkg); as de outros apps viram uma linha de contagem. Sem jogo: tudo. */
+internal fun crashesOf(lines: List<String>, pkg: String?): List<String> {
+    if (pkg == null) return lines
+    val blocks = mutableListOf<MutableList<String>>(mutableListOf())
+    lines.forEach { l -> if ("Fatal signal" in l || "FATAL EXCEPTION" in l) blocks += mutableListOf(l) else blocks.last() += l }
+    val (mine, other) = blocks.drop(1).partition { b -> b.any { pkg in it } }
+    val out = mine.flatten()
+    return when {
+        other.isEmpty() -> out.ifEmpty { lines }
+        out.isEmpty() -> listOf("Nenhuma falha de $pkg (${other.size} de outros apps omitidas)")
+        else -> out + "(${other.size} falhas de outros apps omitidas)"
+    }
+}
+
 private fun dedupe(lines: List<String>): List<String> {
     val seen = HashSet<String>()
     val out = lines.map { "| " + it.removePrefix("| ") }.filter { seen.add(it.removePrefix("| ").replace(LOGCAT_PREFIX, "")) }
