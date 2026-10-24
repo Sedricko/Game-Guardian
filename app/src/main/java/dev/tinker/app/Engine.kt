@@ -750,7 +750,12 @@ class Engine private constructor(private val app: Context) {
         // na primeira mensagem: o que a IA anotou deste jogo em outras conversas, para não descobrir tudo de novo
         val full: suspend () -> String = {
             val notes = notesFile?.takeIf { it.exists() }?.readText()?.takeLast(4000).orEmpty()
-            withContext(Dispatchers.Main) { context() } + if (notes.isBlank()) "" else "\n\n=== Suas anotações deste jogo (de outras conversas) ===\n$notes"
+            val lessons = lessonsFile.takeIf { it.exists() }?.readText()?.takeLast(3000).orEmpty()
+            val server = runCatching { serverHints() }.getOrDefault("")
+            withContext(Dispatchers.Main) { context() } +
+                (if (lessons.isBlank()) "" else "\n\n=== Suas lições (aprendidas em conversas anteriores, valem para qualquer jogo) ===\n$lessons") +
+                (if (notes.isBlank()) "" else "\n\n=== Suas anotações deste jogo (de outras conversas) ===\n$notes") +
+                (if (server.isBlank()) "" else "\n\n=== Sinais de que o servidor ou o antitrapaça confere valores (logcat do jogo) ===\n$server")
         }
         Assistant.ask(chat, full, question, tools, onStep).also {
             saveSettings()  // o Gemini pode ter trocado de modelo sozinho
@@ -759,6 +764,28 @@ class Engine private constructor(private val app: Context) {
     }
 
     private val notesFile get() = savedPkg?.let { File(app.filesDir, "notas-$it.txt") }
+
+    /** Lições gerais da IA (de todos os jogos): o que funcionou e o que errou, para agir melhor na próxima. */
+    private val lessonsFile get() = File(app.filesDir, "licoes-ia.txt")
+
+    fun lessons(): String = lessonsFile.takeIf { it.exists() }?.readText().orEmpty()
+
+    fun clearLessons() {
+        lessonsFile.delete()
+        notesFile?.delete()
+        Diag.add("Aprendizado da IA apagado")
+    }
+
+    private fun appendNote(f: File, text: String, max: Int) = runCatching {
+        val line = "${java.text.SimpleDateFormat("dd/MM", java.util.Locale.US).format(java.util.Date())} ${text.replace('\n', ' ').trim().take(300)}"
+        if (f.exists() && f.readLines().any { it.substringAfter(' ') == line.substringAfter(' ') }) return@runCatching  // já sabe
+        f.appendText(line + "\n")
+        if (f.length() > max) f.writeText(f.readText().takeLast(max / 2).substringAfter('\n'))
+    }
+
+    /** Linhas do logcat do jogo que indicam servidor/antitrapaça recusando valores (ex.: PBC_SHOULD_BE_LESS_THAN_EQUAL no Sonic Forces). */
+    private suspend fun serverHints(): String = call { d -> d.send("logs", quiet = true).lines }
+        .filter { l -> SERVER_WORDS.any { l.contains(it, ignoreCase = true) } }.takeLast(10).joinToString("\n") { it.removePrefix("| ").take(300) }
 
     /** Salvos, ponteiros, receitas e o que voltou ao reabrir: para a IA saber o que já foi achado. */
     fun savedContext(): String = buildString {
@@ -986,12 +1013,29 @@ class Engine private constructor(private val app: Context) {
             if (Session.aiAuto) "Criada sozinha (modo autônomo): " + withContext(Dispatchers.Main) { applyProposal(p) }
             else "Sugestão de receita mostrada para a pessoa (${items.size} salvos)."
         },
+        AiTool("aprender", "Guarda uma lição geral (vale para qualquer jogo) sobre como agir melhor: o que funcionou, o que deu errado e o que fazer " +
+            "diferente. Use no fim de cada tarefa, acertando ou errando. Ex.: 'contagem da corrida reinicia a cada partida: procure o total na classe da conta'.",
+            mapOf("licao" to "uma frase curta e geral"), listOf("licao")) { a ->
+            val l = a.optString("licao").trim()
+            if (l.length < 10) return@AiTool "Lição curta demais."
+            appendNote(lessonsFile, l, 6000)
+            Diag.add("IA aprendeu: ${l.take(200)}")
+            "Aprendido."
+        },
+        AiTool("ver_logcat_jogo", "Mostra as últimas linhas do logcat do jogo (opcionalmente só as que têm certas palavras). Use depois de uma edição para ver se o " +
+            "servidor ou o antitrapaça recusou (erros de validação, 'cheat', 'invalid', 'mismatch').",
+            mapOf("palavras" to "opcional: palavras para filtrar, separadas por espaço"), emptyList()) { a ->
+            val words = searchWords(a.optString("palavras"))
+            val lines = call { d -> d.send("logs", quiet = true).lines }.map { it.removePrefix("| ") }.filterNot(::isLogNoise)
+            val shown = if (words.isEmpty()) lines.takeLast(40) else lines.filter { l -> words.any { l.contains(it, ignoreCase = true) } }.takeLast(40)
+            if (shown.isEmpty()) "Nada no logcat do jogo${if (words.isEmpty()) "" else " com essas palavras"}." else shown.joinToString("\n") { it.take(300) }
+        },
         AiTool("anotar", "Guarda uma anotação sobre este jogo para as próximas conversas (ex.: Ouro = PlayerData.Gold, Float, cifrado).",
             mapOf("nota" to "uma linha curta"), listOf("nota")) { a ->
             val f = notesFile ?: return@AiTool "Nenhum jogo escolhido."
             val note = a.optString("nota").replace('\n', ' ').trim().take(300)
             if (note.isEmpty()) return@AiTool "Nota vazia."
-            f.appendText("${java.text.SimpleDateFormat("dd/MM", java.util.Locale.US).format(java.util.Date())} $note\n")
+            appendNote(f, note, 8000)
             "Anotado."
         },
         AiTool("esperar_mudanca", "Espera a pessoa mexer no jogo (gastar, ganhar, levar dano) e refina sozinho quando os resultados mudarem — " +
@@ -1156,6 +1200,8 @@ class Engine private constructor(private val app: Context) {
         write(u.addr, u.type, u.old)
         storeSaved()
         Diag.add("Desfeita a edição da IA em ${u.label}: voltou para ${u.old}")
+        // erro dela: fica anotado para não repetir
+        notesFile?.let { appendNote(it, "ERRO: a pessoa desfez a edição de ${u.label} (0x${u.addr} ${u.type}); não era o valor certo", 8000) }
         return "${u.label} voltou para ${u.old}."
     }
 
@@ -2355,6 +2401,9 @@ internal fun readable(value: String, cipherType: String): String? {
     return if (abs == 0.0 || abs in 1e-6..1e15) java.math.BigDecimal(short).stripTrailingZeros().toPlainString() else short
 }
 
+/** Logcat do jogo: sinais de servidor ou antitrapaça conferindo valores. */
+private val SERVER_WORDS = listOf("PBC_", "cheat", "hack", "tamper", "invalid value", "validation", "mismatch", "rejected", "banned", "integrity", "speedhack")
+
 private val PROBLEM_WORDS = listOf("erro", "falha", "aviso", "fechou", "exception")
 
 private val LOGCAT_PREFIX = Regex("""^\S+ \S+\s+\d+\s+\d+ """)
@@ -2376,7 +2425,7 @@ internal fun crashesOf(lines: List<String>, pkg: String?): List<String> {
 
 private fun dedupe(lines: List<String>): List<String> {
     val seen = HashSet<String>()
-    val out = lines.map { "| " + it.removePrefix("| ") }.filter { seen.add(it.removePrefix("| ").replace(LOGCAT_PREFIX, "")) }
+    val out = lines.filterNot(::isLogNoise).map { "| " + it.removePrefix("| ") }.filter { seen.add(it.removePrefix("| ").replace(LOGCAT_PREFIX, "")) }
     return if (out.size < lines.size) out + "(${lines.size - out.size} linhas repetidas omitidas)" else out
 }
 

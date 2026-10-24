@@ -1454,6 +1454,15 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                 Toggle("Modo autônomo: controlar o jogo", "A IA toca e arrasta na tela do jogo para fazer o valor mudar e acha sozinha. " +
                     "Toque bloqueado se outra coisa (compra na Play Store, anúncio) estiver na frente; mesmo assim, use em jogos sem compras " +
                     "ou com senha na Play Store. ⏹ Parar a qualquer momento.", s.aiControl) { s.aiControl = it; engine.saveSettings() }
+                // o que a IA aprendeu (lições gerais + notas deste jogo): ver e apagar
+                var showLessons by remember { mutableStateOf(false) }
+                TextButton(onClick = { showLessons = !showLessons }) { Text((if (showLessons) "▾ " else "▸ ") + "O que a IA aprendeu") }
+                if (showLessons) {
+                    val text = remember(showLessons) { engine.lessons() }
+                    Text(text.ifBlank { "Nada ainda: ela aprende uma lição no fim de cada tarefa." }, style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace, modifier = Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState()))
+                    if (text.isNotBlank()) TextButton(onClick = { engine.clearLessons(); showLessons = false }) { Text("Apagar o aprendizado") }
+                }
                 Toggle("IA pode testar valores", "Para saber se um resultado é o verdadeiro, ela escreve um valor de teste por 2 segundos e depois volta o original. " +
                     "Desligado: ela só olha.", s.aiCanTest) { s.aiCanTest = it; engine.saveSettings() }
                 if (!gemini && s.aiKey.isNotBlank()) TextButton(onClick = { s.aiKey = ""; engine.saveSettings() }) { Text("Apagar chave") }

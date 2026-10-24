@@ -45,6 +45,7 @@ class AiConversation {
     var steps by mutableStateOf(listOf<String>())
     var applied by mutableStateOf<String?>(null)
     var job: Job? = null  // a pergunta em andamento, para ⏹ Parar
+    var stats by mutableStateOf("")  // gasto da última resposta: consultas, tempo, tokens
 }
 
 object AiConversations {
@@ -91,6 +92,7 @@ fun AiBox(
             val a = runCatching { engine.askAi(chat, context, q) { st -> c.steps = c.steps + st } }
                 .getOrElse { if (it is kotlinx.coroutines.CancellationException) "⏹ Parado." else it.message ?: "Erro" }
             c.turns = (c.turns + (q to a)).takeLast(6)
+            c.stats = Assistant.lastStats
             c.loading = false
         }
     }
@@ -135,6 +137,7 @@ fun AiBox(
                 if (cited.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     cited.forEach { n -> AssistChip(onClick = { onOpen(n) }, label = { Text("Abrir ${n.substringAfterLast('.')}", maxLines = 1) }) }
                 }
+                if (c.stats.isNotEmpty()) Text(c.stats, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 TextButton(onClick = {
                     ctx.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Resposta da IA", a))
                 }) { Text("⧉ Copiar resposta") }

@@ -87,11 +87,23 @@ com "controlar o jogo", você mesmo faz o valor mudar: ver_tela, ache um botão 
 número novo no print e refinar com ele; repita até sobrar 1. Jogue com cuidado: prefira ações baratas e reversíveis, nunca
 toque em compras com dinheiro real, preços em moeda real, assinaturas, Play Store, nem em "vender tudo"/"excluir". Se não achar
 um jeito seguro de mudar o valor, pare e diga à pessoa o que fazer.
+Aprenda e melhore: leia "Suas lições" e "Suas anotações" no contexto antes de agir e siga o que elas dizem (uma ERRO anotada é
+um endereço que você já errou: não repita). No fim de cada tarefa, acertando ou errando, chame aprender com uma lição curta e geral
+sobre como agir melhor (o que encurtou o caminho, o que te enganou), sem repetir lição que já existe; e anotar com o que vale só
+para este jogo. Se "Sinais de que o servidor confere valores" aparecer, ou depois de editar o ver_logcat_jogo mostrar recusa,
+avise que editar esse valor não vai valer (o jogo é conferido pelo servidor) e anote.
 Use ver_salvos para saber o que já foi achado e se os ponteiros voltaram. Quando descobrir algo que vale para a próxima vez
 (classe e campo de um recurso, tipo do valor, se é cifrado), use anotar. Para deixar várias edições prontas para toda vez que o
 jogo abrir, use propor_receita com os salvos."""
 
     @Volatile private var lowThinking = true
+
+    // gasto da última pergunta, para a caixa mostrar (consultas, tempo, tokens)
+    @Volatile private var statRounds = 0
+    @Volatile private var statIn = 0L
+    @Volatile private var statOut = 0L
+    @Volatile var lastStats = ""
+        private set
 
     private const val MAX_ROUNDS = 20  // chamadas de ferramenta por pergunta, para não ficar em volta para sempre
 
@@ -111,9 +123,11 @@ jogo abrir, use propor_receita com os salvos."""
         Diag.ai("==== PERGUNTA (${Session.aiProvider}, ${if (Session.aiProvider == "gemini") Session.geminiModel else "claude-opus-5-5"}${if (chat.started) ", continuando" else ""}): $question")
         if (!chat.started) Diag.ai("contexto (${prompt.length} letras):\n${prompt.take(6000)}${if (prompt.length > 6000) "\n…(cortado)" else ""}")
         val t0 = System.currentTimeMillis()
+        statRounds = 0; statIn = 0; statOut = 0
         val answer = if (Session.aiProvider == "gemini") askGemini(Session.geminiKey, chat, prompt, tools, onStep)
         else askClaude(Session.aiKey, chat, prompt, tools, onStep)
-        Diag.ai("==== RESPOSTA (${(System.currentTimeMillis() - t0) / 1000} s):\n$answer")
+        lastStats = "$statRounds consultas · ${(System.currentTimeMillis() - t0) / 1000} s · ${(statIn + statOut + 500) / 1000} mil tokens"
+        Diag.ai("==== RESPOSTA ($lastStats):\n$answer")
         return answer
     }
 
@@ -163,6 +177,7 @@ jogo abrir, use propor_receita com os salvos."""
                     .build()
                 val c0 = System.currentTimeMillis()
                 val r = client.beta().messages().create(params)
+                statRounds++; statIn += r.usage().inputTokens(); statOut += r.usage().outputTokens()
                 Diag.ai("API Claude rodada ${it + 1}: ${System.currentTimeMillis() - c0} ms, parada ${r.stopReason().orElse(null)}, tokens entrada ${r.usage().inputTokens()} " +
                     "(cache ${r.usage().cacheReadInputTokens().orElse(0L)}), saída ${r.usage().outputTokens()}")
                 if (r.stopReason().orElse(null) == BetaStopReason.REFUSAL) {
@@ -257,6 +272,8 @@ jogo abrir, use propor_receita com os salvos."""
                     http("models/${Session.geminiModel.trim()}:generateContent", Session.geminiKey, body).let { code = it.first; reply = it.second }
                 }
                 val j = runCatching { JSONObject(reply) }.getOrNull() ?: return "Gemini respondeu $code sem conteúdo.".also { drop(); Diag.ai("API Gemini: código $code sem JSON: ${reply.take(500)}") }
+                statRounds++
+                j.optJSONObject("usageMetadata")?.let { u -> statIn += u.optInt("promptTokenCount"); statOut += u.optInt("candidatesTokenCount") }
                 Diag.ai("API Gemini rodada ${it + 1} (${Session.geminiModel}): código $code, tokens ${j.optJSONObject("usageMetadata")?.let { u -> "entrada ${u.optInt("promptTokenCount")}, saída ${u.optInt("candidatesTokenCount")}" } ?: "?"}" +
                     (j.optJSONObject("error")?.let { e -> ", erro ${e.optString("status")}: ${e.optString("message").take(300)}" } ?: "") +
                     (j.optJSONArray("candidates")?.optJSONObject(0)?.optString("finishReason")?.let { f -> ", fim $f" } ?: ""))

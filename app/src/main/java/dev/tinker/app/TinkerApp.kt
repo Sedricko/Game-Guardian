@@ -86,7 +86,7 @@ object Diag {
     /** Logcat do próprio Tinker (o app lê o dele sem root): erros internos do Android, do Compose e das bibliotecas. */
     fun ownLogcat(): String = runCatching {
         val p = ProcessBuilder("logcat", "-d", "-t", "300", "--pid=${android.os.Process.myPid()}").redirectErrorStream(true).start()
-        p.inputStream.bufferedReader().use { it.readText() }.also { p.waitFor() }
+        p.inputStream.bufferedReader().use { it.readLines() }.also { p.waitFor() }.filterNot(::isLogNoise).joinToString("\n")
     }.getOrElse { "(não deu para ler: ${it.message})" }
 
     /** O registro para o relatório: o logcat copiado no meio é encurtado, senão ele empurra as ações do Tinker para fora. */
@@ -113,3 +113,11 @@ internal fun compactLog(lines: List<String>, keep: Int = 40): List<String> {
     if (cut > 0) out += "($cut linhas do logcat omitidas aqui; veja a seção Logcat do jogo)"
     return out
 }
+
+/** Avisos do Android que aparecem o tempo todo e não dizem nada (escondiam os erros de verdade no relatório). */
+internal fun isLogNoise(line: String) = LOG_NOISE.any { it in line }
+
+private val LOG_NOISE = listOf(
+    "Choreographer: Frame time is", "IInputConnectionWrapper", "ClassLoaderContext classpath", "Not starting debugger since process cannot load the jdwp",
+    "A resource failed to call end", "AppMetrica", "Event saved to db", "Event received on service", "UserMessagingPlatform: Stored info not exists",
+)
