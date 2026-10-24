@@ -115,6 +115,8 @@ fun TinkerPanel(
     var picking by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val run = rememberRun(engine) { error = it }
+    // abriu o Tinker com o jogo da última vez aberto: já escolhe ele (e os salvos voltam sozinhos)
+    LaunchedEffect(Unit) { if (s.process == null) runCatching { engine.followGame(startDaemon = true) }.getOrNull()?.let { s.status = it } }
 
     Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
         Column {
@@ -642,7 +644,7 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
                 checked = key in selected, onCheck = { selected = if (it) selected + key else selected - key }, title = item.name,
                 trailing = {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(start = 12.dp)) {
-                        Switch(checked = item.frozen, onCheckedChange = { engine.setFrozen(listOf(item), it) }, enabled = !old)
+                        Switch(checked = item.frozen, onCheckedChange = { engine.setFrozen(listOf(item), it) }, enabled = !old || item.frozen)
                         Text("Congelar", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 },
@@ -965,7 +967,8 @@ private val HELP = listOf(
     "Ponteiros" to "Como no Cheat Engine, mas sozinho: ao salvar, o Tinker já busca os ponteiros e aprende a assinatura (bytes em volta). " +
         "Ao reabrir o jogo e escolher ele no Tinker, cada salvo volta sozinho (ponteiro → caminhos guardados → assinatura); os da mesma ficha " +
         "vêm junto pelo offset. Sobrou dúvida entre vários caminhos? Abra o salvo, digite o valor que o jogo mostra e toque em Filtrar pelo valor. " +
-        "Salvo com ⚠ é de outra vez do jogo e não é lido nem escrito até voltar. " +
+        "Salvo com ⚠ é de outra vez do jogo e não é lido nem escrito até voltar; se estava congelado, volta congelado. " +
+        "Com o Tinker aberto, quando o jogo reabre ele é escolhido de novo sozinho. " +
         "Sem nenhum caminho? Aumente os níveis ou a distância, ou desligue \"Ponteiros só nas libs do jogo\" em Ajustes.",
     "Reportar um problema" to "Na aba Registro, toque em Compartilhar relatório e envie o arquivo .txt. Ele tem tudo que é preciso para investigar.",
 )

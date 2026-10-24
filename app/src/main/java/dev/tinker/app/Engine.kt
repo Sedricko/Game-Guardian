@@ -105,6 +105,7 @@ class Engine private constructor(private val app: Context) {
     private var savedPkg: String? = null
     private val savedFile get() = File(app.filesDir, savedPkg?.let { "saved-$it.json" } ?: "saved.json")
     private val historyFile get() = File(app.filesDir, "history.txt")
+    private val lastGameFile get() = File(app.filesDir, "last-game.txt")
     private var inFile = false  // busca desconhecida ainda no arquivo do daemon
     private var steps = 0  // etapas da busca atual, para o registro
 
@@ -112,6 +113,13 @@ class Engine private constructor(private val app: Context) {
         loadSaved()
         loadHistory()
         scope.launch { freezeLoop() }
+        // o jogo reabriu (PID novo): escolhe de novo sozinho e os salvos voltam pela restauração
+        scope.launch {
+            while (true) {
+                delay(3000)
+                if (!Session.busy) runCatching { followGame(startDaemon = false) }.getOrNull()?.let { Session.status = it }
+            }
+        }
     }
 
     private fun Daemon.send(command: String, quiet: Boolean = false): Daemon.Reply {
@@ -152,7 +160,8 @@ class Engine private constructor(private val app: Context) {
         if (closedPid == p.pid) return
         closedPid = p.pid
         Session.paused = false
-        Session.saved.replaceAll { it.copy(frozen = false) }
+        // salvos com pid continuam congelados: ficam parados até voltar sozinhos quando o jogo reabrir
+        Session.saved.replaceAll { if (it.pid == 0) it.copy(frozen = false) else it }
         Session.status = "O jogo fechou. Veja a aba Registro para o motivo."
         Diag.add("=== O jogo ${p.label} (PID ${p.pid}) fechou. Falhas registradas pelo Android: ===")
         runCatching { dedupe(d.call("crashlog").lines).forEach(Diag::add) }
@@ -194,8 +203,29 @@ class Engine private constructor(private val app: Context) {
         }.sortedBy { it.label.lowercase() }
     }
 
+    /**
+     * O jogo da última vez está aberto, ou reabriu com outro PID? Escolhe ele sozinho.
+     * startDaemon=false só olha se o daemon já está rodando (não pede root sem o usuário abrir o Tinker).
+     */
+    suspend fun followGame(startDaemon: Boolean): String? {
+        if (daemon == null && !startDaemon) return null
+        val pkg = Session.process?.pkg ?: runCatching { lastGameFile.readText().trim() }.getOrNull()?.takeIf { it.isNotEmpty() } ?: return null
+        val pid = call { d ->
+            d.send("ps", quiet = true).lines.firstNotNullOfOrNull { l -> l.substringBefore(' ').toIntOrNull()?.takeIf { l.substringAfter(' ') == pkg } }
+        } ?: return null
+        if (pid == Session.process?.pid) return null
+        val pm = app.packageManager
+        val info = runCatching { pm.getApplicationInfo(pkg, 0) }.getOrNull() ?: return null
+        Diag.add(if (Session.process == null) "O jogo da última vez está aberto: escolhido sozinho" else "O jogo reabriu (PID $pid): escolhido de novo sozinho")
+        val msg = attach(GameProcess(pid, pkg, pm.getApplicationLabel(info).toString(), info.loadIcon(pm).toImageBitmap()))
+        Session.count = null
+        Session.results = emptyList()
+        return msg
+    }
+
     suspend fun attach(p: GameProcess): String = call { d ->
         Diag.add("Jogo escolhido: ${p.label} (${p.pkg}, PID ${p.pid})")
+        runCatching { lastGameFile.writeText(p.pkg) }
         d.send("attach ${p.pid}")
         Session.process = p
         Session.paused = false
@@ -783,7 +813,7 @@ class Engine private constructor(private val app: Context) {
     private fun loadSaved() = runCatching {
         if (!savedFile.exists()) return@runCatching
         val a = JSONArray(savedFile.readText())
-        for (i in 0 until a.length()) Session.saved.add(a.getJSONObject(i).toSaved().copy(frozen = false))
+        for (i in 0 until a.length()) Session.saved.add(a.getJSONObject(i).toSaved().let { if (it.pid == 0) it.copy(frozen = false) else it })
     }
 
     private fun storeSaved() = runCatching {
