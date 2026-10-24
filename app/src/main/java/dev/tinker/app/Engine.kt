@@ -984,7 +984,8 @@ class Engine private constructor(private val app: Context) {
             val items = matchSaved(a.optString("salvos"), Session.saved.toList()).filter { it.anchor.isEmpty() }.take(5)
             if (items.isEmpty()) return@AiTool "Nenhum salvo com esses nomes (os que seguem outro pelo offset já vêm junto com ele)."
             aiBusy {
-                items.joinToString("\n") { item -> "${label(item)}: " + runCatching { scanPointers(item) }.getOrElse { "erro: ${it.message}" } } +
+                // map (inline) e não joinToString { }: o lambda do joinToString não pode chamar função suspend
+                items.map { item -> "${label(item)}: " + runCatching { scanPointers(item) }.getOrElse { "erro: ${it.message}" } }.joinToString("\n") +
                     "\n\nEstado agora:\n" + items.mapNotNull { i -> Session.saved.firstOrNull { it.id == i.id } }.joinToString("\n") { savedLine(it) }
             }
         },
