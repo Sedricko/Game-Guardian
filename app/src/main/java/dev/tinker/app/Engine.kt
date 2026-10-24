@@ -110,8 +110,34 @@ data class Recipe(val id: String = java.util.UUID.randomUUID().toString(), val n
 data class FichaRow(val addr: String, val off: Long, val type: String, val label: String, val value: String)
 data class Recent(val types: Set<String>, val value: String)
 
-/** Edição sugerida pela IA: só acontece quando você toca em Aplicar. */
-data class AiProposal(val addr: String, val type: String, val value: String, val freeze: Boolean, val label: String, val why: String)
+/** Edição sugerida pela IA: só acontece quando você toca em Aplicar. recipe: ids dos salvos (sugestão de receita, não de edição). */
+data class AiProposal(
+    val addr: String, val type: String, val value: String, val freeze: Boolean, val label: String, val why: String,
+    val recipe: List<String> = emptyList(),
+)
+
+/** O que a IA aplicou, para desfazer: valor de antes e o salvo que a edição criou (sai junto). */
+data class AiUndo(val addr: String, val type: String, val old: String, val label: String, val savedId: String?)
+
+/** Jeito de comparar pedido pela IA (aumentou, diminuiu, igual, mudou, com ou sem quanto) no comando do daemon. */
+internal fun compareOp(how: String, by: String): String? {
+    val h = how.trim().lowercase()
+    val op = when {
+        h.startsWith("aument") || h == "inc" -> "inc"
+        h.startsWith("diminu") || h == "dec" -> "dec"
+        h.startsWith("igual") || h.startsWith("não mud") || h.startsWith("nao mud") || h == "same" -> "same"
+        h.startsWith("mud") || h == "changed" -> "changed"
+        else -> return null
+    }
+    return if (by.isNotBlank() && (op == "inc" || op == "dec")) op + "by" else op
+}
+
+/** Salvos citados pela IA: por nome (sem diferença de maiúsculas), endereço, campo IL2CPP ou "todos". */
+internal fun matchSaved(wanted: String, saved: List<SavedItem>): List<SavedItem> {
+    val keys = wanted.split(',', ';').map { it.trim().lowercase().removePrefix("0x") }.filter { it.isNotEmpty() }
+    if (keys.any { it == "todos" }) return saved.filter { !it.temp }
+    return saved.filter { s -> !s.temp && keys.any { k -> k == s.name.lowercase() || k == s.addr || k == s.il2.lowercase() || k == s.il2.substringBeforeLast('+').substringAfterLast('.').lowercase() } }
+}
 
 /** Estado da tela; fica fora da Activity para a janela flutuante e a Activity verem o mesmo. */
 object Session {
@@ -142,6 +168,8 @@ object Session {
     val saved = mutableStateListOf<SavedItem>()
     val recipes = mutableStateListOf<Recipe>()
     val aiProposals = mutableStateListOf<AiProposal>()
+    val aiUndo = mutableStateListOf<AiUndo>()
+    var aiAsk by mutableStateOf<Pair<String, String>?>(null)  // pedido automático: (onde, pergunta) — a caixa ✨ daquela tela pergunta sozinha
     var engine by mutableStateOf<GameEngine?>(null)
     var aiKey by mutableStateOf("")  // chave da API do Claude para o assistente; vazia = assistente desligado
     var aiProvider by mutableStateOf("claude")  // "claude" ou "gemini"
@@ -623,16 +651,33 @@ class Engine private constructor(private val app: Context) {
 
     /**
      * Pergunta ao assistente com o contexto da tela e as ferramentas (ele mesmo procura classes, abre objetos e busca valores).
-     * O registro guarda a pergunta, as ferramentas usadas e o começo da resposta (o contexto pode ser grande).
+     * chat guarda a conversa para Continuar. O registro guarda a pergunta, as ferramentas usadas e o começo da resposta.
      */
-    suspend fun askAi(context: String, question: String, onStep: (String) -> Unit = {}): String = withContext(Dispatchers.IO) {
-        Diag.add("Assistente (${Session.aiProvider}): ${question.take(200)} (${context.length / 1024} KB de contexto)")
+    suspend fun askAi(chat: AiChat, context: suspend () -> String, question: String, onStep: (String) -> Unit = {}): String = withContext(Dispatchers.IO) {
+        Diag.add("Assistente (${Session.aiProvider}${if (chat.started) ", continuando" else ""}): ${question.take(200)}")
         withContext(Dispatchers.Main) { Session.aiProposals.clear() }
         val tools = if (Session.process != null) aiTools() else emptyList()
-        Assistant.ask(context, question, tools, onStep).also {
+        // na primeira mensagem: o que a IA anotou deste jogo em outras conversas, para não descobrir tudo de novo
+        val full: suspend () -> String = {
+            val notes = notesFile?.takeIf { it.exists() }?.readText()?.takeLast(4000).orEmpty()
+            withContext(Dispatchers.Main) { context() } + if (notes.isBlank()) "" else "\n\n=== Suas anotações deste jogo (de outras conversas) ===\n$notes"
+        }
+        Assistant.ask(chat, full, question, tools, onStep).also {
             saveSettings()  // o Gemini pode ter trocado de modelo sozinho
             Diag.add("Assistente respondeu: ${it.take(600).replace('\n', ' ')}")
         }
+    }
+
+    private val notesFile get() = savedPkg?.let { File(app.filesDir, "notas-$it.txt") }
+
+    /** Salvos, ponteiros, receitas e o que voltou ao reabrir: para a IA saber o que já foi achado. */
+    fun savedContext(): String = buildString {
+        appendLine(gameLine())
+        appendLine("Restauração: ${Session.restoreInfo.ifBlank { "nada pendente" }} · ponteiros: ${Session.pointerInfo.ifBlank { "-" }}")
+        appendLine("Salvos (${Session.saved.size}; ⚠ = de outra vez do jogo, ainda não voltou):")
+        Session.saved.forEach { appendLine((if (stale(it)) "⚠ " else "") + savedLine(it)) }
+        appendLine("Receitas (${Session.recipes.size}):")
+        Session.recipes.forEach { r -> appendLine("${r.name}${if (r.auto) " (ao abrir)" else ""}: " + r.steps.joinToString { "${it.label} = ${it.value} (${it.how})" }) }
     }
 
     private var classCache: Pair<Int, List<GameClass>>? = null
@@ -706,6 +751,35 @@ class Engine private constructor(private val app: Context) {
             withContext(Dispatchers.Main) { Session.aiProposals.add(p) }
             "Sugestão mostrada para a pessoa com o botão Aplicar."
         },
+        AiTool("busca_sem_valor", "Começa uma busca sem saber o número (barra de vida, energia): guarda a memória para comparar depois com comparar.",
+            mapOf("tipo" to "i32 (inteiro) ou f32 (decimal; barras costumam ser f32)"), emptyList()) { a ->
+            val t = a.optString("tipo").trim().takeIf { it in TYPE_SIZES && !it.startsWith("x") }
+            resultsText(startUnknown(setOfNotNull(t)))
+        },
+        AiTool("comparar", "Refina a busca pelo jeito que o valor mudou desde a última busca ou comparação (depois que a pessoa mexeu no jogo).",
+            mapOf("como" to "aumentou, diminuiu, igual ou mudou", "quanto" to "opcional: quanto aumentou ou diminuiu (ex.: 10)"), listOf("como")) { a ->
+            val op = compareOp(a.optString("como"), a.optString("quanto")) ?: return@AiTool "Use aumentou, diminuiu, igual ou mudou."
+            resultsText(compare(op, a.optString("quanto")))
+        },
+        AiTool("ver_salvos", "Mostra os salvos (com ponteiro, assinatura, histórico e se voltaram ao reabrir) e as receitas.", emptyMap(), emptyList()) { savedContext() },
+        AiTool("propor_receita", "Sugere criar uma receita com salvos (aplica tudo de uma vez, e sozinha ao abrir o jogo). Aparece um botão para a pessoa.",
+            mapOf("nome" to "nome da receita", "salvos" to "nomes ou endereços dos salvos, separados por vírgula, ou todos", "ao_abrir" to "sim para aplicar sozinha quando o jogo abrir"),
+            listOf("nome", "salvos")) { a ->
+            val items = matchSaved(a.optString("salvos"), Session.saved.toList())
+            if (items.isEmpty()) return@AiTool "Nenhum salvo com esses nomes. Veja os nomes com ver_salvos (ou aplique as edições antes)."
+            val p = AiProposal("", "", "", a.optString("ao_abrir").trim().lowercase().startsWith("s"), a.optString("nome").take(40).ifBlank { "Receita" },
+                items.joinToString { label(it) }, recipe = items.map { it.id })
+            withContext(Dispatchers.Main) { Session.aiProposals.add(p) }
+            "Sugestão de receita mostrada para a pessoa (${items.size} salvos)."
+        },
+        AiTool("anotar", "Guarda uma anotação sobre este jogo para as próximas conversas (ex.: Ouro = PlayerData.Gold, Float, cifrado).",
+            mapOf("nota" to "uma linha curta"), listOf("nota")) { a ->
+            val f = notesFile ?: return@AiTool "Nenhum jogo escolhido."
+            val note = a.optString("nota").replace('\n', ' ').trim().take(300)
+            if (note.isEmpty()) return@AiTool "Nota vazia."
+            f.appendText("${java.text.SimpleDateFormat("dd/MM", java.util.Locale.US).format(java.util.Date())} $note\n")
+            "Anotado."
+        },
         AiTool("ver_resultados", "Mostra os resultados atuais da busca, com o campo IL2CPP quando há até 20.", emptyMap(), emptyList()) { resultsText(Session.status) },
     )
 
@@ -721,18 +795,43 @@ class Engine private constructor(private val app: Context) {
         if (before != Session.geminiModel) "Chave ok: ${ms.size} modelos. Escolhido ${Session.geminiModel}." else "Chave ok: ${ms.size} modelos. Mantido ${Session.geminiModel}."
     }
 
-    /** Aplica a sugestão da IA: escreve e, se pedido, congela (vira salvo com o nome sugerido). */
+    /**
+     * Aplica a sugestão da IA. Edição: guarda o valor de antes (para desfazer), escreve e salva (congelado se pedido), e o
+     * salvo já ganha ponteiros e assinatura como qualquer outro. Receita: cria com os salvos sugeridos.
+     */
     suspend fun applyProposal(p: AiProposal): String {
-        write(p.addr, p.type, p.value)
-        if (p.freeze) {
-            addSaved(listOf(Hit(p.addr, p.type, "?", p.value)), frozen = true)
-            if (p.label.isNotBlank()) Session.saved.indexOfFirst { it.addr == p.addr && it.type == p.type }.takeIf { it >= 0 }?.let { i ->
-                Session.saved[i] = Session.saved[i].copy(name = Session.saved[i].name.ifEmpty { p.label })
-            }
+        if (p.recipe.isNotEmpty()) {
+            val items = Session.saved.filter { it.id in p.recipe }
+            if (items.isEmpty()) return "Os salvos dessa receita não existem mais."
+            val msg = createRecipe(items, p.label)
+            if (p.freeze) Session.recipes.lastOrNull()?.let { updateRecipe(it.copy(auto = true)) }
+            Session.aiProposals.remove(p)
+            Diag.add("Receita sugerida pela IA criada: ${p.label} (${items.size} salvos)")
+            return msg
         }
+        val old = call { d -> runCatching { d.send("read ${p.addr} ${p.type}", quiet = true).status }.getOrDefault("?") }
+        write(p.addr, p.type, p.value)
+        val existed = Session.saved.any { it.addr == p.addr && it.type == p.type }
+        addSaved(listOf(Hit(p.addr, p.type, "?", p.value)), frozen = p.freeze)
+        val i = Session.saved.indexOfFirst { it.addr == p.addr && it.type == p.type }
+        if (i >= 0 && p.label.isNotBlank()) Session.saved[i] = Session.saved[i].copy(name = Session.saved[i].name.ifEmpty { p.label })
+        if (old != "?") Session.aiUndo.add(0, AiUndo(p.addr, p.type, old, p.label.ifEmpty { "0x" + p.addr }, if (existed) null else Session.saved.getOrNull(i)?.id))
+        while (Session.aiUndo.size > 10) Session.aiUndo.removeAt(Session.aiUndo.lastIndex)
+        storeSaved()
         Session.aiProposals.remove(p)
-        Diag.add("Sugestão da IA aplicada: ${p.label.ifEmpty { p.addr }} = ${p.value}${if (p.freeze) " ❄" else ""} (0x${p.addr} ${p.type})")
-        return "${p.label.ifEmpty { "0x" + p.addr }} = ${p.value}" + if (p.freeze) " ❄ congelado." else "."
+        Diag.add("Sugestão da IA aplicada: ${p.label.ifEmpty { p.addr }} = ${p.value}${if (p.freeze) " ❄" else ""} (0x${p.addr} ${p.type}, antes $old)")
+        return "${p.label.ifEmpty { "0x" + p.addr }} = ${p.value}" + (if (p.freeze) " ❄ congelado" else "") + " e salvo (os ponteiros vêm sozinhos)."
+    }
+
+    /** Volta o valor de antes da edição da IA; o salvo que ela criou sai junto (e para de congelar). */
+    suspend fun undoAi(u: AiUndo): String {
+        u.savedId?.let { id -> Session.saved.removeAll { it.id == id } }
+        Session.saved.replaceAll { if (it.addr == u.addr && it.type == u.type) it.copy(frozen = false) else it }
+        write(u.addr, u.type, u.old)
+        storeSaved()
+        Session.aiUndo.remove(u)
+        Diag.add("Desfeita a edição da IA em ${u.label}: voltou para ${u.old}")
+        return "${u.label} voltou para ${u.old}."
     }
 
     private fun gameLine() = "Jogo: ${Session.process?.let { "${it.label} (${it.pkg})" } ?: "nenhum"} · motor ${Session.engine ?: "?"}"

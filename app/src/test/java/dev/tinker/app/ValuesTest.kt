@@ -165,4 +165,26 @@ class ValuesTest {
             "gemini-2.5-flash-image", "text-embedding-004", "gemini-2.5-pro"))
         assertEquals(listOf("gemini-2.5-flash", "gemini-2.0-flash", "gemini-3.0-pro", "gemini-2.5-pro", "gemini-2.5-flash-lite", "gemini-3.0-flash-preview"), got)
     }
+
+    @Test
+    fun aiCompareWords() {
+        assertEquals("inc", compareOp("aumentou", ""))
+        assertEquals("decby", compareOp("Diminuiu", "10"))
+        assertEquals("same", compareOp("não mudou", ""))
+        assertEquals("same", compareOp("igual", "5"))  // "quanto" só vale para aumentou/diminuiu
+        assertEquals("changed", compareOp("mudou", ""))
+        assertEquals(null, compareOp("talvez", ""))
+    }
+
+    @Test
+    fun aiFindsSavedByNameAddressOrField() {
+        val gold = SavedItem("7a10", "i32", "A", "100", name = "Ouro", il2 = "Game.PlayerData+18")
+        val gem = SavedItem("7a14", "i32", "A", "5", name = "Gema")
+        val copy = SavedItem("7b00", "i32", "A", "100", name = "Ouro tela", temp = true)
+        val all = listOf(gold, gem, copy)
+        assertEquals(listOf(gold, gem), matchSaved("ouro, 0x7a14", all))
+        assertEquals(listOf(gold), matchSaved("PlayerData", all))
+        assertEquals(listOf(gold, gem), matchSaved("todos", all))  // cópia de tela nunca entra
+        assertEquals(emptyList<SavedItem>(), matchSaved("vida", all))
+    }
 }

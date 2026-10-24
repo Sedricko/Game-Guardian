@@ -18,6 +18,19 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 
+/** Conversa com a IA: guarda as mensagens para "Continuar" seguir de onde parou (só cresce, nunca reescreve). */
+class AiChat {
+    internal var provider = ""
+    internal val claude = mutableListOf<BetaMessageParam>()
+    internal var gemini = JSONArray()
+    val started get() = claude.isNotEmpty() || gemini.length() > 0
+
+    fun reset() {
+        claude.clear()
+        gemini = JSONArray()
+    }
+}
+
 /** Ferramenta que a IA pode chamar sozinha: parâmetros são todos texto (nome → descrição). */
 class AiTool(val name: String, val description: String, val params: Map<String, String>, val required: List<String>, val run: suspend (JSONObject) -> String)
 
@@ -38,16 +51,25 @@ ver a ficha de um endereço, buscar e refinar valores. Use-as antes de responder
 mesmo pode ver. Se a pessoa disser um valor que vê no jogo (ex.: tenho 1250 de ouro), busque esse valor e veja os campos dos
 resultados. Valores que andam juntos (ouro, gema, nível) dá para buscar em grupo: 1250;30;7::128.
 Você não edita nada direto: quando tiver certeza do campo, use propor_edicao com o endereço e o tipo exatos (aparece um botão
-Aplicar para a pessoa) e explique na resposta qual classe e campo é. Se não tiver certeza, diga o que falta para confirmar."""
+Aplicar para a pessoa) e explique na resposta qual classe e campo é. Se não tiver certeza, diga o que falta para confirmar.
+Quando precisar que o valor mude no jogo (para refinar ou comparar), peça para a pessoa fazer isso e tocar em Continuar: a conversa
+segue de onde parou. Sem saber o número (barra de vida), use busca_sem_valor e depois comparar.
+Use ver_salvos para saber o que já foi achado e se os ponteiros voltaram. Quando descobrir algo que vale para a próxima vez
+(classe e campo de um recurso, tipo do valor, se é cifrado), use anotar. Para deixar várias edições prontas para toda vez que o
+jogo abrir, use propor_receita com os salvos."""
 
     private const val MAX_ROUNDS = 12  // chamadas de ferramenta por pergunta, para não ficar em volta para sempre
 
     /** O provedor escolhido tem chave? */
     fun ready() = if (Session.aiProvider == "gemini") Session.geminiKey.isNotBlank() else Session.aiKey.isNotBlank()
 
-    suspend fun ask(context: String, question: String, tools: List<AiTool>, onStep: (String) -> Unit): String {
-        val prompt = "$context\n\n=== Pergunta ===\n$question"
-        return if (Session.aiProvider == "gemini") askGemini(Session.geminiKey, prompt, tools, onStep) else askClaude(Session.aiKey, prompt, tools, onStep)
+    /** Na primeira mensagem vai o contexto da tela; nas seguintes (Continuar), só o que a pessoa disse. */
+    suspend fun ask(chat: AiChat, context: suspend () -> String, question: String, tools: List<AiTool>, onStep: (String) -> Unit): String {
+        if (chat.provider != Session.aiProvider) { chat.reset(); chat.provider = Session.aiProvider }
+        val prompt = if (chat.started) question else "${context()}\n\n=== Pergunta ===\n$question"
+        val answer = if (Session.aiProvider == "gemini") askGemini(Session.geminiKey, chat, prompt, tools, onStep)
+        else askClaude(Session.aiKey, chat, prompt, tools, onStep)
+        return answer
     }
 
     /** Roda a ferramenta pedida; erro vira texto para a IA (ela pode tentar de outro jeito). */
@@ -60,7 +82,7 @@ Aplicar para a pessoa) e explique na resposta qual classe e campo é. Se não ti
     }
 
     /** Claude pelo SDK oficial, com as ferramentas; erros viram texto para a tela (chave errada, sem internet, limite). */
-    private suspend fun askClaude(key: String, prompt: String, tools: List<AiTool>, onStep: (String) -> Unit): String {
+    private suspend fun askClaude(key: String, chat: AiChat, prompt: String, tools: List<AiTool>, onStep: (String) -> Unit): String {
         if (key.isBlank()) return "Coloque a chave da API do Claude em Ajustes → Assistente (IA)."
         val client = AnthropicOkHttpClient.builder().apiKey(key.trim()).build()
         val defs = tools.map { t ->
@@ -71,7 +93,9 @@ Aplicar para a pessoa) e explique na resposta qual classe e campo é. Se não ti
             ).build()
         }
         // só cresce (mensagens novas no fim): o pensamento do modelo e o cache continuam valendo entre as rodadas
-        val messages = mutableListOf(BetaMessageParam.builder().role(BetaMessageParam.Role.USER).content(prompt).build())
+        val messages = chat.claude
+        val before = messages.size
+        messages += BetaMessageParam.builder().role(BetaMessageParam.Role.USER).content(prompt).build()
         return try {
             repeat(MAX_ROUNDS) {
                 val params = MessageCreateParams.builder()
@@ -102,12 +126,16 @@ Aplicar para a pessoa) e explique na resposta qual classe e campo é. Se não ti
             }
             "Parei depois de $MAX_ROUNDS consultas sem chegar a uma resposta. Tente uma pergunta mais específica."
         } catch (e: UnauthorizedException) {
+            while (messages.size > before) messages.removeAt(messages.lastIndex)  // a pergunta que falhou não fica na conversa
             "Chave da API inválida. Confira em Ajustes → Assistente (IA)."
         } catch (e: RateLimitException) {
+            while (messages.size > before) messages.removeAt(messages.lastIndex)
             "Limite de uso da API atingido. Espere um pouco e tente de novo."
         } catch (e: AnthropicServiceException) {
+            while (messages.size > before) messages.removeAt(messages.lastIndex)
             "A API respondeu com erro ${e.statusCode()}: ${e.message}"
         } catch (e: AnthropicIoException) {
+            while (messages.size > before) messages.removeAt(messages.lastIndex)
             "Sem conexão com a API: ${e.message}"
         } finally {
             client.close()
@@ -117,7 +145,7 @@ Aplicar para a pessoa) e explique na resposta qual classe e campo é. Se não ti
     // Gemini: HTTP direto (sem biblioteca); o Google troca os nomes dos modelos, então o nome fica em Ajustes
     private const val GEMINI = "https://generativelanguage.googleapis.com/v1beta/"
 
-    private suspend fun askGemini(key: String, prompt: String, tools: List<AiTool>, onStep: (String) -> Unit): String {
+    private suspend fun askGemini(key: String, chat: AiChat, prompt: String, tools: List<AiTool>, onStep: (String) -> Unit): String {
         if (key.isBlank()) return "Coloque a chave do Gemini em Ajustes → Assistente (IA)."
         val decls = JSONArray().apply {
             tools.forEach { t ->
@@ -126,7 +154,10 @@ Aplicar para a pessoa) e explique na resposta qual classe e campo é. Se não ti
                     .put("parameters", JSONObject().put("type", "OBJECT").put("properties", props).put("required", JSONArray(t.required))))
             }
         }
-        val contents = JSONArray().put(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", prompt))))
+        val contents = chat.gemini
+        val before = contents.length()
+        contents.put(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", prompt))))
+        fun drop() { while (contents.length() > before) contents.remove(contents.length() - 1) }  // pergunta que falhou sai da conversa
         return try {
             repeat(MAX_ROUNDS) {
                 val body = JSONObject()
@@ -141,16 +172,17 @@ Aplicar para a pessoa) e explique na resposta qual classe e campo é. Se não ti
                     Session.geminiModel = m
                     http("models/$m:generateContent", key, body).let { code = it.first; reply = it.second }
                 }
-                val j = runCatching { JSONObject(reply) }.getOrNull() ?: return "Gemini respondeu $code sem conteúdo."
+                val j = runCatching { JSONObject(reply) }.getOrNull() ?: return "Gemini respondeu $code sem conteúdo.".also { drop() }
                 j.optJSONObject("error")?.let { e ->
+                    drop()
                     return when (code) {
                         400, 401, 403 -> "Gemini recusou a chave ou o pedido: ${e.optString("message")}"
                         429 -> "Limite do Gemini atingido (no gratuito há limite por minuto e por dia). Espere e tente de novo."
                         else -> "Gemini respondeu com erro $code: ${e.optString("message")}"
                     }
                 }
-                j.optJSONObject("promptFeedback")?.optString("blockReason")?.takeIf { it.isNotEmpty() }?.let { return "O Gemini não respondeu essa pergunta ($it)." }
-                val content = j.optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content") ?: return "Sem resposta."
+                j.optJSONObject("promptFeedback")?.optString("blockReason")?.takeIf { it.isNotEmpty() }?.let { drop(); return "O Gemini não respondeu essa pergunta ($it)." }
+                val content = j.optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content") ?: return "Sem resposta.".also { drop() }
                 // a resposta volta inteira (com a assinatura do pensamento), senão o Gemini perde o fio
                 contents.put(content)
                 val parts = content.optJSONArray("parts") ?: JSONArray()
@@ -167,6 +199,7 @@ Aplicar para a pessoa) e explique na resposta qual classe e campo é. Se não ti
             }
             "Parei depois de $MAX_ROUNDS consultas sem chegar a uma resposta. Tente uma pergunta mais específica."
         } catch (e: java.io.IOException) {
+            drop()
             "Sem conexão com o Gemini: ${e.message}"
         }
     }

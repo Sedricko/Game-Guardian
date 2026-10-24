@@ -144,6 +144,11 @@ fun TinkerPanel(
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(onClick = { s.status = engine.relaunch(); if (overlay) onMinimize() }) { Text("Reabrir") }
                             TextButton(onClick = { s.gameGone = null }) { Text("Agora não") }
+                            // queda: a IA lê o registro e explica
+                            if (!s.gameGoneByUser && Assistant.ready()) TextButton(onClick = {
+                                s.tab = TABS.indexOf("Registro")
+                                s.aiAsk = "registro" to "O jogo fechou sozinho. Veja no registro por quê, se o Tinker teve culpa e o que fazer."
+                            }) { Text("✨ Por quê?") }
                         }
                     }
                 }
@@ -410,6 +415,10 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                 // com resultados: refinar pelo jeito que mudou, sem precisar do número
                 if ((s.count ?: 0) > 0) CompareButtons(engine, enabled, run)
                 Text(s.status, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                // busca deu 0: a IA investiga sozinha por quê (e tenta achar)
+                if (s.count == 0L && s.process != null && Assistant.ready()) TextButton(onClick = {
+                    s.aiAsk = "busca" to "A busca não achou o valor. Descubra por quê e tente achar você mesmo (outro tipo, faixa, grupo, sem valor ou pelo nome da classe)."
+                }) { Text("✨ Por que não achou? A IA tenta achar") }
                 // o resto fica recolhido: a tela pequena do menu flutuante sobra para os resultados
                 TextButton(onClick = { more = !more }) { Text((if (more) "▾ " else "▸ ") + "Mais formas de buscar") }
                 if (more) {
@@ -419,8 +428,8 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                 }
                 if (s.process != null) AiBox(
                     engine, "Perguntar à IA sobre esta busca",
-                    listOf("Qual desses é o valor certo?", "Por que a busca não acha o valor?", "Qual o próximo passo?"),
-                    context = { engine.searchContext(names) },
+                    listOf("Qual desses é o valor certo?", "Por que a busca não acha o valor?", "Qual o próximo passo?", "Me guie na busca sem valor (barra de vida)"),
+                    context = { engine.searchContext(names) }, key = "busca",
                 )
             }
         }
@@ -699,8 +708,16 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
             if (s.restoreInfo.isNotEmpty()) Text(s.restoreInfo, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 4.dp))
             if (s.process != null && s.saved.any(engine::stale)) {
                 TextButton(onClick = { run { engine.retryNow() } }, enabled = !s.busy) { Text("↻ Procurar os salvos ⚠ agora") }
+                if (Assistant.ready()) TextButton(onClick = {
+                    s.aiAsk = "salvos" to "Alguns salvos (⚠) não voltaram ao reabrir o jogo. Ache cada um de novo (pela classe, ponteiro, grupo ou busca) e proponha as edições."
+                }) { Text("✨ Achar de novo com a IA") }
             }
             Recipes(engine, run, onInfo = { info = it })
+            if (s.process != null) AiBox(
+                engine, "Perguntar à IA sobre os salvos",
+                listOf("Os ponteiros estão bons?", "Crie uma receita com os salvos", "Por que algum salvo não voltou?"),
+                context = { engine.savedContext() }, key = "salvos",
+            )
         }
         if (s.process == null) {
             item {
@@ -1485,8 +1502,10 @@ private val HELP = listOf(
         "o que corta milhares de resultados soltos. Funciona em qualquer jogo, com ou sem IL2CPP.",
     "Assistente (IA)" to "Em Ajustes → Assistente (IA), escolha Claude ou Gemini e coloque a chave (a do Gemini é grátis em aistudio.google.com). Depois, toque em ✨: na Busca, qual resultado é o certo e o próximo passo; na lista de classes, pergunte onde " +
         "está o valor (as classes citadas viram atalho para abrir); na ficha, o que cada campo faz; no Registro, o que deu errado. " +
-        "A IA também olha a memória sozinha (🔧): procura classes, abre objetos com os valores, busca (inclusive em grupo) e refina. " +
-        "Ela não edita sozinha: quando acha o campo, aparece um botão Aplicar com a edição sugerida (e ❄ se for para congelar). " +
+        "A IA também olha a memória sozinha (🔧): procura classes, abre objetos com os valores, busca (inclusive em grupo e sem valor), " +
+        "refina, compara e vê os salvos. Ela não edita sozinha: quando acha o campo, aparece Aplicar (escreve e salva, com ponteiros; ❄ congela) " +
+        "e depois ↶ Desfazer; para receitas, Criar. Quando ela pedir para mexer no jogo, faça e toque em Continuar. Ela anota o que descobre " +
+        "de cada jogo e usa na próxima vez. Também aparece sozinha: busca deu 0, jogo fechou, salvo não voltou. " +
         "Só o que está na tela e o que ela consulta é enviado, e só quando você toca em Perguntar. Precisa de internet; no Claude cada pergunta é cobrada; no Gemini gratuito há limite por dia.",
     "Reportar um problema" to "Na aba Registro, toque em Compartilhar relatório e envie o arquivo .txt. Ele tem tudo que é preciso para investigar.",
 )
@@ -1604,7 +1623,7 @@ private fun LogTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, onE
         AiBox(
             engine, "Analisar o registro com IA",
             listOf("O que aconteceu? Tem algum problema?", "Por que a busca não achou o valor?", "Que melhoria o Tinker precisa com base nisso?"),
-            context = { engine.reportContext() },
+            context = { engine.reportContext() }, key = "registro",
         )
         if (working) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
         info?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp)) }
