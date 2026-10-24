@@ -502,6 +502,7 @@ private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
         }
         TypeChips(type) { t -> s.view = center to t }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        if (center != "0") NearSearch(engine, center, type, onError = { error = it })
         if (center != "0") {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { shift-- }) { Text("▲ Anteriores") }
@@ -523,6 +524,69 @@ private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
                     if (editing == row.addr) {
                         InlineEditor(row.value, "Novo valor (${TYPE_NAMES[type]})", onSave = { v -> editing = null; run { engine.write(row.addr, type, v) } }, onCancel = { editing = null }) {
                             TextButton(onClick = { engine.addSaved(listOf(row.copy(region = "?"))); editing = null }) { Text("Salvar") }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Busca perto: valores (um ou vários com ;) nas N linhas acima e abaixo do endereço aberto. */
+@Composable
+private fun NearSearch(engine: Engine, center: String, type: String, onError: (String) -> Unit) {
+    val s = Session
+    val scope = rememberCoroutineScope()
+    var values by remember { mutableStateOf("") }
+    var radius by remember { mutableStateOf("100") }
+    var found by remember(center, type) { mutableStateOf<List<Hit>?>(null) }
+    var open by remember { mutableStateOf<String?>(null) }
+    val size = TYPE_SIZES.getValue(type)
+    Panel {
+        Text("Buscar perto", style = MaterialTheme.typography.titleSmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = values, onValueChange = { values = it }, label = { Text("Valores (ex.: 50;75)") },
+                singleLine = true, modifier = Modifier.weight(2f),
+            )
+            OutlinedTextField(
+                value = radius, onValueChange = { radius = it.filter(Char::isDigit) }, label = { Text("± linhas") },
+                singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f),
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = {
+                scope.launch {
+                    runCatching { found = engine.searchNear(center, type, radius.toIntOrNull() ?: 100, values) }
+                        .onFailure { onError(it.message ?: "Erro") }
+                }
+            }, enabled = values.isNotBlank()) { Text("Buscar ${TYPE_NAMES[type]}") }
+            if (found != null) TextButton(onClick = { found = null }) { Text("Limpar") }
+        }
+        found?.let { list ->
+            Text(
+                when {
+                    list.isEmpty() -> "Nada encontrado. Tente outro tipo ou aumente as linhas."
+                    list.size > 50 -> "${list.size} encontrados; mostrando os 50 mais perto."
+                    else -> "${list.size} encontrados:"
+                },
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            list.sortedBy { kotlin.math.abs(it.addr.toLong(16) - center.toLong(16)) }.take(50).forEach { hit ->
+                val delta = (hit.addr.toLong(16) - center.toLong(16) / size * size) / size
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                        .clickable { open = if (open == hit.addr) null else hit.addr }.padding(horizontal = 12.dp, vertical = 6.dp),
+                ) {
+                    Row {
+                        Text(hit.addr, Modifier.weight(1f), fontFamily = FontFamily.Monospace, fontSize = 13.sp)
+                        Text("${if (delta > 0) "+" else ""}$delta linhas", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("  ${hit.value}", fontFamily = FontFamily.Monospace, fontSize = 14.sp, color = MaterialTheme.colorScheme.primary)
+                    }
+                    if (open == hit.addr) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(onClick = { engine.addSaved(listOf(hit.copy(region = "?"))); open = null }) { Text("Salvar") }
+                            TextButton(onClick = { s.view = hit.addr to type }) { Text("Ir para") }
                         }
                     }
                 }

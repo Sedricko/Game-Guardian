@@ -263,7 +263,7 @@ static void cmd_dump(const char *addr, const char *tname, const char *count) {
     int t = find_type(tname);
     if (t < 0) { printf("err tipo inválido: %s\n", tname); return; }
     size_t n = strtoul(count, NULL, 10), sz = TYPES[t].size;
-    if (n < 1 || n > 512) n = 64;
+    if (n < 1 || n > 20001) n = 64;  // até 10000 linhas para cada lado na busca perto
     uint64_t a = strtoull(addr, NULL, 16);
     unsigned char *buf = malloc(n * sz);
     int whole = !read_mem(a, buf, n * sz);  // falha se cruzar uma página sem mapa; aí lê um por um

@@ -20,6 +20,7 @@ refine 987654321
 list 10
 read $iaddr i32
 dump $iaddr i32 3
+dump $iaddr i32 99999
 search f64,f32 3.5
 list 1000
 writeall 7.25
@@ -40,6 +41,7 @@ check "^$iaddr i32 (Ch|A) 987654321$"           # write + refine + list
 check "^ok 987654321$"                          # read
 check "^$iaddr 987654321$"                      # dump: primeiro valor
 check "^[0-9a-f]+ 555$"                         # dump: o vizinho seguinte
+[ "$(grep -c "^[0-9a-f]* " <<<"$got")" -ge 64 ] || { echo "FALHOU: dump com N inválido não usou 64"; exit 1; }
 check "^$faddr f32 (Ch|A) 3.5$"                 # auto acha o float
 check "^ok [1-9][0-9]* 0$"                      # writeall sem falhas
 check "^err valor inválido: 1.5$"               # 1.5 não é Dword

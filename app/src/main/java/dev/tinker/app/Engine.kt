@@ -261,6 +261,29 @@ class Engine private constructor(private val app: Context) {
         }
     }
 
+    /**
+     * Busca perto: procura um ou mais valores ("50" ou "50;75") nas `radius` linhas acima e abaixo de addr,
+     * no tipo dado. Ex.: achou o ouro, procura a prata ali do lado.
+     */
+    suspend fun searchNear(addr: String, type: String, radius: Int, values: String): List<Hit> = call { d ->
+        val wanted = values.split(';', ',', ' ').mapNotNull { it.trim().toDoubleOrNull() }
+        require(wanted.isNotEmpty()) { "Digite um ou mais valores, separados por ;" }
+        val size = TYPE_SIZES.getValue(type)
+        val r = radius.coerceIn(1, 10000)
+        val center = addr.toLong(16) / size * size
+        val start = (center - r.toLong() * size).coerceAtLeast(0)
+        val float = type.startsWith("f")
+        val hits = d.send("dump ${start.toString(16)} $type ${2 * r + 1}", quiet = true).lines.mapNotNull {
+            val (a, v) = it.split(" ", limit = 2)
+            val x = v.toDoubleOrNull() ?: return@mapNotNull null
+            // float guardado nunca é exato: 1.1 digitado vira 1.10000002 na memória
+            val ok = wanted.any { w -> if (float) kotlin.math.abs(x - w) <= 1e-4 * maxOf(1.0, kotlin.math.abs(w)) else x == w }
+            if (ok && a.toLong(16) != center) Hit(a, type, "", v) else null
+        }
+        Diag.add("Busca perto de 0x$addr (±$r ${TYPE_NAMES[type]}): $values → ${hits.size} achados")
+        hits
+    }
+
     /** "Pegar Double e salvar em Float": muda o tipo de um salvo, mesmo endereço. */
     fun changeType(item: SavedItem, type: String) {
         if (Session.saved.any { it.addr == item.addr && it.type == type }) return
