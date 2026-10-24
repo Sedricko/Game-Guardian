@@ -135,6 +135,23 @@ data class AiProposal(
 /** O que a IA aplicou, para desfazer: valor de antes e o salvo que a edição criou (sai junto). */
 data class AiUndo(val addr: String, val type: String, val old: String, val label: String, val savedId: String?)
 
+/**
+ * Busca que deu 0: outras tentativas, em ordem — todos os tipos com cifrados; depois o número como faixa (a tela
+ * mostra 1250, o jogo guarda 1250.37; ou 12.5 vira 12~13). Cada uma: (tipos, valor, como achou).
+ */
+internal fun retryPlans(types: String, value: String): List<Triple<String, String, String>> {
+    val all = "i32,f32,i64,f64,xi32,xf32"
+    val plans = mutableListOf<Triple<String, String, String>>()
+    if (types != all) plans += Triple(all, value, "procurando em todos os tipos e nos cifrados")
+    val v = value.toDoubleOrNull()
+    if (v != null) {
+        val d = maxOf(0.5, kotlin.math.abs(v) * 0.005)
+        fun f(x: Double) = java.math.BigDecimal(x).setScale(3, java.math.RoundingMode.HALF_UP).stripTrailingZeros().toPlainString()
+        plans += Triple("f32,f64", "${f(v - d)}~${f(v + d)}", "como número com casas decimais (${f(v - d)}~${f(v + d)})")
+    }
+    return plans
+}
+
 /** Jeito de comparar pedido pela IA (aumentou, diminuiu, igual, mudou, com ou sem quanto) no comando do daemon. */
 internal fun compareOp(how: String, by: String): String? {
     val h = how.trim().lowercase()
@@ -487,12 +504,20 @@ class Engine private constructor(private val app: Context) {
         val n = d.frozenGame {
             if ("::" in value) d.send("group $list ${value.substringBefore("::").arg()} $group") else d.send("search $list ${value.arg()}")
         }.status
+        // nada: tenta sozinho do jeito que a pessoa tentaria (todos os tipos, cifrados, número arredondado na tela)
+        var found = n
+        var how = ""
+        if (n == "0" && "::" !in value) for ((l, v, why) in retryPlans(list, normalizeNumbers(value))) {
+            found = d.frozenGame { d.send("search $l $v") }.status
+            if (found != "0") { how = why; break }
+        }
         Session.canUndo = false
         addRecent(Recent(types, value.trim()))
         inFile = false
-        step(true, value.trim(), n)
-        if (n == "0") "Nada encontrado. Dicas: use Auto; se o número da tela é arredondado (1.2K), busque uma faixa como 1150~1250; ou marque mais regiões em Ajustes." + byName
-        else "$n encontrados. Mude o valor no jogo e refine."
+        step(true, value.trim() + if (how.isEmpty()) "" else " ($how)", found)
+        if (how.isNotEmpty()) "Não achei como pedido; achei $found $how. Mude o valor no jogo e refine."
+        else if (found == "0") "Nada encontrado (tentei também todos os tipos, cifrados e o número arredondado). Dicas: use Auto; se o número da tela é arredondado (1.2K), busque uma faixa como 1150~1250; ou marque mais regiões em Ajustes." + byName
+        else "$found encontrados. Mude o valor no jogo e refine."
     }
 
     suspend fun refine(value: String): String = call { d ->

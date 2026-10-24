@@ -25,6 +25,7 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -74,6 +75,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
@@ -391,7 +393,9 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                     }
                 }
                 // teclado de texto: o numérico não tem o ~ da faixa (100~200)
-                ValueField(s.value, "Valor (100, faixa 100~200, grupo 100;250::64)", { s.value = it }, keyboard = KeyboardType.Ascii)
+                ValueField(s.value, "Valor", { s.value = it }, keyboard = KeyboardType.Ascii)
+                if (s.value.isEmpty()) Text("100 · faixa 100~200 · vários 100;250 · grupo 100;250::64", style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (s.history.isNotEmpty()) {
                     // últimas buscas: um toque repete valor e tipos
                     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -410,6 +414,8 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                         enabled = enabled && (s.count ?: 0) > 0 && s.value.isNotBlank(),
                         modifier = Modifier.weight(1f),
                     ) { Text("Refinar") }
+                    // sem número na tela (barra de vida): começa já aqui, sem abrir "Mais formas de buscar"
+                    if (s.count == null) OutlinedButton(onClick = { run { engine.startUnknown(s.types) } }, enabled = enabled) { Text("Sem valor") }
                 }
                 if (s.canUndo) TextButton(onClick = { run { engine.undo() } }, enabled = enabled) { Text("↶ Desfazer último refino") }
                 // com resultados: refinar pelo jeito que mudou, sem precisar do número
@@ -482,6 +488,8 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
         }
         // com poucos resultados, diz qual campo do jogo cada um é (IL2CPP): o dado de verdade x a cópia que aparece na tela
         item {
+            // resultado novo: o editor do único que sobrou volta a abrir sozinho
+            LaunchedEffect(s.results.firstOrNull()?.addr) { if (editing == "-") editing = null }
             LaunchedEffect(if (count <= 20) s.results.joinToString { it.addr } else "") {
                 names = if (count in 1..20) runCatching { engine.il2Names(s.results.map { it.addr }) }.getOrDefault(emptyMap()) else emptyMap()
             }
@@ -490,18 +498,20 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
         val cipher = s.results.filter { it.type.startsWith("x") }.map { it.addr.toLong(16) to readable(it.value, it.type) }
         items(s.results, key = { it.addr + it.type }) { hit ->
             val key = hit.addr + hit.type
-            val open = editing == key
+            // sobrou um só: o editor já vem aberto, com Congelar (antes eram 4 toques e ir até os Salvos)
+            val open = editing == key || (count == 1L && editing == null)
             val copy = !hit.type.startsWith("x") && readable(hit.value, hit.type).let { v ->
                 cipher.any { (a, cv) -> cv == v && kotlin.math.abs(a - hit.addr.toLong(16)) <= 32 }
             }
             ResultCard(
                 shown(hit.value, hit.type), "0x${hit.addr}" + if (copy) " · provável cópia: edite o 🔒" else "", "${TYPE_NAMES[hit.type]} · ${hit.region}",
-                onClick = { editing = if (open) null else key },
+                onClick = { editing = if (open) "-" else key },  // "-": fechado de propósito, não reabre sozinho
                 checked = key in selected, onCheck = { selected = if (it) selected + key else selected - key }, title = names[hit.addr].orEmpty(),
             ) {
                 if (open) {
-                    InlineEditor(readable(hit.value, hit.type) ?: "", "Novo valor", onSave = { v -> editing = null; run { engine.write(hit.addr, hit.type, v) } }, onCancel = { editing = null }) {
-                        TextButton(onClick = { engine.addSaved(listOf(hit)); editing = null }) { Text("Salvar na lista") }
+                    InlineEditor(readable(hit.value, hit.type) ?: "", "Novo valor", onSave = { v -> editing = "-"; run { engine.write(hit.addr, hit.type, v) } }, onCancel = { editing = "-" }) {
+                        TextButton(onClick = { engine.addSaved(listOf(hit), frozen = true); editing = "-" }) { Text("❄ Congelar") }
+                        TextButton(onClick = { engine.addSaved(listOf(hit)); editing = "-" }) { Text("Salvar na lista") }
                         TextButton(onClick = { s.view = hit.addr to plain(hit.type); s.fichaMode = false; s.tab = TAB_MEMORY; editing = null }) { Text("Ver próximos") }
                     }
                 }
@@ -671,6 +681,7 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
     ) { uri -> uri?.let { u -> runCatching { context.contentResolver.openInputStream(u)!!.use { it.reader().readText() } }.onSuccess(::import).onFailure { info = "Não leu o arquivo: ${it.message}" } } } else null
     var editing by remember { mutableStateOf<String?>(null) }
     var editingMany by remember { mutableStateOf(false) }
+    var porting by remember { mutableStateOf(false) }
     var naming by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf(setOf<String>()) }
     LaunchedEffect(s.process) {
@@ -685,7 +696,9 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
     val label = if (chosen.isEmpty()) "todos" else "${chosen.size}"
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            // exportar/importar é raro: recolhido, os salvos e as ações do dia a dia ficam em cima
+            TextButton(onClick = { porting = !porting }) { Text((if (porting) "▾ " else "▸ ") + "Exportar / importar lista") }
+            if (porting) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 OutlinedButton(onClick = {
                     val file = File(context.cacheDir, "reports").apply { mkdirs() }
                         .let { File(it, "tinker-salvos-${System.currentTimeMillis() / 1000}.json") }.apply { writeText(engine.exportSaved()) }
@@ -830,7 +843,7 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
 private fun Recipes(engine: Engine, run: (suspend () -> String) -> Unit, onInfo: (String) -> Unit) {
     val s = Session
     val context = LocalContext.current
-    var open by remember { mutableStateOf(false) }
+    var open by remember { mutableStateOf(Session.recipes.isNotEmpty()) }  // com receitas, já abertas: Aplicar a um toque
     var editing by remember { mutableStateOf<String?>(null) }
     if (s.recipes.isEmpty()) return
     TextButton(onClick = { open = !open }) { Text((if (open) "▾ " else "▸ ") + "Receitas (${s.recipes.size})") }
@@ -960,7 +973,7 @@ private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         if (center != "0") {
             TextButton(onClick = { near = !near }) { Text((if (near) "▾ " else "▸ ") + "Buscar perto deste endereço") }
-            if (near) NearSearch(engine, listOf(center), type, chooseType = false, onError = { error = it })
+            if (near) TopArea { NearSearch(engine, listOf(center), type, chooseType = false, onError = { error = it }) }
         }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             items(rows, key = { it.addr }) { row ->
@@ -1020,7 +1033,10 @@ private fun FichaView(engine: Engine, center: String, run: (suspend () -> String
         }
         return
     }
-    ClassOpener(engine)
+    // objeto aberto: trocar de classe fica recolhido, a ficha fica com a tela
+    var switching by remember { mutableStateOf(false) }
+    TextButton(onClick = { switching = !switching }) { Text((if (switching) "▾ " else "▸ ") + "Trocar objeto / classe") }
+    if (switching) TopArea { ClassOpener(engine) }
     FichaBody(engine, center, run)
 }
 
@@ -1060,7 +1076,7 @@ private fun ClassOpener(engine: Engine) {
         }
     }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        OutlinedTextField(cls, { cls = it }, label = { Text("Classe ou campo (ex.: PlayerData, gold)") }, singleLine = true, modifier = Modifier.weight(1f))
+        OutlinedTextField(cls, { cls = it }, label = { Text("Classe ou campo") }, placeholder = { Text("PlayerData, gold") }, singleLine = true, modifier = Modifier.weight(1f))
         Button(onClick = { open(cls) }, enabled = !loading && s.process != null && cls.isNotBlank(), contentPadding = PaddingValues(horizontal = 12.dp)) { Text("Abrir") }
         if (cls.isNotBlank()) TextButton(onClick = { copy(cls) }, contentPadding = PaddingValues(0.dp), modifier = Modifier.size(40.dp)) { Text("⧉", fontSize = 18.sp) }
     }
@@ -1118,6 +1134,16 @@ private fun ClassOpener(engine: Engine) {
     }
 }
 
+/**
+ * Parte de cima de uma tela que tem lista embaixo: rola sozinha e ocupa no máximo 45% da altura, para a lista nunca
+ * ficar sem espaço (antes, IA aberta + lista de classes empurravam a ficha e o registro para fora da tela).
+ */
+@Composable
+private fun TopArea(content: @Composable ColumnScope.() -> Unit) {
+    val max = (LocalConfiguration.current.screenHeightDp * 0.45f).dp
+    Column(Modifier.fillMaxWidth().heightIn(max = max).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
+}
+
 /** Uma classe da lista: nome, namespace, campos que bateram com o filtro; toque abre, ⧉ copia o nome. */
 @Composable
 private fun ClassRow(gc: GameClass, matched: List<String>, onOpen: () -> Unit, onCopy: () -> Unit) {
@@ -1134,7 +1160,7 @@ private fun ClassRow(gc: GameClass, matched: List<String>, onOpen: () -> Unit, o
                 color = MaterialTheme.colorScheme.tertiary, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
         Text("${gc.fields} campos", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-        TextButton(onClick = onCopy, contentPadding = PaddingValues(0.dp), modifier = Modifier.size(36.dp)) { Text("⧉", fontSize = 16.sp) }
+        TextButton(onClick = onCopy, contentPadding = PaddingValues(0.dp), modifier = Modifier.size(44.dp)) { Text("⧉", fontSize = 16.sp) }
     }
 }
 
@@ -1180,6 +1206,7 @@ private fun FichaBody(engine: Engine, center: String, run: (suspend () -> String
         }
     }
     val c = il2
+    TopArea {
     Text(
         when {
             !looked -> "Lendo o objeto…"
@@ -1218,6 +1245,7 @@ private fun FichaBody(engine: Engine, center: String, run: (suspend () -> String
         }
     }
     error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    }
     LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         items(rows.filter { filter.isBlank() || it.label.contains(filter.trim(), ignoreCase = true) }, key = { it.addr + it.label }) { r ->
             val a = r.addr.toLong(16)
@@ -1351,6 +1379,37 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
     }
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         // organizado por assunto; a Ajuda fica no fim
+        // a IA primeiro: é o que se configura uma vez e o botão "Configurar IA" das outras telas traz para cá
+        item {
+            Panel {
+                Text("Assistente (IA)", style = MaterialTheme.typography.titleSmall)
+                Text("O botão ✨ na Busca, na Ficha, na lista de classes e no Registro manda o que está na tela para a IA e mostra a resposta: " +
+                    "onde está o valor, o que cada campo faz, o que deu errado. Precisa de internet. Nada é enviado sem você tocar em Perguntar.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("claude" to "Claude", "gemini" to "Gemini").forEach { (id, label) ->
+                        FilterChip(selected = s.aiProvider == id, onClick = { s.aiProvider = id; engine.saveSettings() }, label = { Text(label) })
+                    }
+                }
+                val gemini = s.aiProvider == "gemini"
+                Text(
+                    if (gemini) "Chave grátis em aistudio.google.com (Get API key). No nível gratuito há limite por dia, e o Google pode usar o que for enviado para melhorar os modelos."
+                    else "Chave em console.anthropic.com (API Keys), paga por uso; a assinatura do claude.ai não vale aqui.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    if (gemini) s.geminiKey else s.aiKey,
+                    { if (gemini) s.geminiKey = it.trim() else s.aiKey = it.trim(); engine.saveSettings() },
+                    label = { Text(if (gemini) "Chave do Gemini (AIza…)" else "Chave da API do Claude (sk-ant-…)") }, singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(),
+                )
+                if (gemini) GeminiModels(engine)
+                if ((if (gemini) s.geminiKey else s.aiKey).isNotBlank()) TextButton(onClick = {
+                    if (gemini) s.geminiKey = "" else s.aiKey = ""
+                    engine.saveSettings()
+                }) { Text("Apagar chave") }
+            }
+        }
         item {
             Panel {
                 Text("Menu flutuante", style = MaterialTheme.typography.titleSmall)
@@ -1429,36 +1488,6 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                 }
             }
         }
-        item {
-            Panel {
-                Text("Assistente (IA)", style = MaterialTheme.typography.titleSmall)
-                Text("O botão ✨ na Busca, na Ficha, na lista de classes e no Registro manda o que está na tela para a IA e mostra a resposta: " +
-                    "onde está o valor, o que cada campo faz, o que deu errado. Precisa de internet. Nada é enviado sem você tocar em Perguntar.",
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("claude" to "Claude", "gemini" to "Gemini").forEach { (id, label) ->
-                        FilterChip(selected = s.aiProvider == id, onClick = { s.aiProvider = id; engine.saveSettings() }, label = { Text(label) })
-                    }
-                }
-                val gemini = s.aiProvider == "gemini"
-                Text(
-                    if (gemini) "Chave grátis em aistudio.google.com (Get API key). No nível gratuito há limite por dia, e o Google pode usar o que for enviado para melhorar os modelos."
-                    else "Chave em console.anthropic.com (API Keys), paga por uso; a assinatura do claude.ai não vale aqui.",
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                OutlinedTextField(
-                    if (gemini) s.geminiKey else s.aiKey,
-                    { if (gemini) s.geminiKey = it.trim() else s.aiKey = it.trim(); engine.saveSettings() },
-                    label = { Text(if (gemini) "Chave do Gemini (AIza…)" else "Chave da API do Claude (sk-ant-…)") }, singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(),
-                )
-                if (gemini) GeminiModels(engine)
-                if ((if (gemini) s.geminiKey else s.aiKey).isNotBlank()) TextButton(onClick = {
-                    if (gemini) s.geminiKey = "" else s.aiKey = ""
-                    engine.saveSettings()
-                }) { Text("Apagar chave") }
-            }
-        }
         item { HelpPanel() }
     }
 }
@@ -1484,7 +1513,7 @@ private val HELP = listOf(
         "esses valores sozinha e mostra o número real com 🔒. Ao editar ou congelar um 🔒, o Tinker tranca o valor novo com a mesma chave, " +
         "como o jogo faria. Se aparecer o mesmo número normal e com 🔒, edite o 🔒: o normal costuma ser só uma cópia (às vezes uma isca do antitrapaça).",
     "Menu flutuante" to "Abrir o Tinker já abre a bolinha sobre o jogo e tira o app da frente, como no GameGuardian (dá para desligar em " +
-        "Ajustes). Toque na bolinha para abrir o painel. No topo: toque no nome do jogo para trocar; 👁 (segure) espia o jogo; ⏸/▶ pausa; " +
+        "Ajustes). Toque na bolinha para abrir o painel; segure para abrir o outro modo (painel ↔ barra rápida). No topo: toque no nome do jogo para trocar; 👁 (segure) espia o jogo; ⏸/▶ pausa; " +
         "⚡ barra rápida; — minimiza; ✕ sai. Os ajustes ficam guardados.",
     "Barra rápida" to "No menu flutuante, toque em ⚡: uma barra pequena fica sobre o jogo, com o campo de valor (e o teclado do Tinker), " +
         "⏸/▶ para pausar, Buscar/Refinar e ↑ ↓ = ≠ (aumentou, diminuiu, não mudou, mudou). Com até 50 resultados aparece Editar (todos " +
@@ -1610,6 +1639,7 @@ private fun LogTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, onE
         working = false
     }
     Column(Modifier.padding(horizontal = 16.dp)) {
+        TopArea {
         Text(
             "Tudo que o Tinker faz fica registrado. Se o jogo fechar, o motivo é anexado sozinho. " +
                 "O relatório junta registro, falhas do Android e logcat do jogo num arquivo .txt.",
@@ -1650,6 +1680,7 @@ private fun LogTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, onE
         )
         if (working) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
         info?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp)) }
+        }
         LazyColumn(Modifier.padding(top = 8.dp), reverseLayout = true) {
             items(Diag.lines.asReversed()) { line ->
                 Text(line, fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)

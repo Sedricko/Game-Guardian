@@ -198,4 +198,13 @@ class ValuesTest {
         assertEquals(null, classMatch(ui, searchWords("gem")))
         assertEquals(emptyList<String>(), classMatch(ui, searchWords("")))   // sem filtro: tudo aparece
     }
+
+    @Test
+    fun zeroResultsRetries() {
+        val p = retryPlans("i32", "1250")
+        assertEquals("i32,f32,i64,f64,xi32,xf32", p[0].first)
+        assertEquals(Triple("f32,f64", "1243.75~1256.25", "como número com casas decimais (1243.75~1256.25)"), p[1])
+        assertEquals("12~13", retryPlans("i32,f32,i64,f64,xi32,xf32", "12.5").single().second)  // já tinha todos os tipos
+        assertEquals(emptyList<Triple<String, String, String>>(), retryPlans("i32,f32,i64,f64,xi32,xf32", "100;200"))
+    }
 }

@@ -15,8 +15,8 @@ import android.view.WindowManager
 import android.view.WindowManager.LayoutParams
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
@@ -120,7 +120,13 @@ class OverlayService : Service() {
                             bubble?.let { wm.updateViewLayout(it, bubbleParams) }
                         }
                     }
-                    .clickable { if (Session.useBar) showBar() else openPanel() },
+                    // toque: o modo de sempre; segurar: o outro (painel ↔ barra rápida), sem precisar passar pelo ▢
+                    .pointerInput(Unit) {
+                        detectTapGestures(
+                            onTap = { if (Session.useBar) showBar() else openPanel() },
+                            onLongPress = { if (Session.useBar) { Session.useBar = false; openPanel() } else showBar() },
+                        )
+                    },
                 contentAlignment = Alignment.Center,
             ) { Image(painterResource(R.drawable.ic_launcher_foreground), contentDescription = "Abrir Tinker", modifier = Modifier.size(56.dp)) }
         }

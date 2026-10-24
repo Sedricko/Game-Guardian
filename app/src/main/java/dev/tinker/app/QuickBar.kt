@@ -85,7 +85,9 @@ fun QuickBar(engine: Engine, onDrag: (Float, Float) -> Unit, onKeyboard: (Boolea
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
                 "⠿", fontSize = 22.sp, color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.pointerInput(Unit) { detectDragGestures { c, d -> c.consume(); onDrag(d.x, d.y) } }.padding(horizontal = 6.dp, vertical = 8.dp),
+                // 44dp: é o único jeito de mover a barra, precisa ser fácil de pegar
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.size(44.dp).pointerInput(Unit) { detectDragGestures { c, d -> c.consume(); onDrag(d.x, d.y) } }.padding(top = 6.dp),
             )
             TextButton(onClick = { act { if (s.paused) engine.resume() else engine.pause() } }, enabled = enabled, contentPadding = PaddingValues(0.dp),
                 modifier = Modifier.size(40.dp)) { Text(if (s.paused) "▶" else "⏸", fontSize = 18.sp) }
@@ -131,6 +133,9 @@ fun QuickBar(engine: Engine, onDrag: (Float, Float) -> Unit, onKeyboard: (Boolea
             OutlinedButton(onClick = { act { engine.writeAll(s.value) } }, enabled = enabled && s.value.isNotBlank(), contentPadding = small) {
                 Text("Editar ${if (n == 1L) "" else "os $n "}para ${s.value.ifBlank { "…" }}", maxLines = 1)
             }
+            // sobrou um: congela e salva direto daqui
+            if (n == 1L) OutlinedButton(onClick = { act { s.results.firstOrNull()?.let { engine.addSaved(listOf(it), frozen = true); "Congelado e salvo." } ?: "Nada para congelar." } },
+                enabled = enabled, contentPadding = small) { Text("❄") }
             if (n <= 5L) Text(s.results.take(5).joinToString("  ") { it.value }, Modifier.weight(1f), style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.primary, maxLines = 1)
         }
