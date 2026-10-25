@@ -1101,6 +1101,32 @@ class Engine private constructor(private val app: Context) {
     private fun panelUrl(extra: String = "") = Session.keySource.trim().takeIf { it.startsWith("https://script.google.com/") }
         ?.let { it + extra.takeIf { e -> e.isNotEmpty() }?.let { e -> (if ('?' in it) "&" else "?") + e }.orEmpty() }
 
+    /**
+     * GET no script do painel com o motivo certo quando falha: antes a mensagem era só o link (com o token na tela).
+     * O Google responde com uma página de login ou de erro (não com a lista) quando a implantação está errada.
+     */
+    private fun panelGet(url: String): Result<String> = runCatching {
+        val c = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+        try {
+            c.connectTimeout = 15_000; c.readTimeout = 60_000
+            val code = c.responseCode
+            val body = (if (code < 400) c.inputStream else c.errorStream)?.bufferedReader()?.use { it.readText() }.orEmpty()
+            val html = body.trimStart().startsWith("<")
+            when {
+                code == 404 -> error("o Google diz que esse link não existe (código 404). A implantação foi apagada ou trocada: " +
+                    "no painel da planilha, copie o link de novo; se criou uma Nova implantação, use o link dela")
+                code == 401 || code == 403 || (html && ("accounts.google" in body || "ServiceLogin" in body)) ->
+                    error("o Google pediu login (código $code). Na implantação, \"Quem pode acessar\" precisa ser Qualquer pessoa")
+                code >= 400 -> error("o Google respondeu com erro $code")
+                html -> error("o Google respondeu uma página, não a lista: o script deu erro ou a implantação está na versão antiga " +
+                    "(Implantar → Gerenciar implantações → editar → Nova versão)")
+                else -> body
+            }
+        } finally {
+            c.disconnect()
+        }
+    }
+
     /** Manda a memória para a planilha (lá ela é juntada, não substituída: nada que outra instância aprendeu se perde). */
     private fun cloudPush() {
         val url = panelUrl() ?: return
@@ -1152,12 +1178,7 @@ class Engine private constructor(private val app: Context) {
     /** Traz o aprendizado de todas as instâncias da planilha e junta com o daqui (depois manda o resultado de volta). */
     suspend fun cloudPull(): String = withContext(Dispatchers.IO) {
         val url = panelUrl("memoria=1") ?: return@withContext "Sem painel de chaves: o aprendizado fica só neste aparelho e no backup."
-        val text = runCatching {
-            (java.net.URL(url).openConnection() as java.net.HttpURLConnection).run {
-                connectTimeout = 15_000; readTimeout = 60_000
-                try { inputStream.bufferedReader().use { it.readText() } } finally { disconnect() }
-            }
-        }.getOrElse { return@withContext "Não li o aprendizado da planilha: ${it.message}" }
+        val text = panelGet(url).getOrElse { return@withContext "Não li o aprendizado da planilha: ${it.message}" }
         if (runCatching { JSONObject(text).optString("tinker") }.getOrNull() != "memoria-ia") {
             backupMemorySoon()  // planilha ainda vazia (ou script antigo): manda o daqui
             return@withContext "Planilha sem aprendizado ainda: mandei o deste aparelho."
@@ -1619,12 +1640,7 @@ class Engine private constructor(private val app: Context) {
         val url = Session.keySource.trim()
         if (url.isEmpty()) return@withContext "Sem link do painel de chaves."
         if (!url.startsWith("https://script.google.com/")) return@withContext "O link do painel começa com https://script.google.com/ (copie no painel da planilha)."
-        val text = runCatching {
-            (java.net.URL(url).openConnection() as java.net.HttpURLConnection).run {
-                connectTimeout = 15_000; readTimeout = 30_000
-                try { inputStream.bufferedReader().use { it.readText() } } finally { disconnect() }
-            }
-        }.getOrElse { return@withContext "Não li o painel de chaves: ${it.message}" }
+        val text = panelGet(url).getOrElse { return@withContext "Não li o painel de chaves: ${it.message}" }
         val j = runCatching { JSONObject(text) }.getOrNull()
             ?: return@withContext "O painel não respondeu a lista. Confira a implantação: App da Web, Executar como Eu, Qualquer pessoa."
         if (j.has("erro")) return@withContext "O painel recusou o link (token antigo?). Copie o link de novo no painel."
