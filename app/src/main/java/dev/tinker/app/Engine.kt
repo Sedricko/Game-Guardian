@@ -1245,8 +1245,31 @@ class Engine private constructor(private val app: Context) {
         // "Fazer backup" chama da tela: rede nunca na linha principal
         scope.launch(Dispatchers.IO) { runCatching {
             val code = panelPost(url, memoryJson())
-            if (code >= 400) Diag.add("Aprendizado não foi para a planilha: código $code")
-        }.onFailure { Diag.add("Aprendizado não foi para a planilha: ${it.message}") } }
+            if (code >= 400) Diag.add("Aprendizado não foi para a planilha: código $code") else pushPending = false
+        }.onFailure { pushPending = true; Diag.add("Aprendizado não foi para a planilha: ${it.message} (vai quando a internet voltar)") } }
+    }
+
+    // sem internet nada se perde: o relatório fica numa fila e o aprendizado é mandado de novo quando a planilha responder
+    @Volatile private var pushPending = false
+    private val pendingDir get() = File(app.filesDir, "pendentes").apply { mkdirs() }
+
+    private fun queueReport(body: String) = runCatching {
+        File(pendingDir, "relatorio-${System.currentTimeMillis()}.json").writeText(body)
+        pendingDir.listFiles()?.sortedBy { it.name }?.dropLast(20)?.forEach { it.delete() }  // guarda os 20 mais novos
+    }
+
+    /** A planilha respondeu: manda o que ficou na fila (do mais velho para o mais novo). */
+    private fun flushPending() {
+        if (pushPending) cloudPush()
+        val url = panelUrl("relatorio=1") ?: return
+        val files = pendingDir.listFiles()?.sortedBy { it.name }.orEmpty()
+        var sent = 0
+        for (f in files) {
+            val ok = runCatching { panelPost(url, f.readText()) < 400 }.getOrDefault(false)
+            if (!ok) break
+            f.delete(); sent++
+        }
+        if (sent > 0) Diag.add("Internet de volta: $sent relatório(s) da fila foram para a planilha")
     }
 
     private fun enc(v: String) = java.net.URLEncoder.encode(v, "UTF-8")
@@ -1279,6 +1302,7 @@ class Engine private constructor(private val app: Context) {
     suspend fun fetchRequests(): String = withContext(Dispatchers.IO) {
         val url = panelUrl("pedidos=1&aparelho=${enc(android.os.Build.MODEL)}&versao=${enc(appVersion())}") ?: return@withContext ""
         val text = panelGet(url).getOrElse { return@withContext "" }  // sem rede: tenta de novo na próxima volta
+        flushPending()
         val arr = runCatching { JSONObject(text).optJSONArray("pedidos") }.getOrNull() ?: return@withContext ""
         val list = (0 until arr.length()).map { arr.getJSONObject(it) }
             .map { SheetRequest(it.optString("id"), it.optString("tipo").lowercase().replace("ç", "c").replace("õ", "o"), it.optString("jogo").trim(), it.optString("texto").trim().take(2000)) }
@@ -1393,8 +1417,10 @@ class Engine private constructor(private val app: Context) {
         }
         check("print da tela") { call { d -> d.send("screencap", quiet = true).lines.size }.let { require(it > 0) { "veio vazio" }; "ok" } }
         check("app em primeiro plano") { call { d -> d.send("focus", quiet = true).lines.firstOrNull()?.removePrefix("| ")?.trim()?.take(120) ?: "?" } }
-        check("painel de chaves") { syncKeys() }
-        check("planilha (aprendizado)") { cloudPull() }
+        // sem internet, os testes de rede diziam OK com a mensagem de erro dentro (visto no relatório de 25/10 05:03)
+        check("internet") { java.net.InetAddress.getByName("script.google.com").hostAddress?.let { "ok" } ?: error("sem resposta do DNS") }
+        check("painel de chaves") { syncKeys().also { require(it.startsWith("Painel de chaves")) { it } } }
+        check("planilha (aprendizado)") { cloudPull().also { require(it.startsWith("Planilha")) { it } } }
         // uma pergunta curtinha de verdade em cada IA (1 pedido da cota de cada): responde e quanto demora
         check("Gemini") { if (Session.geminiKeys.isEmpty()) "sem chave" else Assistant.pingGemini() }
         check("Groq") { if (Session.groqKeys.isEmpty()) "sem chave" else Assistant.pingGroq() }
@@ -1424,7 +1450,11 @@ class Engine private constructor(private val app: Context) {
                 val body = JSONObject().put("jogo", p?.let { "${it.label} (${it.pkg})" } ?: "nenhum")
                     .put("versao", appVersion()).put("aparelho", android.os.Build.MODEL)
                     .put("motivo", reason).put("problemas", problems).put("texto", text.take(400_000)).toString()  // a planilha guarda até 405 mil letras
-                val code = panelPost(url, body)
+                val code = runCatching { panelPost(url, body) }.getOrElse { e ->
+                    queueReport(body)
+                    Diag.add("Relatório não foi para a planilha: ${e.message} (ficou na fila; vai quando a internet voltar)")
+                    return@runCatching
+                }
                 Diag.add(if (code < 400) "Relatório enviado para a planilha ($reason)" else "Relatório não foi para a planilha: código $code")
             }.onFailure { Diag.add("Relatório não foi para a planilha: ${it.message}") }
         }

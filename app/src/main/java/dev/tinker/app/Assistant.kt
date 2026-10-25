@@ -310,7 +310,7 @@ jogo abrir, use propor_receita com os salvos."""
     /** Autoteste: uma pergunta curtinha ao Groq (1 pedido da cota). */
     fun pingGroq(): String {
         if (Session.groqModels.isEmpty()) Session.groqModels = groqModels(Session.groqKey)
-        val model = Session.groqModel.ifEmpty { Session.groqModels.firstOrNull() ?: error("a chave não mostrou modelos") }
+        val model = Session.groqModel.ifEmpty { Session.groqModels.firstOrNull() ?: error("a chave não mostrou modelos (sem internet, ou a chave foi recusada)") }
         val t0 = System.currentTimeMillis()
         val body = JSONObject().put("model", model).put("max_completion_tokens", 20)
             .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", "Responda só: ok"))).toString()
