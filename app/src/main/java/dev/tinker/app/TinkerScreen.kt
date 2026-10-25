@@ -1459,10 +1459,17 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                 Text("Chaves do ${if (gemini) "Gemini" else "Groq"} (quando a cota de uma acaba, o Tinker passa para a próxima):", style = MaterialTheme.typography.bodySmall)
                 keys.forEachIndexed { i, k ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("${i + 1}. ${k.take(4)}…${k.takeLast(4)}" + (if (i == current) "  · em uso" else "") +
-                            (if (gemini) "  · ${s.geminiUse[i] ?: 0} pedidos hoje" + (s.geminiOut[i]?.let { "  · cota acabou às $it" } ?: "") else "") +
-                            (if (k in s.sheetKeys || k in s.sheetGroqKeys) "  · do painel" else ""), Modifier.weight(1f),
-                            fontFamily = FontFamily.Monospace, color = if (i == current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                        // a chave numa linha e o resto embaixo, menor: tudo junto em letra de máquina quebrava em 3 linhas
+                        Column(Modifier.weight(1f)) {
+                            Text("${i + 1}. ${k.take(4)}…${k.takeLast(4)}" + if (i == current) "  · em uso" else "",
+                                fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodyMedium,
+                                color = if (i == current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                            Text(listOfNotNull(
+                                if (gemini) "${s.geminiUse[i] ?: 0} pedidos hoje" else null,
+                                if (gemini) s.geminiOut[i]?.let { "cota acabou às $it" } else null,
+                                if (k in s.sheetKeys || k in s.sheetGroqKeys) "do painel" else "posta no app",
+                            ).joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                         if (i != current) TextButton(onClick = { if (gemini) s.geminiKeyIndex = i else s.groqKeyIndex = i; engine.saveSettings() }) { Text("Usar") }
                         TextButton(onClick = { engine.removeKey(s.aiProvider, i) }) { Text("✕") }
                     }
