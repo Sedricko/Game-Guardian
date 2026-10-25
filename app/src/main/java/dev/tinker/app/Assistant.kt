@@ -299,7 +299,9 @@ jogo abrir, use propor_receita com os salvos."""
         // 404 (fechado para a chave) sai por 7 dias; 503 (servidor cheio, visto em 25/10 05:06) só por 10 min
         while ((code == 404 || code == 503) && tries++ < 3) {
             tired[Session.geminiModel.trim()] = System.currentTimeMillis() + if (code == 404) 7 * 86_400_000L else 600_000L
-            val m = pickGemini(Session.geminiModels, Session.geminiSpeed, tiredModels()) ?: break
+            // sem jogo a lista de modelos ainda está vazia (25/10 08:40 o autoteste parou no primeiro 503): busca e aceita até os lite
+            val m = pickGemini(Session.geminiModels, Session.geminiSpeed, tiredModels())
+                ?: Session.geminiModels.ifEmpty { geminiModels(Session.geminiKey).also { Session.geminiModels = it } }.firstOrNull { it !in tiredModels() } ?: break
             Diag.add("Gemini: ${Session.geminiModel} ${if (code == 404) "não aceita esta chave" else "cheio (503)"}, usando $m")
             Session.geminiModel = m
             http("models/$m:generateContent", Session.geminiKey, body).let { code = it.first; reply = it.second }
