@@ -220,10 +220,28 @@ class OverlayService : Service() {
      * com a largura do tamanho escolhido e a altura toda: o jogo continua à vista do outro lado.
      */
     /** Barras do sistema (navegação de lado, deitado; recorte da câmera): o painel não entra embaixo delas. */
-    private fun bars(): android.graphics.Insets? = if (Build.VERSION.SDK_INT >= 30) runCatching {
-        wm.currentWindowMetrics.windowInsets.getInsetsIgnoringVisibility(
-            android.view.WindowInsets.Type.navigationBars() or android.view.WindowInsets.Type.displayCutout())
-    }.getOrNull() else null
+    private fun bars(): android.graphics.Insets? {
+        val sys = if (Build.VERSION.SDK_INT >= 30) runCatching {
+            wm.currentWindowMetrics.windowInsets.getInsetsIgnoringVisibility(
+                android.view.WindowInsets.Type.navigationBars() or android.view.WindowInsets.Type.displayCutout())
+        }.getOrNull() else null
+        if (sys != null && (sys.left > 0 || sys.right > 0 || sys.bottom > 0)) return sys
+        // o serviço às vezes recebe as barras zeradas (visto no vPhoneOS): a diferença entre a tela inteira e a área
+        // dos apps mostra onde a barra está; sem isso o painel ficava cortado embaixo da barra de lado
+        @Suppress("DEPRECATION") val d = wm.defaultDisplay
+        val real = android.graphics.Point().also { @Suppress("DEPRECATION") d.getRealSize(it) }
+        val app = android.graphics.Point().also { @Suppress("DEPRECATION") d.getSize(it) }
+        val dx = (real.x - app.x).coerceAtLeast(0)
+        val dy = (real.y - app.y).coerceAtLeast(0)
+        if (dx == 0 && dy == 0) return sys
+        return if (Build.VERSION.SDK_INT >= 29) when {
+            dx > 0 && d.rotation == android.view.Surface.ROTATION_270 -> android.graphics.Insets.of(dx, 0, 0, 0)
+            dx > 0 -> android.graphics.Insets.of(0, 0, dx, 0)
+            else -> android.graphics.Insets.of(0, 0, 0, dy)
+        } else null
+    }
+
+    private var lastPlace = ""
 
     private fun place(p: LayoutParams) {
         val (w, h) = screen()
@@ -234,6 +252,8 @@ class OverlayService : Service() {
         Session.panelWide = w > h && f < 1f
         // deitado, a barra de navegação fica de lado: antes o painel ia até a borda e a barra cobria a aba Ajustes e os botões
         val usable = w - left - right
+        val info = "Painel: tela ${w}x$h, barras esq=$left dir=$right baixo=${b?.bottom ?: 0}"
+        if (info != lastPlace) { lastPlace = info; Diag.add(info) }
         if (w > h) {
             p.width = (usable * f).toInt(); p.height = LayoutParams.MATCH_PARENT
             p.gravity = Gravity.TOP or if (Session.panelLeft) Gravity.START else Gravity.END
