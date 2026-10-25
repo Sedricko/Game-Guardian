@@ -1049,6 +1049,12 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
                         // qual instrução do jogo muda este valor (o painel sai da frente para a pessoa jogar)
                         TextButton(onClick = { editing = null; engine.watchLater(item); if (overlay) onMinimize() }, enabled = !old && !s.busy) { Text("O que escreve aqui?") }
                     }
+                    // congelado: fixo, ou com regra (só subir: o jogo não tira, o que ganhar fica; só descer: o contrário)
+                    if (item.frozen) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("" to "❄ Fixo", "up" to "⬆ Só subir", "down" to "⬇ Só descer").forEach { (r, l) ->
+                            FilterChip(selected = item.freezeRule == r, onClick = { engine.setFreezeRule(item, r) }, label = { Text(l) })
+                        }
+                    }
                     NameEditor(item.name) { engine.rename(item, it) }
                     FolderEditor(item.folder, s.saved.map { it.folder }.filter { it.isNotEmpty() }.distinct()) { engine.setFolder(item, it) }
                     historyText(item, System.currentTimeMillis()).takeIf { it.isNotEmpty() }?.let {
@@ -2028,7 +2034,19 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                     androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
                 ) { uri -> uri?.let { u -> keyInfo = runCatching { clipCtx.contentResolver.openInputStream(u)!!.use { it.reader().readText() } }
                     .map(engine::importMemory).getOrElse { "Não leu o arquivo: ${it.message}" } } } else null
-                TextButton(onClick = { showLessons = !showLessons }) { Text((if (showLessons) "▾ " else "▸ ") + "O que a IA aprendeu") }
+                TextButton(onClick = { showLessons = !showLessons }) {
+                    Text((if (showLessons) "▾ " else "▸ ") + "O que a IA aprendeu" + if (Session.pendingLessons.isNotEmpty()) " (${Session.pendingLessons.size} para aprovar)" else "")
+                }
+                // lição nova vale para todos os jogos: só entra com o toque da pessoa
+                if (showLessons) Session.pendingLessons.toList().forEach { l ->
+                    Panel {
+                        Text("A IA quer aprender: $l", style = MaterialTheme.typography.bodySmall)
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            FilledTonalButton(shape = MaterialTheme.shapes.medium, onClick = { engine.decideLesson(l, true) }) { Text("Aprovar") }
+                            TextButton(onClick = { engine.decideLesson(l, false) }) { Text("Descartar") }
+                        }
+                    }
+                }
                 if (showLessons) {
                     val text = remember(showLessons) { engine.lessons() }
                     Text(text.ifBlank { "Nada ainda: ela aprende uma lição no fim de cada tarefa." }, style = MaterialTheme.typography.bodySmall,

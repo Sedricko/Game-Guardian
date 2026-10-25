@@ -277,6 +277,14 @@ echo "$ac"
 grep -qE "^act A ([3-9][0-9]|[1-9][0-9]{2,}) [0-9]+$" <<<"$ac" && grep -qE "^how (soft|smaps)$" <<<"$ac" && grep -qE "^ok [0-9]+$" <<<"$ac" \
     || { echo "FALHOU: onde o jogo escreve"; exit 1; }
 
+# Congelar com regra "up": o jogo não tira (500 volta a 1000), mas o que ganhar fica (2000 vira o novo congelado)
+fu=$( { printf '%s\n' "attach $pid" "freeze $iaddr i32 1000 up" "write $iaddr i32 500"; sleep 0.4
+        printf '%s\n' "read $iaddr i32" "write $iaddr i32 2000"; sleep 0.4
+        printf '%s\n' "read $iaddr i32" "write $iaddr i32 1500"; sleep 0.4
+        printf '%s\n' "read $iaddr i32" "unfreeze all"; } | "$out/tinkerd")
+echo "$fu"
+[ "$(grep -cx 'ok 1000' <<<"$fu")" = 1 ] && [ "$(grep -cx 'ok 2000' <<<"$fu")" = 2 ] || { echo "FALHOU: congelar com regra"; exit 1; }
+
 # Autoteste do app: o daemon se liga a ele mesmo e acha os próprios valores de teste (não toca em outro processo)
 sp="$out/self.fifo"; mkfifo "$sp"
 "$out/tinkerd" < "$sp" > "$out/self.out" & spid=$!
@@ -287,6 +295,20 @@ exec 7>&-; wait $spid 2>/dev/null || true
 cat "$out/self.out"
 mapfile -t sf < <(grep -E '^(ok|err)' "$out/self.out")
 [ -n "$dpid" ] && [ "${sf[2]}" = "ok" ] && [[ "${sf[3]}" =~ ^ok\ [1-9] ]] && [[ "${sf[4]}" =~ ^ok\ [1-9] ]] || { echo "FALHOU: autoteste no próprio daemon"; exit 1; }
+
+# Dados do autoteste do app: o daemon ligado a ele mesmo acha a tabela Lua de teste e conta a memória nova escrita
+sp2="$out/self2.fifo"; mkfifo "$sp2"
+"$out/tinkerd" < "$sp2" > "$out/self2.out" & spid=$!
+exec 8> "$sp2"; echo info >&8; sleep 0.3
+dpid=$(grep -o 'pid=[0-9]*' "$out/self2.out" | cut -d= -f2)
+printf '%s\n' "attach $dpid" "selftestdata" >&8; sleep 0.3
+lt=$(grep '^lua ' "$out/self2.out" | cut -d' ' -f2); fr=$(grep '^fresh ' "$out/self2.out" | cut -d' ' -f2)
+printf '%s\n' "luatable $lt" "activity start" >&8
+for k in 0 1 2 3 4 5 6 7; do printf 'write %x i32 7\n' $((0x$fr + k * 4096)) >&8; done
+printf '%s\n' "activity" >&8; sleep 0.5
+exec 8>&-; wait $spid 2>/dev/null || true
+cat "$out/self2.out"
+grep -q " int gold 31415$" "$out/self2.out" && grep -qE "^act A ([3-9][0-9]|[1-9][0-9]{2,}) " "$out/self2.out" || { echo "FALHOU: dados do autoteste"; exit 1; }
 
 # Daemon saindo com o jogo pausado (app caiu no meio da busca): o jogo tem que voltar a rodar
 printf '%s\n' "attach $pid" "pause" | "$out/tinkerd" >/dev/null

@@ -156,6 +156,8 @@ data class SavedItem(
     val temp: Boolean = false,
     // folder: pasta que a pessoa escolheu (Materiais, Status…); vazio = sem pasta
     val folder: String = "",
+    // freezeRule: "" fixo; "up" só deixa subir (o jogo não tira, o que ganhar fica); "down" só deixa descer
+    val freezeRule: String = "",
 )
 
 const val MAX_CHAINS = 200
@@ -365,6 +367,7 @@ object Session {
     var groqModels by mutableStateOf(listOf<String>())  // os que a chave do Groq pode usar, o melhor primeiro
     var groqModel by mutableStateOf("")  // vazio: escolhido sozinho na primeira pergunta
     var sheetGroqKeys = setOf<String>()  // chaves do Groq que vieram do painel
+    val pendingLessons = mutableStateListOf<String>()  // lições que a IA propôs, esperando a pessoa aprovar
     var autoFind by mutableStateOf<String?>(null)  // 🎯 Achar sozinho rodando: o que está fazendo agora (null = parado)
     var autoFindWinner by mutableStateOf<Hit?>(null)  // o que mudou o número da tela no teste
     var aiCanTest by mutableStateOf(false)  // a IA pode escrever um valor de teste (e voltar o original) para saber se é o verdadeiro
@@ -515,6 +518,7 @@ class Engine private constructor(private val app: Context) {
         Session.panelLeft = prefs.getBoolean("panelLeft", false)
         Session.panelSize = prefs.getInt("panelSize2", Session.panelSize).coerceIn(0, PANEL_SIZES.lastIndex)  // chave nova: quem já usava volta uma vez para tela cheia, o novo padrão
         loadSaved()
+        loadPendingLessons()
         loadHistory()
         // instalação nova (ou dados limpos): a memória da IA volta sozinha do backup em Download/Tinker
         if (!lessonsFile.exists() && noteFiles.isEmpty()) scope.launch(Dispatchers.IO) {
@@ -782,7 +786,7 @@ class Engine private constructor(private val app: Context) {
     /** types vazio = Auto. */
     suspend fun search(types: Set<String>, value: String): String = call { d ->
         val lua = if ("li" in types) listOf("li", "lf") else emptyList()  // número do Lua (inteiro e decimal juntos)
-        val base = TYPES.map { it.first }.filter { it in types }.ifEmpty { if (lua.isEmpty()) listOf("i32", "f32", "i64", "f64") else emptyList() }
+        val base = TYPES.map { it.first }.filter { it in types }.ifEmpty { if (lua.isEmpty()) listOf("i32", "f32", "i64", "f64") + engineTypes() else emptyList() }
         // cifrados junto, sem o usuário precisar saber: Dword 🔒 quando busca Dword, Float 🔒 quando busca Float
         // "150X4" (como no GameGuardian): só o cifrado com a chave nessa distância
         val gg = ggXor(value)
@@ -1246,6 +1250,21 @@ class Engine private constructor(private val app: Context) {
 
     fun lessons(): String = lessonsFile.takeIf { it.exists() }?.readText().orEmpty()
 
+    private fun storePendingLessons() = prefs.edit().putString("licoesPendentes", Session.pendingLessons.joinToString("\n")).apply()
+
+    fun loadPendingLessons() {
+        Session.pendingLessons.clear()
+        Session.pendingLessons.addAll(prefs.getString("licoesPendentes", "").orEmpty().lines().filter { it.isNotBlank() })
+    }
+
+    /** ok: a lição entra (e vai para a planilha); senão é descartada. */
+    fun decideLesson(l: String, ok: Boolean) {
+        Session.pendingLessons.remove(l)
+        storePendingLessons()
+        if (ok) { appendNote(lessonsFile, l, 6000); backupMemorySoon() }
+        Diag.add("Lição ${if (ok) "aprovada" else "descartada"}: ${l.take(200)}")
+    }
+
     fun clearLessons() {
         lessonsFile.delete()
         notesFile?.delete()
@@ -1663,6 +1682,63 @@ class Engine private constructor(private val app: Context) {
                 t.close()
             }
         }
+        // as funções novas, cada uma no próprio daemon (o jogo não é tocado): assim se sabe o que funciona neste aparelho
+        check("congelar com regra (só subir)") {
+            withSelf { t ->
+                require((t.call("search i32 271828182").status.toLongOrNull() ?: 0) >= 1) { "sem valor de teste" }
+                val addr = t.call("list 20").lines.firstOrNull()?.substringBefore(' ') ?: error("lista vazia")
+                t.call("freeze $addr i32 1000 up"); t.call("write $addr i32 500"); Thread.sleep(400)
+                require(t.call("read $addr i32").status == "1000") { "não segurou o mínimo" }
+                t.call("write $addr i32 2000"); Thread.sleep(400)
+                require(t.call("read $addr i32").status == "2000") { "não deixou subir" }
+                t.call("unfreeze all")
+                "ok"
+            }
+        }
+        check("Lua (tabelas e busca 🌙)") {
+            withSelf { t ->
+                val lua = t.call("selftestdata").lines.firstOrNull { it.startsWith("lua ") }?.substringAfter(' ') ?: error("daemon sem dados de teste")
+                require(t.call("luatable $lua").lines.any { it.endsWith(" int gold 31415") }) { "não leu o campo gold da tabela" }
+                require((t.call("search li 31415").status.toLongOrNull() ?: 0) >= 1) { "a busca 🌙 não achou" }
+                "ok"
+            }
+        }
+        check("onde o jogo escreve (📍)") {
+            withSelf { t ->
+                val fresh = t.call("selftestdata").lines.firstOrNull { it.startsWith("fresh ") }?.substringAfter(' ')?.toLongOrNull(16) ?: error("sem memória de teste")
+                t.call("activity start")
+                for (k in 0 until 8) t.call("write ${(fresh + k * 4096L).toString(16)} i32 7")
+                val r = t.call("activity")
+                val a = r.lines.firstOrNull { it.startsWith("act A ") }?.split(' ')?.getOrNull(2)?.toLongOrNull() ?: 0
+                require(a >= 28) { "não contou a memória escrita ($a KB)" }
+                "ok (${if (r.lines.any { it == "how soft" }) "marca cada página" else "pela memória nova: este aparelho não marca cada página"})"
+            }
+        }
+        check("foto do jogo") {
+            withSelf { t ->
+                require((t.call("search i32 271828182").status.toLongOrNull() ?: 0) >= 1) { "sem valor de teste" }
+                val addr = t.call("list 20").lines.firstOrNull()?.substringBefore(' ') ?: error("lista vazia")
+                val mb = t.call("photo").status
+                t.call("write $addr i32 123")
+                require((t.call("photodiff").status.toLongOrNull() ?: 0) >= 1) { "a diferença não achou a mudança" }
+                t.call("photorestore $addr")
+                require(t.call("read $addr i32").status == "271828182") { "não voltou como estava" }
+                t.call("photodrop")
+                "ok ($mb MB)"
+            }
+        }
+        check("leitor de texto (🎯 Achar sozinho)") {
+            val bmp = Bitmap.createBitmap(640, 200, Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.WHITE) }
+            Canvas(bmp).drawText("48213", 40f, 140f, android.graphics.Paint().apply { textSize = 110f; color = android.graphics.Color.BLACK; isAntiAlias = true })
+            val text = com.google.android.gms.tasks.Tasks.await(ocr.process(com.google.mlkit.vision.common.InputImage.fromBitmap(bmp, 0))).text
+            require("48213" in text.filter { !it.isWhitespace() }) { "leu \"${text.take(40)}\" em vez de 48213" }
+            "ok"
+        }
+        check("depurador (O que escreve aqui?)") {
+            val v = prefs.getString("depurador", null) ?: return@check "ainda não testado: use \"O que escreve aqui?\" uma vez"
+            require(v == "funciona") { v }
+            v
+        }
         check("print da tela") { call { d -> d.send("screencap", quiet = true).lines.size }.let { require(it > 0) { "veio vazio" }; "ok" } }
         check("app em primeiro plano") { call { d -> d.send("focus", quiet = true).lines.firstOrNull()?.removePrefix("| ")?.trim()?.take(120) ?: "?" } }
         // sem internet, os testes de rede diziam OK com a mensagem de erro dentro (visto no relatório de 25/10 05:03)
@@ -1676,6 +1752,18 @@ class Engine private constructor(private val app: Context) {
         val ok = out.count { it.startsWith("OK") }
         sendReport("autoteste: $ok de ${out.size} ok")
         "Autoteste: $ok de ${out.size} ok (o resultado foi para a planilha)\n" + out.joinToString("\n")
+    }
+
+    /** Um daemon à parte, ligado a ele mesmo: as funções são testadas na memória dele, sem tocar no jogo. */
+    private fun <T> withSelf(block: (Daemon) -> T): T {
+        val t = Daemon(app.applicationInfo.nativeLibraryDir + "/libtinkerd.so") {}
+        try {
+            val pid = t.call("info").status.substringAfter("pid=", "").substringBefore(' ').toIntOrNull() ?: error("daemon sem pid")
+            t.call("attach $pid")
+            return block(t)
+        } finally {
+            t.close()
+        }
     }
 
     @Volatile private var lastAutoReport = 0L
@@ -2155,9 +2243,11 @@ class Engine private constructor(private val app: Context) {
             mapOf("licao" to "uma frase curta e geral"), listOf("licao")) { a ->
             val l = a.optString("licao").trim()
             if (l.length < 10) return@AiTool "Lição curta demais."
-            appendNote(lessonsFile, l, 6000)
-            Diag.add("IA aprendeu: ${l.take(200)}")
-            "Aprendido."
+            // vale para todos os jogos: só entra quando a pessoa aprovar (25/10 duas lições erradas se espalharam pela planilha)
+            withContext(Dispatchers.Main) { if (l !in Session.pendingLessons) Session.pendingLessons.add(l.take(400)) }
+            storePendingLessons()
+            Diag.add("IA quer aprender (esperando aprovação): ${l.take(200)}")
+            "Guardado para a pessoa aprovar em Ajustes → O que a IA aprendeu."
         },
         AiTool("ver_logcat_jogo", "Mostra as últimas linhas do logcat do jogo (opcionalmente só as que têm certas palavras). Use depois de uma edição para ver se o " +
             "servidor ou o antitrapaça recusou (erros de validação, 'cheat', 'invalid', 'mismatch').",
@@ -3011,12 +3101,21 @@ class Engine private constructor(private val app: Context) {
     }
 
     /** O que mudou desde a foto (fora o que muda sozinho e os ponteiros): vai para a lista da Busca, onde dá para refinar. */
-    suspend fun photoDiff(): String = call { d ->
-        val n = d.send("photodiff").status
-        Session.canUndo = false
-        inFile = false
-        step(true, "o que mudou desde a foto", n)
-        "$n valores mudaram desde a foto. Refine para ficar só com os da ação (ex.: o número de presentes) e toque em Voltar como estava."
+    suspend fun photoDiff(): String {
+        val n = call { d ->
+            val n = d.send("photodiff").status
+            Session.canUndo = false
+            inFile = false
+            step(true, "o que mudou desde a foto", n)
+            n
+        }
+        // muitos: espera parado e tira o que continua mudando sozinho (a foto dava 2 milhões no Police Chief)
+        if ((n.toLongOrNull() ?: 0) <= 1000) return "$n valores mudaram desde a foto. Refine para ficar só com os da ação (ex.: o número de presentes) e toque em Voltar como estava."
+        delay(3000)
+        compare("same")
+        val m = Session.count ?: list().first ?: 0
+        Diag.add("Foto do jogo: $n mudaram; $m depois de tirar o que muda sozinho")
+        return "$n mudaram desde a foto; tirei os que continuam mudando sozinhos: sobraram $m. Refine pelo valor da ação e toque em Voltar como estava."
     }
 
     /**
@@ -3118,6 +3217,8 @@ class Engine private constructor(private val app: Context) {
         Diag.add("Regiões deste jogo: ${codes.joinToString().ifEmpty { "esquecidas (a busca volta a olhar tudo)" }}")
     }
 
+    private fun engineTypes() = engineTypes(Session.engine?.name)
+
     /** As aprendidas mais as dos salvos deste jogo (região que o daemon informou ao salvar). */
     fun focusRegions(): Set<String> = learnedRegions() + Session.saved.map { it.region }.filter { it in REGION_CODES }
 
@@ -3145,10 +3246,21 @@ class Engine private constructor(private val app: Context) {
     }
 
     /** Pela tela: o painel sai da frente e o resultado fica em Session.traceHits. */
+    /** Lembra se o "O que escreve aqui?" funciona neste aparelho: o autoteste mostra, e assim dá para saber antes de tentar. */
+    private fun noteDebugger(e: Throwable?) {
+        val v = when {
+            e == null -> "funciona"
+            "não deixou observar" in (e.message ?: "") -> "não funciona neste aparelho (${e.message})"
+            else -> return
+        }
+        prefs.edit().putString("depurador", v).apply()
+    }
+
     fun traceLater(addr: String, label: String, secs: Int = 10) {
         Session.status = "Contando chamadas de $label por $secs s: jogue normalmente…"
         scope.launch {
             val r = runCatching { traceCalls(addr, secs) }
+            noteDebugger(r.exceptionOrNull())
             withContext(Dispatchers.Main) {
                 r.onSuccess { Session.traceHits = label to it }
                 Session.status = r.fold({ "$label rodou ${it.first} vezes em $secs s." }, { "Não deu para contar: ${it.message}" })
@@ -3193,6 +3305,7 @@ class Engine private constructor(private val app: Context) {
         Session.status = "Mude $label no jogo nos próximos $secs s (gaste ou ganhe)…"
         scope.launch {
             val r = runCatching { watchWrites(item.addr, secs) }
+            noteDebugger(r.exceptionOrNull())
             withContext(Dispatchers.Main) {
                 r.onSuccess { Session.watchHits = label to it }
                 Session.status = r.fold({ if (it.isEmpty()) "Nada escreveu em $label: mude o valor no jogo enquanto observa." else "${it.size} instrução(ões) escrevem em $label: veja em Salvos." },
@@ -3613,6 +3726,11 @@ class Engine private constructor(private val app: Context) {
             " Os endereços só valem se o jogo não reiniciou desde a exportação."
     }
 
+    fun setFreezeRule(item: SavedItem, rule: String) {
+        Diag.add("Congelar ${label(item)}: " + when (rule) { "up" -> "só deixa subir"; "down" -> "só deixa descer"; else -> "valor fixo" })
+        replace(item) { it.copy(frozen = true, freezeRule = rule) }
+    }
+
     fun setFrozen(items: List<SavedItem>, frozen: Boolean) {
         Diag.add("${if (frozen) "Congelados" else "Descongelados"} ${items.size} salvos")
         items.forEach { item -> replace(item) { it.copy(frozen = frozen) } }
@@ -3678,10 +3796,11 @@ class Engine private constructor(private val app: Context) {
                     val item = runCatching { d.resolve(old) }.getOrNull() ?: continue
                     if (!stale(item)) want["${item.addr} ${item.type}"] = item  // escrever no endereço velho pode derrubar o jogo
                 }
-                for (k in sentFreeze.keys.toList()) if (want[k]?.value != sentFreeze[k]) { d.send("unfreeze $k", quiet = true); sentFreeze.remove(k) }
-                for ((k, item) in want) if (sentFreeze[k] != item.value) try {
-                    d.send("freeze $k ${item.value}", quiet = true)
-                    sentFreeze[k] = item.value
+                // a regra vai junto: mudar de "fixo" para "só subir" manda de novo
+                for (k in sentFreeze.keys.toList()) if (want[k]?.let { it.value + it.freezeRule } != sentFreeze[k]) { d.send("unfreeze $k", quiet = true); sentFreeze.remove(k) }
+                for ((k, item) in want) if (sentFreeze[k] != item.value + item.freezeRule) try {
+                    d.send("freeze $k ${item.value} ${item.freezeRule}".trim(), quiet = true)
+                    sentFreeze[k] = item.value + item.freezeRule
                     if (freezeFailing.remove(k)) Diag.add("Congelamento voltou a funcionar em 0x${item.addr}")
                 } catch (e: IOException) {
                     if (e.message == "o jogo fechou") throw e
@@ -3763,7 +3882,7 @@ internal fun normalizeNumbers(input: String): String =
 private fun SavedItem.toJson() = JSONObject().put("addr", addr).put("type", type).put("region", region).put("value", value).put("name", name).put("frozen", frozen)
     .put("pointer", pointer).put("id", id).put("anchor", anchor).put("offset", offset).put("pid", pid)
     .put("chains", JSONArray(chains)).put("sig", sig).put("sigOff", sigOff).put("verified", verified)
-    .put("trusted", trusted).put("il2", il2).put("il2Field", il2Field).put("temp", temp).put("folder", folder).put("history", JSONArray(history)).apply { if (!seenMin.isNaN()) put("seenMin", seenMin).put("seenMax", seenMax) }  // JSON não aceita NaN
+    .put("trusted", trusted).put("il2", il2).put("il2Field", il2Field).put("temp", temp).put("folder", folder).put("freezeRule", freezeRule).put("history", JSONArray(history)).apply { if (!seenMin.isNaN()) put("seenMin", seenMin).put("seenMax", seenMax) }  // JSON não aceita NaN
 
 /** Namespaces de bibliotecas: vão para o fim da lista de classes (o que interessa é o código do próprio jogo). */
 private val LIBS = listOf(
@@ -3984,6 +4103,7 @@ private fun JSONObject.toSaved(): SavedItem {
         il2 = optString("il2", "").takeIf { IL2.matches(it) }.orEmpty(), temp = optBoolean("temp", false),
         il2Field = optString("il2Field", "").takeIf { FIELD.matches(it) }.orEmpty(),
         folder = optString("folder", "").take(40),
+        freezeRule = optString("freezeRule", "").takeIf { it == "up" || it == "down" }.orEmpty(),
     )
 }
 
@@ -4022,6 +4142,12 @@ internal fun readable(value: String, cipherType: String): String? {
 const val MEMORY_FILE = "tinker-memoria-ia.json"
 private val AI_ERRORS = listOf("Gemini respondeu", "Gemini recusou", "Groq respondeu", "O Groq recusou", "Sem conexão", "O limite grátis", "A cota grátis", "Sem resposta")
 private val GEMINI_KEY = Regex("""[A-Za-z0-9._-]{20,200}""")
+/** No Auto, os tipos que o motor do jogo usa além dos comuns: Flutter (Dart) e JavaScript guardam inteiro em dobro. */
+internal fun engineTypes(name: String?): List<String> = when (name) {
+    "Flutter", "Cocos" -> listOf("i32x2", "i64x2")
+    else -> emptyList()
+}
+
 // regiões que a busca conhece (o V, vídeo, nunca entra)
 internal val REGION_CODES = setOf("Jh", "J", "Ch", "Ca", "Cd", "Cb", "A", "S", "As", "O")
 

@@ -226,6 +226,13 @@ class ValuesTest {
     }
 
     @Test
+    fun engineExtraTypes() {
+        assertEquals(listOf("i32x2", "i64x2"), engineTypes("Flutter"))
+        assertEquals(emptyList<String>(), engineTypes("Unity IL2CPP"))
+        assertEquals(emptyList<String>(), engineTypes(null))
+    }
+
+    @Test
     fun busyRegionsPicksMostWritten() {
         assertEquals(setOf("Ca", "A"), busyRegions(listOf(Triple("Ca", 800L, 9000L), Triple("A", 150L, 4000L), Triple("Jh", 10L, 500L), Triple("V", 900L, 900L))))
         assertEquals(emptySet<String>(), busyRegions(listOf(Triple("Ca", 0L, 10L))))

@@ -7,6 +7,7 @@
 #include <dirent.h>
 #include <elf.h>
 #include <stddef.h>
+#include <sys/mman.h>
 #include <sys/ptrace.h>
 #include <time.h>
 #if defined(__x86_64__)
@@ -1011,7 +1012,8 @@ static void cmd_write(const char *addr, const char *name, const char *value) {
 // por salvo a cada 200 ms pelo pipe; com muitos salvos isso dava lag e atrasava os outros comandos.
 #define FREEZE_MAX 512
 #define FREEZE_FAILS 25  // 2,5 s sem conseguir escrever: o objeto foi liberado; sai da lista (escrever ali derruba o jogo)
-typedef struct { uint64_t addr; int type, fails; unsigned char val[8]; } frz_t;
+// mode: 0 fixo; 1 "up" (só deixa subir: o jogo não tira, mas o que ganhar fica); 2 "down" (só deixa descer)
+typedef struct { uint64_t addr; int type, fails, mode; unsigned char val[8]; } frz_t;
 static frz_t frz[FREEZE_MAX];
 static int nfrz;
 static pthread_mutex_t frz_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -1026,6 +1028,11 @@ static void *freeze_thread(void *arg) {
             frz_t *f = &frz[i];
             unsigned char cur[8];
             int len = TYPES[B(f->type)].size;
+            // com regra: o valor andou para o lado permitido; vira o novo congelado (não escreve)
+            if (f->mode && !load(f->addr, f->type, cur, 0)) {
+                double c = num(B(f->type), cur), v = num(B(f->type), f->val);
+                if (f->mode == 1 ? c >= v : c <= v) { memcpy(f->val, cur, len); f->fails = 0; frz[k++] = *f; continue; }
+            }
             // igual ao congelado: não escreve (menos mexida na memória do jogo); cifrado sempre reescreve (a chave muda)
             if (!(f->type & (XOR | TAG)) && !read_mem(f->addr, cur, len) && !memcmp(cur, f->val, len)) f->fails = 0;
             else if (store(f->addr, f->type, f->val)) f->fails++;
@@ -1038,7 +1045,7 @@ static void *freeze_thread(void *arg) {
     return NULL;
 }
 
-static void cmd_freeze(const char *addr, const char *name, const char *value) {
+static void cmd_freeze(const char *addr, const char *name, const char *value, const char *rule) {
     int t = find_type(name);
     value_t v;
     unsigned char b[8] = {0};
@@ -1053,7 +1060,7 @@ static void cmd_freeze(const char *addr, const char *name, const char *value) {
     while (i < nfrz && !(frz[i].addr == a && frz[i].type == t)) i++;
     if (i == FREEZE_MAX) { pthread_mutex_unlock(&frz_lock); puts("err congelados demais"); return; }
     if (i == nfrz) nfrz++;
-    frz[i] = (frz_t){a, t, 0, {0}};
+    frz[i] = (frz_t){a, t, 0, !strcmp(rule, "up") ? 1 : !strcmp(rule, "down") ? 2 : 0, {0}};
     memcpy(frz[i].val, b, sizeof b);
     pthread_mutex_unlock(&frz_lock);
     puts("ok");
@@ -1626,6 +1633,27 @@ static void cmd_activity(const char *arg) {
         if (a.total[i]) printf("act %s %" PRIu64 " %" PRIu64 "\n", REGIONS[i], kb[i], a.total[i] * (uint64_t)a.pg >> 10);
     printf("how %s\n", soft ? "soft" : "smaps");
     printf("ok %" PRIu64 "\n", sum);
+}
+
+// ---- dados do autoteste do app: um daemon se liga a ele mesmo e testa Lua, foto e "onde escreve" nestes, sem tocar no jogo ----
+static void cmd_selftestdata(void) {
+    static unsigned char *tbl, *fresh;
+    if (!tbl) {
+        // tabela do Lua 5.4 como a do xLua: { gold = 31415 }
+        static unsigned char str[64], nodes[2 * 24], t[64];
+        str[8] = 0x04; str[11] = 4; memcpy(str + 24, "gold", 4);
+        long long gold = 31415;
+        void *sp = str;
+        memcpy(nodes, &gold, 8); nodes[8] = 0x03; nodes[9] = 0x44; memcpy(nodes + 16, &sp, 8);
+        void *np = nodes;
+        t[8] = 0x05; t[11] = 1; memcpy(t + 24, &np, 8);
+        tbl = t;
+        fresh = mmap(NULL, 1 << 20, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);  // ainda não escrita
+        if (fresh == MAP_FAILED) fresh = NULL;
+    }
+    printf("lua %" PRIx64 "\n", (uint64_t)(uintptr_t)tbl);
+    printf("fresh %" PRIx64 "\n", (uint64_t)(uintptr_t)fresh);
+    puts("ok");
 }
 
 // "libjogo.so+1a2b30 18 40": base da lib + 1a2b30, lê o ponteiro, soma 18, lê, soma 40 = endereço do valor.
@@ -2349,6 +2377,7 @@ int main(void) {
         else if (!strcmp(cmd, "photorestore")) cmd_photorestore(strcmp(a1, "except") ? a1 : strstr(line, "except"));
         else if (!strcmp(cmd, "photodrop")) { drop_photo(); puts("ok"); }
         else if (!strcmp(cmd, "activity")) cmd_activity(a1);
+        else if (!strcmp(cmd, "selftestdata")) cmd_selftestdata();
         else if (!strcmp(cmd, "watch")) cmd_watch(a1, a2);
         else if (!strcmp(cmd, "trace")) cmd_trace(a1, a2);
         else if (!strcmp(cmd, "il2methods")) cmd_il2methods(a1);
@@ -2358,7 +2387,7 @@ int main(void) {
         else if (!strcmp(cmd, "dump")) cmd_dump(a1, a2, a3);
         else if (!strcmp(cmd, "write")) cmd_write(a1, a2, a3);
         else if (!strcmp(cmd, "writeall")) cmd_writeall(a1);
-        else if (!strcmp(cmd, "freeze")) cmd_freeze(a1, a2, a3);
+        else if (!strcmp(cmd, "freeze")) cmd_freeze(a1, a2, a3, a4);
         else if (!strcmp(cmd, "unfreeze")) cmd_unfreeze(a1, a2);
         else if (!strcmp(cmd, "frozen")) cmd_frozen();
         else if (!strcmp(cmd, "pause")) puts(kill(target, SIGSTOP) ? "err não pausou" : "ok");
