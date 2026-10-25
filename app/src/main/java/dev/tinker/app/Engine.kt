@@ -1207,10 +1207,28 @@ class Engine private constructor(private val app: Context) {
             Session.sheetRequests.clear(); Session.sheetRequests.addAll(ask)
             if (fresh) "Planilha: ${ask.size} pedido(s) esperando você no painel" else ""
         }
+        if (msg.isNotEmpty()) notifyRequests(ask)
         // a pessoa marcou "Sempre permitir" para este tipo: acontece sem perguntar (um de cada tipo por volta)
         auto.distinctBy { it.tipo }.forEach { answerRequest(it, true, remembered = true) }
         auto.groupBy { it.tipo }.values.flatMap { it.drop(1) }.forEach { answerRequest(it, false) }
         msg
+    }
+
+    /** Aviso no celular quando chega pedido novo: o toque abre o Tinker, onde a pessoa permite ou ignora. */
+    private fun notifyRequests(list: List<SheetRequest>) = runCatching {
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            app.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) return@runCatching
+        val nm = app.getSystemService(android.app.NotificationManager::class.java)
+        nm.createNotificationChannel(android.app.NotificationChannel("pedidos", "Pedidos da planilha", android.app.NotificationManager.IMPORTANCE_DEFAULT))
+        val open = android.app.PendingIntent.getActivity(app, 0,
+            android.content.Intent(app, MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            android.app.PendingIntent.FLAG_IMMUTABLE)
+        nm.notify(2, android.app.Notification.Builder(app, "pedidos")
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle(if (list.size == 1) "Pedido da planilha" else "${list.size} pedidos da planilha")
+            .setContentText(list.joinToString(" · ") { REQUEST_TYPES[it.tipo].orEmpty() }.take(200))
+            .setContentIntent(open).setAutoCancel(true)
+            .build())
     }
 
     /** A pessoa tocou em Aplicar (ou Ignorar) num pedido da planilha: faz e devolve a resposta para a aba Pedidos. */

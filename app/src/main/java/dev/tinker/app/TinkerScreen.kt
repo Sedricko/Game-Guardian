@@ -162,8 +162,18 @@ fun TinkerPanel(
                         listOf(r.jogo, r.texto).filter { it.isNotEmpty() }.joinToString(" · ").takeIf { it.isNotEmpty() }?.let {
                             Text(it.take(300), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
                         }
+                        // os outros que esperam, para "Permitir todos" saber o que vai acontecer
+                        s.sheetRequests.drop(1).take(4).forEach { o ->
+                            Text("• ${REQUEST_TYPES[o.tipo]}: ${listOf(o.jogo, o.texto).filter { it.isNotEmpty() }.joinToString(" · ").take(120)}",
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                        }
+                        if (s.sheetRequests.size > 5) Text("… e mais ${s.sheetRequests.size - 5}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(shape = MaterialTheme.shapes.medium, onClick = { reqScope.launch { s.status = engine.answerRequest(r, true) } }) { Text("Permitir só desta vez") }
+                            if (s.sheetRequests.size > 1) Button(shape = MaterialTheme.shapes.medium, onClick = {
+                                val all = s.sheetRequests.toList()
+                                reqScope.launch { all.forEach { s.status = engine.answerRequest(it, true) }; s.status = "Pedidos da planilha: ${all.size} permitidos" }
+                            }) { Text("Permitir todos (${s.sheetRequests.size})") }
                             if (r.tipo in TRUSTABLE_REQUESTS) OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = {
                                 s.alwaysRequests = s.alwaysRequests + r.tipo
                                 engine.saveSettings()
