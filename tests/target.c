@@ -1,4 +1,5 @@
 // Processo alvo dos testes: guarda valores conhecidos e espera.
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,7 +18,20 @@ static struct fi player_fields[3];
 // em .data (dentro do arquivo do programa): base fixa, como a de uma .so de jogo
 static void *volatile root = (void *)1;
 
+// "o que escreve aqui": uma thread muda o contador o tempo todo, como o jogo mudando a vida
+static volatile int ticks;
+static void *ticker(void *arg) {
+    (void)arg;
+    for (;;) { ticks++; usleep(20000); }
+    return NULL;
+}
+
+// código que nunca roda: o teste escreve nele (patch) e confere
+__attribute__((noinline)) int never_called(int x) { return x * 3 + 7; }
+
 int main(void) {
+    pthread_t th;
+    pthread_create(&th, NULL, ticker, NULL);
     volatile int *i = malloc(4096);
     volatile float *f = malloc(4096);
     i[7] = 123456789;
@@ -57,8 +71,8 @@ int main(void) {
     volatile unsigned long long *w = malloc(64);
     w[0] = 0x1F2E3D4C5B6A7988ULL;
     w[1] = 7777777777ULL ^ 0x1F2E3D4C5B6A7988ULL;
-    printf("%d %lx %lx %lx %lx %lx %lx %lx %lx %lx\n", getpid(), (unsigned long)&i[7], (unsigned long)&f[3], (unsigned long)v, (unsigned long)x,
-           (unsigned long)obj, (unsigned long)y, (unsigned long)z, (unsigned long)q, (unsigned long)w);
+    printf("%d %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx\n", getpid(), (unsigned long)&i[7], (unsigned long)&f[3], (unsigned long)v, (unsigned long)x,
+           (unsigned long)obj, (unsigned long)y, (unsigned long)z, (unsigned long)q, (unsigned long)w, (unsigned long)&ticks, (unsigned long)never_called);
     fflush(stdout);
     pause();
     return 0;

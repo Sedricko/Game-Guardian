@@ -4,6 +4,18 @@
 #define _GNU_SOURCE
 #define _FILE_OFFSET_BITS 64  // pread em endereços acima de 2 GB mesmo num build 32 bits
 #include <dirent.h>
+#include <elf.h>
+#include <stddef.h>
+#include <sys/ptrace.h>
+#include <time.h>
+#if defined(__x86_64__)
+#include <sys/user.h>
+#elif defined(__aarch64__)
+#include <asm/ptrace.h>
+#endif
+#ifndef NT_ARM_HW_WATCH
+#define NT_ARM_HW_WATCH 0x403
+#endif
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
@@ -1176,6 +1188,138 @@ static void cmd_resolve(char *chain) {
     printf("ok %" PRIx64 "\n", a);
 }
 
+// Onde fica um endereço: "lib.so+deslocamento" (a lib de base mais alta que não passa dele). Código dentro de uma lib
+// fica sempre no mesmo deslocamento, então um patch guardado assim vale em qualquer vez que o jogo abrir.
+static int where_of(uint64_t a, char *out, size_t len) {
+    if (mods_pid != target) { psize = ptr_size(); if (load_modules()) return -1; }
+    int best = -1;
+    for (size_t i = 0; i < nmods; i++) if (mods[i].base <= a && (best < 0 || mods[i].base > mods[best].base)) best = (int)i;
+    if (best < 0 || a - mods[best].base > 0x20000000) return -1;
+    snprintf(out, len, "%s+%" PRIx64, mods[best].name, a - mods[best].base);
+    return 0;
+}
+
+static void cmd_where(const char *addr) {
+    char w[160];
+    if (where_of(strtoull(addr, NULL, 16), w, sizeof w)) puts("err fora das libs do jogo");
+    else printf("ok %s\n", w);
+}
+
+// "O que escreve aqui", como o "Find out what writes to this address" do Cheat Engine: um ponto de observação de
+// hardware em cada thread do jogo por alguns segundos; cada instrução que escreve no endereço é anotada e o jogo segue.
+static int hw_watch(pid_t tid, uint64_t addr, int on) {
+#if defined(__x86_64__)
+    if (on && ptrace(PTRACE_POKEUSER, tid, offsetof(struct user, u_debugreg[0]), (void *)(uintptr_t)addr)) return -1;
+    ptrace(PTRACE_POKEUSER, tid, offsetof(struct user, u_debugreg[6]), 0);
+    unsigned long dr7 = on ? (1UL | (1UL << 16) | (3UL << 18)) : 0;  // DR0 ligado, só escrita, 4 bytes
+    return ptrace(PTRACE_POKEUSER, tid, offsetof(struct user, u_debugreg[7]), (void *)dr7) ? -1 : 0;
+#elif defined(__aarch64__)
+    struct user_hwdebug_state st;
+    memset(&st, 0, sizeof st);
+    st.dbg_regs[0].addr = addr & ~7ULL;
+    // ligado, só no app (EL0), só escrita, os 4 bytes do valor dentro da palavra de 8
+    st.dbg_regs[0].ctrl = on ? (1u | (2u << 1) | (2u << 3) | ((0xfu << (addr & 7)) << 5)) : 0;
+    struct iovec io = {&st, offsetof(struct user_hwdebug_state, dbg_regs) + sizeof st.dbg_regs[0]};
+    return ptrace(PTRACE_SETREGSET, tid, NT_ARM_HW_WATCH, &io) ? -1 : 0;
+#else
+    (void)tid; (void)addr; (void)on;
+    errno = ENOSYS;
+    return -1;
+#endif
+}
+
+static uint64_t thread_pc(pid_t tid) {
+#if defined(__x86_64__)
+    struct user_regs_struct r;
+    return ptrace(PTRACE_GETREGS, tid, 0, &r) ? 0 : r.rip;  // x86: já passou da instrução (o PC é o da seguinte)
+#elif defined(__aarch64__)
+    struct user_pt_regs r;
+    struct iovec io = {&r, sizeof r};
+    return ptrace(PTRACE_GETREGSET, tid, NT_PRSTATUS, &io) ? 0 : r.pc;  // arm64: a própria instrução, ainda não rodou
+#else
+    (void)tid;
+    return 0;
+#endif
+}
+
+#define WATCH_TIDS 1024
+static double now_s(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec + t.tv_nsec / 1e9; }
+
+static void cmd_watch(const char *addr, const char *secs) {
+    uint64_t a = strtoull(addr, NULL, 16);
+    int sec = atoi(secs);
+    if (sec < 1 || sec > 60) sec = 15;
+    if (a % 4) { puts("err o endereço precisa ser múltiplo de 4"); return; }
+    static pid_t tids[WATCH_TIDS];
+    static char held[WATCH_TIDS];
+    int nt = 0, armed = 0, why = 0;
+    char path[64];
+    snprintf(path, sizeof path, "/proc/%d/task", target);
+    DIR *dir = opendir(path);
+    if (!dir) { puts("err não leu as threads do jogo"); return; }
+    for (struct dirent *e; (e = readdir(dir)) && nt < WATCH_TIDS;) if (atoi(e->d_name) > 0) tids[nt++] = atoi(e->d_name);
+    closedir(dir);
+    // pega cada thread um instante, liga o ponto de observação e solta
+    for (int i = 0; i < nt; i++) {
+        held[i] = 0;
+        if (ptrace(PTRACE_SEIZE, tids[i], 0, 0)) { why = errno; continue; }
+        held[i] = 1;
+        int st;
+        if (ptrace(PTRACE_INTERRUPT, tids[i], 0, 0) || waitpid(tids[i], &st, __WALL) != tids[i]) continue;
+        if (!hw_watch(tids[i], a, 1)) armed++;
+        else why = errno;
+        ptrace(PTRACE_CONT, tids[i], 0, 0);
+    }
+    struct { uint64_t pc; int n; } hit[32];
+    int nh = 0;
+    double end = now_s() + sec;
+    while (armed && now_s() < end) {
+        int st;
+        pid_t t = waitpid(-1, &st, __WALL | WNOHANG);
+        if (t <= 0) { usleep(2000); continue; }
+        int k = 0;
+        while (k < nt && tids[k] != t) k++;
+        if (k == nt) continue;
+        if (WIFEXITED(st) || WIFSIGNALED(st)) { held[k] = 0; continue; }
+        if (!WIFSTOPPED(st)) continue;
+        int sig = WSTOPSIG(st), event = st >> 16;
+        if (sig == SIGTRAP && !event) {
+            uint64_t pc = thread_pc(t);
+            int j = 0;
+            while (j < nh && hit[j].pc != pc) j++;
+            if (j == nh && nh < 32) hit[nh++] = (typeof(hit[0])){pc, 0};
+            if (j < nh) hit[j].n++;
+#if defined(__aarch64__)
+            // a instrução ainda não rodou: desliga, deixa ela rodar sozinha e liga de novo
+            hw_watch(t, a, 0);
+            if (!ptrace(PTRACE_SINGLESTEP, t, 0, 0)) waitpid(t, &st, __WALL);
+            hw_watch(t, a, 1);
+#else
+            hw_watch(t, a, 1);  // x86: limpa o registro de status e segue
+#endif
+            ptrace(PTRACE_CONT, t, 0, 0);
+        } else if (event == PTRACE_EVENT_STOP) {
+            ptrace(PTRACE_CONT, t, 0, 0);
+        } else {
+            ptrace(PTRACE_CONT, t, 0, sig);  // sinal do próprio jogo: entrega a ele
+        }
+    }
+    // desliga tudo e solta o jogo
+    for (int i = 0; i < nt; i++) {
+        if (!held[i]) continue;
+        int st;
+        if (!ptrace(PTRACE_INTERRUPT, tids[i], 0, 0) && waitpid(tids[i], &st, __WALL) == tids[i]) hw_watch(tids[i], a, 0);
+        ptrace(PTRACE_DETACH, tids[i], 0, 0);
+    }
+    if (!armed) { printf("err o sistema não deixou observar o endereço (%s)\n", strerror(why ? why : ENOSYS)); return; }
+    for (int j = 0; j < nh; j++) {
+        char w[160];
+        if (where_of(hit[j].pc, w, sizeof w)) snprintf(w, sizeof w, "?");
+        printf("pc %" PRIx64 " %d %s\n", hit[j].pc, hit[j].n, w);
+    }
+    printf("ok %d\n", nh);
+}
+
 // AOB: sequência de bytes com curingas, ex.: "15CD5B07??020000". Cada ?? aceita qualquer byte.
 #define AOB_MAX 192
 typedef struct { unsigned char b[AOB_MAX], m[AOB_MAX]; int n, first; chunks_t cs; hits_t *out; } aob_t;
@@ -1605,6 +1749,8 @@ int main(void) {
         else if (!strcmp(cmd, "il2objs")) cmd_il2objs(a1);
         else if (!strcmp(cmd, "il2classes")) cmd_il2classes();
         else if (!strcmp(cmd, "resolve")) cmd_resolve(strstr(line, "resolve") + 7);
+        else if (!strcmp(cmd, "where")) cmd_where(a1);
+        else if (!strcmp(cmd, "watch")) cmd_watch(a1, a2);
         else if (!strcmp(cmd, "list")) cmd_list(strtoul(a1, NULL, 10));
         else if (!strcmp(cmd, "read")) cmd_read(a1, a2);
         else if (!strcmp(cmd, "dump")) cmd_dump(a1, a2, a3);

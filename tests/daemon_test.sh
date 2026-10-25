@@ -5,10 +5,10 @@ cd "$(dirname "$0")/.."
 out=$(mktemp -d); tpid=
 trap 'kill -9 $tpid 2>/dev/null || true; rm -rf "$out"' EXIT  # -9: um alvo parado (SIGSTOP) ignora o SIGTERM
 cc -O2 -Wall -Werror -pthread -o "$out/tinkerd" daemon/tinkerd.c -lm
-cc -O2 -o "$out/target" tests/target.c
+cc -O2 -pthread -o "$out/target" tests/target.c
 "$out/target" > "$out/info" & tpid=$!
 for _ in $(seq 50); do [ -s "$out/info" ] && break; sleep 0.1; done
-read -r pid iaddr faddr paddr xaddr oaddr yaddr zaddr qaddr waddr < "$out/info"
+read -r pid iaddr faddr paddr xaddr oaddr yaddr zaddr qaddr waddr taddr caddr < "$out/info"
 
 got=$("$out/tinkerd" <<CMDS
 search i32 1
@@ -122,6 +122,21 @@ grep -qE "^$yaddr xi32@8 (Ch|A) 31337$" <<<"$gg" && grep -qx "ok 41414" <<<"$gg"
 x8=$(printf '%s\n' "attach $pid" "search i64,xi64 7777777777" "list 5" "write $waddr xi64 8888888888" "read $waddr xi64" "frozen" | "$out/tinkerd")
 echo "$x8"
 grep -qE "^$waddr xi64 (Ch|A) 7777777777$" <<<"$x8" && grep -qx "ok 8888888888" <<<"$x8" || { echo "FALHOU: cifrado de 8 bytes"; exit 1; }
+
+# O que escreve aqui: o ponto de observação acha a instrução da thread que muda o contador; o jogo continua rodando
+wt=$(printf '%s\n' "attach $pid" "watch $taddr 1" "watch 1 1" "where $caddr" "read $taddr i32" | "$out/tinkerd")
+echo "$wt"
+grep -qE "^pc [0-9a-f]+ [1-9][0-9]* target\+[0-9a-f]+$" <<<"$wt" && grep -qE "^ok [1-9]" <<<"$wt" && grep -qx "err o endereço precisa ser múltiplo de 4" <<<"$wt" \
+    && grep -qE "^ok target\+[0-9a-f]+$" <<<"$wt" || { echo "FALHOU: watch/where"; exit 1; }
+sleep 0.2; kill -0 "$pid" || { echo "FALHOU: o alvo morreu depois do watch"; exit 1; }
+t1=$(printf '%s\n' "attach $pid" "read $taddr i32" | "$out/tinkerd" | tail -1); sleep 0.3
+t2=$(printf '%s\n' "attach $pid" "read $taddr i32" | "$out/tinkerd" | tail -1)
+[ "$t1" != "$t2" ] || { echo "FALHOU: a thread do alvo parou depois do watch"; exit 1; }
+
+# Patch: escreve no código (página sem escrita) e lê de volta
+pt=$(printf '%s\n' "attach $pid" "read $caddr i32" "write $caddr i32 -1869574000" "read $caddr i32" | "$out/tinkerd")
+echo "$pt"
+grep -qx "ok -1869574000" <<<"$pt" || { echo "FALHOU: escrita no código"; exit 1; }
 
 # Ponteiros: acha root → +10 → +20 e o caminho volta a dar no mesmo endereço
 ptr=$(printf '%s\n' "attach $pid" "pointers $paddr 256 3" | "$out/tinkerd")

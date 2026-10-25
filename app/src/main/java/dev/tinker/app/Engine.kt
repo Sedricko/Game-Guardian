@@ -71,6 +71,17 @@ val REGION_NAMES = mapOf(
     "Cb" to "C++ .bss", "A" to "Anônima", "S" to "Pilha", "As" to "Ashmem", "O" to "Outras", "V" to "Vídeo (pode travar o jogo)",
 )
 
+// Patch de código: troca bytes de instruções numa lib do jogo (ex.: o SUB que tira 1 da madeira vira NOP). where é
+// "lib.so+deslocamento": o código fica sempre no mesmo lugar da lib, então o patch vale em qualquer vez que o jogo abrir.
+// orig/new: os bytes em hexadecimal (orig para desfazer); suspect: o jogo fechou logo depois de aplicar, não reaplica sozinho.
+data class CodePatch(
+    val id: String = java.util.UUID.randomUUID().toString(), val name: String, val where: String, val orig: String, val new: String,
+    val enabled: Boolean = false, val suspect: Boolean = false, val note: String = "",
+)
+
+// Uma instrução na aba Código: endereço, onde fica na lib, os 4 bytes e o que ela faz.
+data class CodeRow(val addr: String, val where: String, val word: Int?, val text: String)
+
 data class GameProcess(val pid: Int, val pkg: String, val label: String, val icon: ImageBitmap?)
 // base: na busca perto, o endereço de partida em volta do qual este foi achado
 data class Hit(val addr: String, val type: String, val region: String, val value: String, val base: String = "", val asDword: String = "")
@@ -174,7 +185,7 @@ data class SheetRequest(val id: String, val tipo: String, val jogo: String, val 
 // tipos fixos que a aba Pedidos aceita: anotações e conferências, nada de comando livre nem escrita no jogo
 // os únicos que podem ficar "sempre permitidos": só conferem e mandam informação; nota e lição mudam o que a IA faz, pedem o toque toda vez
 // versão do Code.gs que este app espera (a mesma constante VERSAO lá): sobe junto quando o script muda
-const val SCRIPT_VERSION = 13
+const val SCRIPT_VERSION = 14
 
 val TRUSTABLE_REQUESTS = setOf("autoteste", "relatorio")
 val REQUEST_TYPES = mapOf("dica" to "Dica para você", "nota" to "Anotar no jogo", "licao" to "Guardar lição da IA", "autoteste" to "Rodar o autoteste", "relatorio" to "Mandar o relatório")
@@ -271,12 +282,15 @@ object Session {
     var gameGoneByUser = false  // fechado pelo botão do Tinker: mostra "Reabrir", mas não abre o painel sozinho  // o jogo fechou sozinho (não pelo Tinker): pergunta se reabre  // versão nova na página de releases: nome e link do APK  // a bolinha abre a barra rápida em vez do painel  // a busca também procura valores cifrados (🔒)
     var canUndo by mutableStateOf(false)  // há um refino para desfazer  // pausa o jogo durante busca/refino, para o valor não mudar no meio
     var view by mutableStateOf<Pair<String, String>?>(null)
+    var codeMode by mutableStateOf(false)  // aba Memória: instruções (Código)
+    var watchHits by mutableStateOf<Pair<String, List<Triple<String, Int, String>>>?>(null)  // último "o que escreve aqui"
     var fichaMode by mutableStateOf(false)  // aba Memória: lista de endereços (false) ou ficha do objeto (true)
     var tab by mutableIntStateOf(0)  // índice em TABS  // visualizador de memória: endereço e tipo  // segurando o "olho": painel quase invisível
     val saved = mutableStateListOf<SavedItem>()
     val recipes = mutableStateListOf<Recipe>()
     val aiProposals = mutableStateListOf<AiProposal>()
     val sheetRequests = mutableStateListOf<SheetRequest>()
+    val patches = mutableStateListOf<CodePatch>()
     var alwaysRequests by mutableStateOf(setOf<String>())
     var autoReports by mutableStateOf(true)  // relatório sozinho a cada 10 min de jogo (com atividade nova) e ao fechar o jogo pelo Tinker  // tipos que a pessoa mandou lembrar
     val aiUndo = mutableStateListOf<AiUndo>()
@@ -495,6 +509,12 @@ class Engine private constructor(private val app: Context) {
         // salvos com pid continuam congelados: ficam parados até voltar sozinhos quando o jogo reabrir
         Session.saved.replaceAll { if (it.pid == 0) it.copy(frozen = false) else it }
         Session.status = "O jogo fechou. Veja a aba Registro para o motivo."
+        // fechou menos de 1 min depois de ligar um patch: o patch é suspeito e não volta sozinho
+        if (System.currentTimeMillis() - lastPatchAt < 60_000 && Session.patches.any { it.enabled }) {
+            for (i in Session.patches.indices) if (Session.patches[i].enabled) Session.patches[i] = Session.patches[i].copy(enabled = false, suspect = true)
+            storePatches()
+            Diag.add("O jogo fechou logo depois de um patch de código: os patches ligados ficaram como suspeitos e desligados")
+        }
         sendReport("o jogo fechou sozinho", auto = true)
         Diag.add("=== O jogo ${p.label} (PID ${p.pid}) fechou. Falhas registradas pelo Android: ===")
         runCatching { dedupe(crashesOf(d.call("crashlog").lines, p.pkg)).forEach(Diag::add) }
@@ -648,6 +668,7 @@ class Engine private constructor(private val app: Context) {
         switchSaved(p.pkg)
         Session.aiProposals.clear()  // endereços da vez anterior do jogo
         scope.launch { if (Session.keySource.isNotBlank()) Diag.add(cloudPull()) }  // o que outro aparelho achou deste jogo já chega
+        scope.launch { delay(3000); reapplyPatches() }  // patches de código ligados voltam sozinhos
         Session.aiUndo.clear()
         AiConversations.clear()
         Session.engine = detectEngine(p.pkg)?.also { Diag.add("Motor do jogo: $it") }
@@ -1152,6 +1173,7 @@ class Engine private constructor(private val app: Context) {
         .put("jogos", JSONObject().apply {
             library().forEach { g ->
                 put(g.pkg, JSONObject().put("nome", g.name).put("notas", g.notes).put("receitas", jsonFile("recipes-${g.pkg}.json"))
+                    .put("patches", jsonFile("patches-${g.pkg}.json"))
                     // pid -1 (de outra vez do jogo): na restauração o salvo é procurado de novo (classe, ponteiro ou assinatura), nunca usado no endereço velho
                     .put("salvos", JSONArray().apply { portableSaved(g.pkg).forEach { o ->
                         // 200 caminhos de reserva por salvo deixavam o backup enorme: os 20 primeiros bastam para voltar
@@ -1191,6 +1213,7 @@ class Engine private constructor(private val app: Context) {
             val notes = mergeLines(f.takeIf { it.exists() }?.readText().orEmpty(), g.optString("notas"))
             if (notes.isNotEmpty()) f.writeText(notes)
             recipes += mergeRecipes(pkg, g.optJSONArray("receitas") ?: JSONArray())
+            mergePatches(pkg, g.optJSONArray("patches") ?: JSONArray())
             saved += mergeSaved(pkg, g.optJSONArray("salvos") ?: JSONArray())
             count++
         }
@@ -1198,6 +1221,16 @@ class Engine private constructor(private val app: Context) {
         val n = lessons().lines().count { it.isNotBlank() }
         Diag.add("Memória da IA importada: $n lições, $count jogos, +$recipes receitas, +$saved salvos")
         return "Memória importada: $n lições e $count jogos (+$recipes receitas, +$saved salvos novos)."
+    }
+
+    /** Patches de outra instância (planilha): entram desligados; a pessoa liga quando quiser. */
+    private fun mergePatches(pkg: String, a: JSONArray) {
+        val current = pkg == savedPkg
+        val have = if (current) Session.patches.toList() else jsonFile("patches-$pkg.json").let { x -> (0 until x.length()).mapNotNull { x.optJSONObject(it)?.toPatch() } }
+        val new = (0 until a.length()).mapNotNull { a.optJSONObject(it)?.toPatch()?.copy(enabled = false) }.filter { n -> have.none { it.id == n.id } }
+        if (new.isEmpty()) return
+        if (current) { Session.patches.addAll(new); storePatches() }
+        else File(app.filesDir, "patches-$pkg.json").writeText(JSONArray().apply { (have + new).forEach { put(it.toJson()) } }.toString())
     }
 
     /** Receitas novas do backup (validadas como as coladas à mão); mesma id ou mesmo nome já existe, fica a de agora. */
@@ -1767,6 +1800,27 @@ class Engine private constructor(private val app: Context) {
             val changed = objectRows(center).third.filter { r -> old[r.addr]?.let { it.value != r.value } == true }
             (c?.let { "${it.name} em 0x${it.start}" } ?: "Sem classe IL2CPP em volta de 0x$center") + ": ${changed.size} de ${before.size} campos mudaram em $secs s" +
                 changed.take(60).joinToString("") { r -> "\n+${r.off.toString(16)} ${r.label}: ${old.getValue(r.addr).value} → ${r.value} (0x${r.addr})" }
+        },
+        AiTool("o_que_escreve", "Descobre qual instrução do jogo escreve num endereço (como o 'Find out what writes' do Cheat Engine). " +
+            "Antes, diga à pessoa para mudar o valor no jogo (gastar/ganhar) durante os segundos. Devolve lib+deslocamento de cada instrução.",
+            mapOf("endereco" to "endereço do valor em hexadecimal (de um salvo)", "segundos" to "de 5 a 30 (padrão 15)"), listOf("endereco")) { a ->
+            val addr = parseAddress(a.optString("endereco")) ?: return@AiTool "Endereço inválido."
+            val hits = watchWrites(addr, a.optString("segundos").toIntOrNull() ?: 15)
+            if (hits.isEmpty()) "Nada escreveu em 0x$addr nesse tempo. A pessoa precisa mudar o valor no jogo enquanto observa."
+            else hits.joinToString("\n") { (pc, n, w) -> "0x$pc ($w) escreveu $n vez(es)" } + "\nUse ver_codigo no endereço para ler a instrução."
+        },
+        AiTool("ver_codigo", "Mostra as instruções ARM64 em volta de um endereço de código (de o_que_escreve), já traduzidas (SUB, STR, ADD…).",
+            mapOf("endereco" to "endereço da instrução em hexadecimal"), listOf("endereco")) { a ->
+            val addr = parseAddress(a.optString("endereco")) ?: return@AiTool "Endereço inválido."
+            codeAt(addr, 8, 24).joinToString("\n") { r -> "${if (r.addr == addr) "→" else " "} 0x${r.addr} ${r.where} ${r.word?.let { "%08x".format(it) } ?: "????????"} ${r.text}" }
+        },
+        AiTool("propor_patch", "Propõe trocar instruções do jogo (ex.: o SUB que tira 1 do recurso vira NOP 1f2003d5). O patch fica guardado " +
+            "DESLIGADO em Salvos → Patches de código; só a pessoa liga. Explique em uma frase o que muda no jogo.",
+            mapOf("endereco" to "endereço da primeira instrução", "bytes" to "bytes novos em hex, 8 dígitos por instrução, como na memória (NOP = 1f2003d5)",
+                "nome" to "nome curto (ex.: Madeira não diminui)", "motivo" to "o que a instrução fazia e o que passa a fazer"),
+            listOf("endereco", "bytes", "nome")) { a ->
+            val addr = parseAddress(a.optString("endereco")) ?: return@AiTool "Endereço inválido."
+            createPatch(addr, a.optString("bytes"), a.optString("nome").take(60), a.optString("motivo"), apply = false)
         },
         AiTool("ver_endereco", "Mostra a ficha em volta de um endereço (de um resultado da busca): classe e campos com valores.",
             mapOf("endereco" to "endereço em hexadecimal, ex.: 7197b90978"), listOf("endereco")) { a ->
@@ -2711,6 +2765,119 @@ class Engine private constructor(private val app: Context) {
         return "\"$text\" (UTF-16): " + searchAob(utf16, false)
     }
 
+    // ---- código: "o que escreve aqui", ver as instruções e patches ----
+
+    /** "O que escreve aqui": observa o endereço por alguns segundos e devolve as instruções que escreveram nele (pc, vezes, lib+desloc.). */
+    suspend fun watchWrites(addr: String, secs: Int = 15): List<Triple<String, Int, String>> = call { d ->
+        val r = d.send("watch $addr ${secs.coerceIn(3, 30)}")
+        r.lines.filter { it.startsWith("pc ") }.map { it.split(' ') }.filter { it.size >= 4 }
+            .map { Triple(it[1], it[2].toIntOrNull() ?: 0, it[3]) }
+            .also { Diag.add("O que escreve em 0x$addr: " + it.joinToString { (pc, n, w) -> "$w ($n×)" }.ifEmpty { "nada em $secs s" }) }
+    }
+
+    /** Pela tela: roda no escopo do app (o painel some enquanto a pessoa joga) e o resultado fica em Session.watchHits. */
+    fun watchLater(item: SavedItem, secs: Int = 15) {
+        val label = item.name.ifEmpty { "0x${item.addr}" }
+        Session.status = "Mude $label no jogo nos próximos $secs s (gaste ou ganhe)…"
+        scope.launch {
+            val r = runCatching { watchWrites(item.addr, secs) }
+            withContext(Dispatchers.Main) {
+                r.onSuccess { Session.watchHits = label to it }
+                Session.status = r.fold({ if (it.isEmpty()) "Nada escreveu em $label: mude o valor no jogo enquanto observa." else "${it.size} instrução(ões) escrevem em $label: veja em Salvos." },
+                    { "Não deu para observar: ${it.message}" })
+            }
+        }
+    }
+
+    /** As instruções em volta de um endereço de código, já lidas (ARM64). */
+    suspend fun codeAt(addr: String, before: Int = 8, count: Int = 32): List<CodeRow> = call { d ->
+        val start = (addr.toLong(16) - before * 4L).coerceAtLeast(0) / 4 * 4
+        val where = runCatching { d.send("where ${start.toString(16)}", quiet = true).status }.getOrNull()
+        val lib = where?.substringBeforeLast('+')
+        val off = where?.substringAfterLast('+')?.toLongOrNull(16)
+        d.send("dump ${start.toString(16)} i32 $count", quiet = true).lines.mapIndexed { i, l ->
+            val a = start + 4L * i
+            val w = l.substringAfter(' ').toLongOrNull()?.toInt()
+            CodeRow(a.toString(16), if (lib != null && off != null) "$lib+${(off + 4L * i).toString(16)}" else "", w,
+                w?.let { decodeArm64(it, a) } ?: "?")
+        }
+    }
+
+    private fun wordsHex(words: List<Int>) = words.joinToString("") { w -> (0 until 4).joinToString("") { "%02x".format((w ushr (8 * it)) and 0xff) } }
+    private fun hexWords(hex: String) = hex.chunked(8).map { c -> c.chunked(2).reversed().joinToString("").toLong(16).toInt() }
+
+    /** Cria o patch (bytes novos no lugar das instruções em addr) e já aplica; os bytes de agora ficam guardados para desfazer. */
+    suspend fun createPatch(addr: String, newHex: String, name: String, note: String = "", apply: Boolean = true): String {
+        val hex = newHex.replace(" ", "").lowercase()
+        require(Regex("""([0-9a-f]{8}){1,16}""").matches(hex)) { "bytes inválidos: use 8 dígitos por instrução (ex.: 1f2003d5 = NOP)" }
+        require(savedPkg != null) { "escolha o jogo primeiro" }
+        val (where, orig) = call { d ->
+            val w = d.send("where $addr", quiet = true).status
+            val n = hex.length / 8
+            val cur = d.send("dump $addr i32 $n", quiet = true).lines.map { it.substringAfter(' ').toLong().toInt() }
+            w to wordsHex(cur)
+        }
+        require(orig != hex) { "esses já são os bytes de agora" }
+        val p = CodePatch(name = name.ifBlank { where }, where = where, orig = orig, new = hex, note = note.take(300))
+        withContext(Dispatchers.Main) { Session.patches.add(p); storePatches() }
+        Diag.add("Patch criado: ${p.name} em $where ($orig → $hex)")
+        return if (apply) setPatch(p, true) else "Patch \"${p.name}\" guardado (desligado): ligue em Salvos → Patches de código."
+    }
+
+    @Volatile private var lastPatchAt = 0L
+
+    /** Liga (bytes novos) ou desliga (bytes originais) um patch; confere antes que o código ainda é o esperado. */
+    suspend fun setPatch(p: CodePatch, on: Boolean): String {
+        val msg = call { d ->
+            val addr = d.send("resolve ${p.where}", quiet = true).status
+            val n = p.new.length / 8
+            val cur = wordsHex(d.send("dump $addr i32 $n", quiet = true).lines.map { it.substringAfter(' ').toLong().toInt() })
+            val want = if (on) p.new else p.orig
+            when (cur) {
+                want -> "já estava ${if (on) "ligado" else "desligado"}"
+                (if (on) p.orig else p.new) -> {
+                    hexWords(want).forEachIndexed { i, w -> d.send("write ${(addr.toLong(16) + 4L * i).toString(16)} i32 $w") }
+                    if (on) lastPatchAt = System.currentTimeMillis()
+                    if (on) "ligado" else "desligado"
+                }
+                else -> error("o código ali mudou (jogo atualizado?): esperava ${if (on) p.orig else p.new}, achei $cur")
+            }
+        }
+        withContext(Dispatchers.Main) {
+            val i = Session.patches.indexOfFirst { it.id == p.id }
+            if (i >= 0) Session.patches[i] = Session.patches[i].copy(enabled = on, suspect = if (on) false else Session.patches[i].suspect)
+            storePatches()
+        }
+        Diag.add("Patch ${p.name}: $msg")
+        return "Patch \"${p.name}\": $msg."
+    }
+
+    fun removePatch(p: CodePatch) {
+        Session.patches.removeAll { it.id == p.id }
+        storePatches()
+        Diag.add("Patch removido: ${p.name}")
+    }
+
+    /** Jogo reaberto: liga de novo os patches que estavam ligados (menos os suspeitos). */
+    private suspend fun reapplyPatches() {
+        Session.patches.filter { it.enabled && !it.suspect }.forEach { p ->
+            runCatching { setPatch(p, true) }.onFailure { Diag.add("Patch ${p.name} não voltou: ${it.message}") }
+        }
+    }
+
+    private val patchesFile get() = savedPkg?.let { File(app.filesDir, "patches-$it.json") }
+
+    private fun loadPatches() {
+        Session.patches.clear()
+        val a = patchesFile?.takeIf { it.exists() }?.let { f -> runCatching { JSONArray(f.readText()) }.getOrNull() } ?: return
+        for (i in 0 until a.length()) a.optJSONObject(i)?.toPatch()?.let { Session.patches.add(it) }
+    }
+
+    private fun storePatches() = runCatching {
+        patchesFile?.writeText(JSONArray().apply { Session.patches.forEach { put(it.toJson()) } }.toString())
+        backupMemorySoon()
+    }
+
     /** Volta ao resultado de antes do último refino; tocar de novo refaz. */
     suspend fun undo(): String = call { d -> "${d.send("undo").status} resultados (desfeito; toque de novo para refazer)." }
 
@@ -3135,6 +3302,7 @@ class Engine private constructor(private val app: Context) {
             loadSaved()
         }
         loadRecipes()
+        loadPatches()
         // jogo atualizado: classes e offsets podem ter mudado; os salvos que não voltarem vão para a IA consertar
         gameVersion()?.let { v ->
             val last = prefs.getLong("ver-$pkg", -1L)
@@ -3485,3 +3653,18 @@ private fun Drawable.toImageBitmap(): ImageBitmap {
     draw(Canvas(bitmap))
     return bitmap.asImageBitmap()
 }
+
+private val WHERE = Regex("""[A-Za-z0-9_.@+-]{1,120}\+[0-9a-f]{1,10}""")
+
+private fun CodePatch.toJson() = JSONObject().put("id", id).put("name", name).put("where", where).put("orig", orig).put("new", new)
+    .put("enabled", enabled).put("suspect", suspect).put("note", note)
+
+private fun JSONObject.toPatch(): CodePatch? = runCatching {
+    val w = getString("where")
+    val o = getString("orig").lowercase()
+    val n = getString("new").lowercase()
+    // vai para o daemon: só lib+deslocamento e hex
+    require(WHERE.matches(w) && Regex("""([0-9a-f]{8}){1,16}""").matches(o) && o.length == n.length && Regex("""[0-9a-f]+""").matches(n))
+    CodePatch(optString("id").ifEmpty { java.util.UUID.randomUUID().toString() }, optString("name", w).take(60), w, o, n,
+        optBoolean("enabled", false), optBoolean("suspect", false), optString("note", "").take(300))
+}.getOrNull()

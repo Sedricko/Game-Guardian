@@ -211,6 +211,21 @@ class ValuesTest {
     }
 
     @Test
+    fun arm64Decoder() {
+        assertEquals("SUB W8, W8, #1", decodeArm64(0x51000508, 0))
+        assertEquals("STR W8, [X19, #0x10]", decodeArm64(0xb9001268.toInt(), 0))
+        assertEquals("LDR X0, [X1]", decodeArm64(0xf9400020.toInt(), 0))
+        assertEquals("MOV W0, W1", decodeArm64(0x2a0103e0, 0))
+        assertEquals("B.NE 0x1008", decodeArm64(0x54000041, 0x1000))
+        assertEquals("BL 0x1040", decodeArm64(0x94000010.toInt(), 0x1000))
+        assertEquals("MOVZ W0, #5", decodeArm64(0x528000a0, 0))
+        assertEquals("CMP W8, #0", decodeArm64(0x7100011f, 0))
+        assertEquals("NOP", decodeArm64(ARM64_NOP, 0))
+        assertEquals("RET", decodeArm64(0xd65f03c0.toInt(), 0))
+        assertEquals(".word 0x00000000", decodeArm64(0, 0))
+    }
+
+    @Test
     fun ggXorSyntax() {
         assertEquals("150" to 4, ggXor("150X4"))
         assertEquals("100~200" to -8, ggXor("100~200x-8"))

@@ -42,6 +42,10 @@ Apagar à mão funciona assim:
 - **Aprendizado, Salvos, Receitas e Problemas** são abas de leitura refeitas pelo script. Linha apagada nelas volta na próxima atualização.
 - Remover uma chave no painel é sempre você quem faz.
 
+## Patches de código
+
+A aba **Patches** mostra os patches de código de cada jogo: onde ficam (lib+deslocamento), os bytes originais e os novos, se estão ligados e se ficaram suspeitos. Um patch que chega de outro aparelho entra **desligado**.
+
 ## Versão do script
 
 O `Code.gs` tem `const VERSAO` no começo. O número aparece no menu (**Tinker vN**) e embaixo do painel. Ele também aparece no registro do app: "Painel de chaves: … · script vN". Se o app avisar "desatualizado", cole o Code.gs novo e faça **Nova versão** na implantação.

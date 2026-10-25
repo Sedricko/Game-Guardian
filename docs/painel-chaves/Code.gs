@@ -2,7 +2,7 @@
 // A planilha nunca fica pública: o link só devolve as chaves ativas para quem tem o token.
 
 // Versão do script: sobe a cada mudança. O Tinker mostra no registro e avisa quando a planilha está numa anterior.
-const VERSAO = 13;
+const VERSAO = 14;
 
 const ABA = 'Chaves';
 const COLS = ['Chave', 'Nome', 'Ativa', 'Situação', 'Atualizado', 'Provedor'];
@@ -257,6 +257,7 @@ function legivel_(m) {
   linhas2_(m.licoes).forEach(l => aprendizado.push(['(todos os jogos)', 'lição', l]));
   const salvos = [['Jogo', 'Nome', 'Tipo', 'Classe IL2CPP', 'Ponteiro', 'Assinatura AOB', 'Último valor', 'Reservas', 'Situação', 'Histórico', 'Ponteiro confirmado', 'Pasta']];
   const receitas = [['Jogo', 'Receita', 'Ao abrir', 'Passos', 'Situação']];
+  const patches = [['Jogo', 'Patch', 'Onde (lib+deslocamento)', 'Bytes originais', 'Bytes novos', 'Ligado', 'Suspeito', 'Motivo']];
   Object.keys(jogos).forEach(pkg => {
     const g = jogos[pkg] || {};
     linhas2_(g.notas).forEach(l => aprendizado.push([nome(pkg), 'nota', l]));
@@ -265,6 +266,7 @@ function legivel_(m) {
       v.apagado ? 'apagado no app' : 'ativo',
       (v.history || []).slice(-10).map(h => String(h).split(':').pop()).join(' → '),
       v.pointer ? (v.verified ? 'sim' : 'a confirmar') : '', v.folder || '']));
+    (g.patches || []).forEach(p => patches.push([nome(pkg), p.name || '', p.where || '', p.orig || '', p.new || '', p.enabled ? 'sim' : 'não', p.suspect ? 'sim' : '', p.note || '']));
     (g.receitas || []).forEach(r => receitas.push([nome(pkg), r.name || '', r.auto ? 'sim' : 'não',
       (r.steps || []).map(st => (st.label || st.cls || st.ptr || 'AOB') + ' = ' + st.value + (st.freeze ? ' ❄' : '') +
         (st.cls ? ' [' + st.cls + '+' + Number(st.off || 0).toString(16) + ']' : st.ptr ? ' [' + st.ptr + ']' : st.sig ? ' [AOB]' : '')).join('; '),
@@ -273,6 +275,7 @@ function legivel_(m) {
   tabela_(LEGIVEL, aprendizado);
   tabela_('Salvos', salvos);
   tabela_('Receitas', receitas);
+  tabela_('Patches', patches);
 }
 
 function tabela_(nome, rows) {
@@ -326,7 +329,10 @@ function juntarMemoria_(velha, nova) {
       const igual = salvos.findIndex(x => x.id === v.id || (v.il2 && x.il2 === v.il2) || (v.name && x.name === v.name && x.type === v.type));
       salvos[igual < 0 ? salvos.length : igual] = igual < 0 ? consenso_(null, v) : consenso_(salvos[igual], v);
     });
-    m.jogos[pkg] = { nome: b.nome || a.nome || pkg, notas: juntarLinhas_(a.notas, b.notas),
+    // patches de código: pela id; o mais novo vale (ligado/desligado, suspeito)
+    const patches = (a.patches || []).slice();
+    (b.patches || []).forEach(p => { const i = patches.findIndex(x => x.id === p.id); if (i < 0) patches.push(p); else patches[i] = Object.assign({}, patches[i], p); });
+    m.jogos[pkg] = { nome: b.nome || a.nome || pkg, notas: juntarLinhas_(a.notas, b.notas), patches: patches,
       receitas: receitas.map(r => Object.assign(r, { apagado: fora.has(r.id) })),
       salvos: salvos.map(v => Object.assign(v, { apagado: fora.has(v.id) })) };
   });

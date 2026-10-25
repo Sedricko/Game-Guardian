@@ -575,8 +575,8 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                     InlineEditor(readable(hit.value, hit.type) ?: "", "Novo valor", onSave = { v -> editing = "-"; run { engine.write(hit.addr, hit.type, v) } }, onCancel = { editing = "-" }) {
                         TextButton(onClick = { engine.addSaved(listOf(hit), frozen = true); editing = "-" }) { Text("❄ Congelar") }
                         TextButton(onClick = { engine.addSaved(listOf(hit)); editing = "-" }) { Text("Salvar na lista") }
-                        TextButton(onClick = { s.view = hit.addr to plain(hit.type); s.fichaMode = false; s.tab = TAB_MEMORY; editing = null }) { Text("Ver próximos") }
-                        TextButton(onClick = { s.view = hit.addr to plain(hit.type); s.fichaMode = true; s.tab = TAB_MEMORY; editing = null }) { Text("Ver ficha") }
+                        TextButton(onClick = { s.view = hit.addr to plain(hit.type); s.fichaMode = false; s.codeMode = false; s.tab = TAB_MEMORY; editing = null }) { Text("Ver próximos") }
+                        TextButton(onClick = { s.view = hit.addr to plain(hit.type); s.fichaMode = true; s.codeMode = false; s.tab = TAB_MEMORY; editing = null }) { Text("Ver ficha") }
                         TextButton(onClick = { s.status = copyAddress(ctx, hit.addr) }) { Text("Copiar endereço") }
                     }
                 }
@@ -905,6 +905,21 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
                 }
             }
         }
+        s.watchHits?.let { (label, hits) ->
+            item(key = "watch") {
+                Panel {
+                    Text("O que escreve em $label", style = MaterialTheme.typography.titleSmall)
+                    if (hits.isEmpty()) Text("Nada escreveu enquanto observava. Toque de novo e mude o valor no jogo nesses segundos.", style = MaterialTheme.typography.bodySmall)
+                    hits.forEach { (pc, n, where) ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("$where · $n×", Modifier.weight(1f), fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                            TextButton(onClick = { s.view = pc to "i32"; s.fichaMode = false; s.codeMode = true; s.tab = TAB_MEMORY }) { Text("Ver código") }
+                        }
+                    }
+                    TextButton(onClick = { s.watchHits = null }) { Text("Fechar") }
+                }
+            }
+        }
         // pastas que a pessoa criou (Materiais, Status…): os sem pasta primeiro
         s.saved.groupBy { it.folder }.toSortedMap().forEach { (folder, group) ->
         if (folder.isNotEmpty()) item(key = "pasta-$folder") {
@@ -935,10 +950,12 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
                 if (open) {
                     InlineEditor(readable(item.value, item.type) ?: "", "Novo valor", onSave = { v -> editing = null; run { engine.setSaved(listOf(item), v) } }, onCancel = { editing = null }) {
                         TextButton(onClick = { engine.removeSaved(listOf(item)); editing = null }) { Text("Remover") }
-                        TextButton(onClick = { s.view = item.addr to plain(item.type); s.fichaMode = false; s.tab = TAB_MEMORY; editing = null }) { Text("Ver próximos") }
-                        TextButton(onClick = { s.view = item.addr to plain(item.type); s.fichaMode = true; s.tab = TAB_MEMORY; editing = null }) { Text("Explorar ficha") }
+                        TextButton(onClick = { s.view = item.addr to plain(item.type); s.fichaMode = false; s.codeMode = false; s.tab = TAB_MEMORY; editing = null }) { Text("Ver próximos") }
+                        TextButton(onClick = { s.view = item.addr to plain(item.type); s.fichaMode = true; s.codeMode = false; s.tab = TAB_MEMORY; editing = null }) { Text("Explorar ficha") }
                         // todos os objetos do mesmo formato (no DYSMANTLE, todos os slots do inventário) vão para a Busca
                         TextButton(onClick = { editing = null; run { engine.findSimilar(item).also { s.tab = 0 } } }, enabled = !old && !s.busy) { Text("Achar parecidos") }
+                        // qual instrução do jogo muda este valor (o painel sai da frente para a pessoa jogar)
+                        TextButton(onClick = { editing = null; engine.watchLater(item); if (overlay) onMinimize() }, enabled = !old && !s.busy) { Text("O que escreve aqui?") }
                     }
                     NameEditor(item.name) { engine.rename(item, it) }
                     FolderEditor(item.folder, s.saved.map { it.folder }.filter { it.isNotEmpty() }.distinct()) { engine.setFolder(item, it) }
@@ -956,6 +973,26 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
                 }
             }
         }
+        }
+        // patches de código ficam à parte: são instruções do jogo, não valores
+        if (s.patches.isNotEmpty()) {
+            item(key = "patches") { Text("🛠 Patches de código (${s.patches.size})", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp)) }
+            items(s.patches, key = { "patch-" + it.id }) { p ->
+                Panel {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(p.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(p.where, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(checked = p.enabled, onCheckedChange = { on -> run { engine.setPatch(p, on) } }, enabled = !s.busy && s.process != null)
+                    }
+                    val first = { h: String -> decodeArm64(Integer.reverseBytes(h.take(8).toLong(16).toInt()), 0) }
+                    Text("${first(p.orig)}  →  ${first(p.new)}" + if (p.new.length > 8) " (+${p.new.length / 8 - 1})" else "", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                    if (p.note.isNotEmpty()) Text(p.note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (p.suspect) Text("⚠ O jogo fechou logo depois deste patch: ficou desligado e não volta sozinho.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    TextButton(onClick = { engine.removePatch(p) }, enabled = !p.enabled) { Text("Remover") }
+                }
+            }
         }
     }
 }
@@ -1059,8 +1096,8 @@ private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
     // o que mudou desde a leitura anterior fica destacado por 3 s: ajuda a ver o que reage ao que você faz no jogo
     val changed = remember(center, type) { mutableStateMapOf<String, Long>() }
     val last = remember(center, type) { HashMap<String, String>() }
-    LaunchedEffect(center, type, shift, s.fichaMode) {
-        if (center == "0" || s.fichaMode) return@LaunchedEffect
+    LaunchedEffect(center, type, shift, s.fichaMode, s.codeMode) {
+        if (center == "0" || s.fichaMode || s.codeMode) return@LaunchedEffect
         while (true) {
             runCatching {
                 val new = engine.nearby(center, type, shift)
@@ -1077,11 +1114,16 @@ private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
     }
     Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
-            FilterChip(selected = !s.fichaMode, onClick = { s.fichaMode = false }, label = { Text("Endereços") })
-            FilterChip(selected = s.fichaMode, onClick = { s.fichaMode = true }, label = { Text("Ficha do objeto") })
+            FilterChip(selected = !s.fichaMode && !s.codeMode, onClick = { s.fichaMode = false; s.codeMode = false }, label = { Text("Endereços") })
+            FilterChip(selected = s.fichaMode, onClick = { s.fichaMode = true; s.codeMode = false }, label = { Text("Ficha") })
+            FilterChip(selected = s.codeMode, onClick = { s.fichaMode = false; s.codeMode = true }, label = { Text("Código") })
         }
         if (s.fichaMode) {
             FichaView(engine, center, run)
+            return@Column
+        }
+        if (s.codeMode) {
+            CodeView(engine, center, run)
             return@Column
         }
         if (center == "0") {
@@ -1157,13 +1199,83 @@ private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
                         InlineEditor(readable(row.value, type) ?: "", "Novo valor (${TYPE_NAMES[type]})", onSave = { v -> editing = null; run { engine.write(row.addr, type, v) } }, onCancel = { editing = null }) {
                             TextButton(onClick = { engine.addSaved(listOf(row.copy(region = "?"))); editing = null }) { Text("Salvar na lista") }
                             TextButton(onClick = { s.status = copyAddress(ctx, row.addr) }) { Text("Copiar endereço") }
-                            TextButton(onClick = { s.view = row.addr to type; s.fichaMode = true; editing = null }) { Text("Ver ficha") }
+                            TextButton(onClick = { s.view = row.addr to type; s.fichaMode = true; s.codeMode = false; editing = null }) { Text("Ver ficha") }
                             if (ptr != null) {
                                 TextButton(onClick = { s.view = ptr.toString(16) to type; editing = null }) { Text("Ir para 0x${ptr.toString(16)}") }
                                 TextButton(onClick = { s.status = copyAddress(ctx, ptr.toString(16)) }) { Text("Copiar o valor") }
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Código (região Xa): as instruções do jogo em volta de um endereço, já traduzidas (ARM64). Tocar numa instrução deixa trocar
+ * por NOP ou por outros bytes: vira um patch em Salvos → Patches de código (com os bytes de antes, para desfazer).
+ */
+@Composable
+private fun CodeView(engine: Engine, center: String, run: (suspend () -> String) -> Unit) {
+    val s = Session
+    val ctx = LocalContext.current
+    var rows by remember(center) { mutableStateOf<List<CodeRow>>(emptyList()) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var open by remember { mutableStateOf<String?>(null) }
+    var bytes by remember { mutableStateOf("") }
+    var goTo by remember(center) { mutableStateOf(if (center == "0") "" else center) }
+    var pad by remember { mutableStateOf(false) }
+    val taps = remember { MutableInteractionSource() }
+    val pressed by taps.collectIsPressedAsState()
+    LaunchedEffect(pressed) { if (pressed && s.ownKeypad) pad = true }
+    LaunchedEffect(center) {
+        if (center == "0") return@LaunchedEffect
+        runCatching { engine.codeAt(center) }.onSuccess { rows = it; error = null }.onFailure { error = it.message }
+    }
+    Text("Instruções do jogo (ARM64). Ache o endereço com \"O que escreve aqui?\" num salvo, ou digite um.",
+        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    fun go() {
+        val a = parseAddress(goTo)
+        if (a != null) { s.view = a to "i32"; pad = false } else error = "Endereço inválido: $goTo"
+    }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        OutlinedTextField(goTo, { goTo = it.removePrefix("0x").trim() }, label = { Text("Endereço do código") }, singleLine = true,
+            readOnly = s.ownKeypad, interactionSource = taps, modifier = Modifier.weight(1f))
+        Button(shape = MaterialTheme.shapes.medium, onClick = { go() }, contentPadding = PaddingValues(horizontal = 12.dp)) { Text("Ir") }
+    }
+    if (s.ownKeypad && pad) NumPad(onKey = { goTo = applyKey(goTo, it) }, onDone = { go() }, compact = landscape(), hex = true)
+    error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        items(rows, key = { it.addr }) { r ->
+            val here = r.addr == center
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                    .background(if (here) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLow)
+                    .sizeIn(minHeight = 48.dp).clickable { open = if (open == r.addr) null else r.addr; bytes = "" }.padding(horizontal = 12.dp, vertical = 6.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(r.word?.let { "%08x".format(Integer.reverseBytes(it)) } ?: "????????", Modifier.width(84.dp), fontFamily = FontFamily.Monospace, fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(r.text, Modifier.weight(1f), fontFamily = FontFamily.Monospace, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                if (open == r.addr) {
+                    Text("0x${r.addr}" + if (r.where.isNotEmpty()) " · ${r.where}" else "", fontFamily = FontFamily.Monospace, fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // NOP: a instrução deixa de fazer qualquer coisa (o jeito mais comum de "não descontar")
+                        Button(shape = MaterialTheme.shapes.medium, onClick = { open = null; run { engine.createPatch(r.addr, "1f2003d5", "NOP em ${r.where.ifEmpty { r.addr }}", "era ${r.text}") } },
+                            enabled = r.word != null && r.word != ARM64_NOP && !s.busy) { Text("Trocar por NOP") }
+                        TextButton(onClick = { s.status = copyAddress(ctx, r.addr) }) { Text("Copiar endereço") }
+                        if (r.where.isNotEmpty()) TextButton(onClick = { s.status = copyAddress(ctx, r.where) }) { Text("Copiar lib+desloc.") }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(bytes, { bytes = it.filter { c -> c.isLetterOrDigit() }.lowercase().take(32) }, label = { Text("Bytes novos (8 dígitos por instrução)") },
+                            singleLine = true, textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace), modifier = Modifier.weight(1f))
+                        TextButton(onClick = { open = null; run { engine.createPatch(r.addr, bytes, "Patch em ${r.where.ifEmpty { r.addr }}", "era ${r.text}") } },
+                            enabled = bytes.length >= 8 && bytes.length % 8 == 0 && !s.busy) { Text("Aplicar") }
+                    }
+                    if (bytes.length == 8) bytes.toLongOrNull(16)?.let { Text("= " + decodeArm64(Integer.reverseBytes(it.toInt()), r.addr.toLong(16)), fontFamily = FontFamily.Monospace, fontSize = 12.sp) }
                 }
             }
         }
@@ -1442,7 +1554,7 @@ private fun FichaBody(engine: Engine, center: String, run: (suspend () -> String
                     Text("0x${r.addr}", fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         TextButton(onClick = { s.status = copyAddress(ctx, r.addr) }) { Text("Copiar endereço") }
-                        TextButton(onClick = { s.view = r.addr to (r.type.ifEmpty { "i32" }).let(::plain); s.fichaMode = false }) { Text("Ver na lista") }
+                        TextButton(onClick = { s.view = r.addr to (r.type.ifEmpty { "i32" }).let(::plain); s.fichaMode = false; s.codeMode = false }) { Text("Ver na lista") }
                         if (r.value.startsWith("0x")) TextButton(onClick = { s.status = copyAddress(ctx, r.value.removePrefix("0x")) }) { Text("Copiar o valor") }
                         if (r.type.isNotEmpty()) {
                             // entra nos Salvos já ligado pelo offset aos outros da mesma ficha, com nome do campo quando é IL2CPP
@@ -1839,6 +1951,10 @@ private val HELP = listOf(
         "com tipo e valor ao vivo; o que muda fica destacado. Em jogo Unity IL2CPP, com os nomes do próprio jogo (Player.hp); nos outros, " +
         "com o tipo adivinhado (inteiro, decimal, ponteiro, cifrado 🔒). Toque num campo para salvar ou editar; num ponteiro, para abrir o objeto. " +
         "Salvos dentro de um objeto IL2CPP ganham o nome do campo sozinhos.",
+    "Código e patches" to "Para o recurso não diminuir: em Salvos, toque no salvo → \"O que escreve aqui?\" e gaste o recurso no jogo nos 15 s. " +
+        "Aparece a instrução que muda o valor; \"Ver código\" abre Memória → Código, com as instruções traduzidas (SUB, STR…). Tocar numa " +
+        "instrução deixa trocar por NOP (não faz nada) ou por outros bytes: vira um patch em Salvos → Patches de código, com liga/desliga. " +
+        "Os bytes de antes ficam guardados; o patch volta sozinho quando o jogo reabre. Se o jogo fechar logo depois, o patch fica suspeito e desligado.",
     "Endereços mudaram" to "Quando o jogo reinicia, os endereços mudam. Para um salvo continuar valendo, use um ponteiro (abaixo).",
     "Ponteiros" to "Como no Cheat Engine, mas sozinho: ao salvar, o Tinker já busca os ponteiros e aprende a assinatura (bytes em volta). " +
         "Ao reabrir o jogo e escolher ele no Tinker, cada salvo volta sozinho (ponteiro → caminhos guardados → assinatura); os da mesma ficha " +
