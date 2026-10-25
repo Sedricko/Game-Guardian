@@ -338,6 +338,7 @@ object Session {
     var findEncrypted by mutableStateOf(true)
     var useBar by mutableStateOf(false)
     var autoOverlay by mutableStateOf(true)
+    var autoUpdate by mutableStateOf(false)  // baixa e instala a versão nova sozinho (root) e roda o autoteste depois
     var ownKeypad by mutableStateOf(true)  // teclado do Tinker no lugar do teclado do telefone  // ao abrir o app, já abre o menu flutuante e sai da frente (como o GameGuardian)
     var update by mutableStateOf<Pair<String, String>?>(null)
     var gameGone by mutableStateOf<GameProcess?>(null)
@@ -431,7 +432,7 @@ class Engine private constructor(private val app: Context) {
     fun saveSettings() {
         prefs.edit().putBoolean("autoPause", Session.autoPause).putBoolean("findEncrypted", Session.findEncrypted)
             .putBoolean("autoPointers", Session.autoPointers).putBoolean("gameLibsOnly", Session.gameLibsOnly)
-            .putBoolean("autoOverlay", Session.autoOverlay).putBoolean("ownKeypad", Session.ownKeypad).putFloat("alpha", Session.alpha).putInt("panelSize2", Session.panelSize).putBoolean("panelLeft", Session.panelLeft)
+            .putBoolean("autoOverlay", Session.autoOverlay).putBoolean("ownKeypad", Session.ownKeypad).putBoolean("autoUpdate", Session.autoUpdate).putFloat("alpha", Session.alpha).putInt("panelSize2", Session.panelSize).putBoolean("panelLeft", Session.panelLeft)
             .remove("aiKey").putString("aiProvider", Session.aiProvider).putBoolean("aiReserve", Session.aiReserve)
             .putString("groqKeys", Session.groqKeys.joinToString("\n")).putInt("groqKeyIndex", Session.groqKeyIndex).putString("groqModel", Session.groqModel)
             .putString("sheetGroqKeys", Session.sheetGroqKeys.joinToString("\n")).putBoolean("aiCanTest", Session.aiCanTest).putBoolean("aiAuto", Session.aiAuto).putBoolean("aiControl", Session.aiControl)
@@ -455,6 +456,7 @@ class Engine private constructor(private val app: Context) {
         Session.gameLibsOnly = prefs.getBoolean("gameLibsOnly", true)
         Session.autoOverlay = prefs.getBoolean("autoOverlay", true)
         Session.ownKeypad = prefs.getBoolean("ownKeypad", true)
+        Session.autoUpdate = prefs.getBoolean("autoUpdate", false)
         // o Claude saiu do app (chave paga): quem usava passa para o Gemini
         Session.aiProvider = prefs.getString("aiProvider", "groq").orEmpty().takeIf { it == "gemini" || it == "groq" } ?: "groq"
         // uma vez só: quem já usava passa para o Groq (dá para voltar ao Gemini em Ajustes)
@@ -533,6 +535,11 @@ class Engine private constructor(private val app: Context) {
         scope.launch { watchNeighbors() }
         // aberto por horas: confere de novo a cada 30 min (antes só ao abrir, e a versão nova passava despercebida)
         scope.launch { while (true) { checkUpdate(); delay(30 * 60_000L) } }
+        // instalou sozinho: roda o autoteste (só leituras, no programa de teste do daemon) e o resultado vai para a planilha
+        prefs.getString("testarApos", "").orEmpty().takeIf { it.isNotEmpty() && it == appVersion() }?.let { v ->
+            prefs.edit().remove("testarApos").apply()
+            scope.launch { delay(15_000); Diag.add("Atualizado sozinho para $v: rodando o autoteste"); runCatching { selfTest() } }
+        }
         // o jogo reabriu (PID novo): escolhe de novo sozinho e os salvos voltam pela restauração
         scope.launch {
             while (true) {
@@ -640,7 +647,30 @@ class Engine private constructor(private val app: Context) {
             updateSeen = latest
             Session.update = latest to apk
             Diag.add("Versão nova disponível: $latest (instalada: $mine)")
+            if (Session.autoUpdate) runCatching { autoInstall(latest, apk) }.onFailure { Diag.add("Atualizar sozinho falhou: ${it.message}") }
         }
+    }
+
+    /**
+     * Atualizar sozinho (Ajustes, desligado de fábrica): baixa o APK do Releases, confere que é o Tinker dessa versão e
+     * instala com o root. O Android recusa sozinho um APK com assinatura diferente da instalada.
+     */
+    private fun autoInstall(version: String, url: String) {
+        require(url.endsWith(".apk")) { "o release não tem APK" }
+        val f = File(app.cacheDir, "update.apk")
+        val c = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+        c.connectTimeout = 10_000
+        c.readTimeout = 60_000
+        c.setRequestProperty("User-Agent", "Tinker")
+        c.inputStream.use { i -> f.outputStream().use { i.copyTo(it) } }
+        val info = app.packageManager.getPackageArchiveInfo(f.path, 0)
+        require(info?.packageName == app.packageName && info?.versionName == version) { "o APK baixado não é o Tinker $version" }
+        prefs.edit().putString("testarApos", version).commit()
+        Diag.add("Instalando sozinho o Tinker $version")
+        val tmp = "/data/local/tmp/tinker-update.apk"
+        // am start no fim: o pm install fecha o Tinker; o UpdatedReceiver também reabre caso este comando morra junto
+        ProcessBuilder("su", "-c", "cat '${f.path}' > $tmp && chmod 644 $tmp && pm install -r $tmp; rm -f $tmp '${f.path}'; " +
+            "am start -n ${app.packageName}/.MainActivity").redirectErrorStream(true).start()
     }
 
     /** Botão Sair: nunca deixa o jogo pausado e encerra o daemon root. */

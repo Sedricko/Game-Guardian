@@ -2226,6 +2226,9 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
             Panel {
                 Text("Busca", style = MaterialTheme.typography.titleSmall)
                 Toggle("Pausar o jogo durante a busca e o refino", "O valor não muda no meio da busca.", s.autoPause) { s.autoPause = it; engine.saveSettings() }
+                Toggle("Atualizar e testar sozinho", "Com versão nova, baixa e instala sozinho (root), reabre e roda o autoteste; o resultado vai para a planilha. Nunca mexe em jogo.", s.autoUpdate) {
+                    s.autoUpdate = it; engine.saveSettings()
+                }
                 Toggle("Teclado do Tinker", "Números, ~ e ; dentro do painel; o teclado do telefone abre por cima do jogo e esconde o valor.", s.ownKeypad) {
                     s.ownKeypad = it; engine.saveSettings()
                 }

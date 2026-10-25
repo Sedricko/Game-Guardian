@@ -64,3 +64,14 @@ class MainActivity : ComponentActivity() {
         moveTaskToBack(true)
     }
 }
+
+/** Depois de "Atualizar e testar sozinho": o Android avisa que o Tinker foi atualizado e ele reabre para rodar o autoteste. */
+class UpdatedReceiver : android.content.BroadcastReceiver() {
+    override fun onReceive(context: android.content.Context, intent: Intent) {
+        if (intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
+        val pending = context.getSharedPreferences("tinker", android.content.Context.MODE_PRIVATE).getString("testarApos", "").orEmpty()
+        if (pending.isNotEmpty()) runCatching {
+            context.startActivity(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
+    }
+}
