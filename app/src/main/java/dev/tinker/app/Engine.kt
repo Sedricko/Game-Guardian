@@ -2178,6 +2178,14 @@ class Engine private constructor(private val app: Context) {
             val t = a.optString("tipo").trim().takeIf { it in TYPE_SIZES && !it.startsWith("x") }
             aiBusy { resultsText(startUnknown(setOfNotNull(t))) }
         },
+        AiTool("descobrir_pela_tela", "Com poucos resultados (até ~300), descobre qual é o valor da tela: escreve números em sequência (um em cada " +
+            "resultado), lê a tela e vê qual apareceu; depois volta tudo como estava. Só funciona se a pessoa ligou \"IA pode testar valores\".",
+            emptyMap(), emptyList()) {
+            if (!Session.aiCanTest && !Session.aiAuto) return@AiTool "A pessoa não deixou a IA testar valores (Ajustes → Assistente → IA pode testar valores)."
+            val hits = list().second
+            if (hits.isEmpty()) return@AiTool "Não há resultados: busque primeiro."
+            aiBusy { findBySequence(hits.map { it.addr to it.type }, "") }
+        },
         AiTool("comparar", "Refina a busca pelo jeito que o valor mudou desde a última busca ou comparação (depois que a pessoa mexeu no jogo).",
             mapOf("como" to "aumentou, diminuiu, igual ou mudou", "quanto" to "opcional: quanto aumentou ou diminuiu (ex.: 10)"), listOf("como")) { a ->
             val op = compareOp(a.optString("como"), a.optString("quanto")) ?: return@AiTool "Use aumentou, diminuiu, igual ou mudou."
@@ -3694,19 +3702,42 @@ class Engine private constructor(private val app: Context) {
 
     fun hasSequence() = seqOld.isNotEmpty()
 
-    /** Escreve em sequência, lê a tela e acha o número que apareceu: o dono dele é o endereço certo. Volta tudo depois. */
+    /**
+     * Escreve em sequência, lê a tela e acha o número que apareceu: o dono dele é o endereço certo. Volta tudo depois.
+     * Melhor que o do GG: começa logo acima do valor de agora (número absurdo pode derrubar o jogo), ignora os números
+     * que já estavam na tela, lê duas vezes (o jogo pode demorar a redesenhar), mostra todos que mudaram a tela (o certo
+     * e as cópias) e vai de 300 em 300 quando há mais resultados.
+     */
     suspend fun findBySequence(targets: List<Pair<String, String>>, start: String): String {
-        val written = writeSequence(targets, start)
-        if (written.isEmpty()) return "Nenhum aceitou a escrita."
+        if (targets.isEmpty()) return "Sem resultados."
         withContext(Dispatchers.Main) { Session.aiHidePanel = true }
-        delay(1500)  // o jogo redesenha a tela
+        delay(800)
         withContext(Dispatchers.Main) { Session.aiHidePanel = false }
-        val seen = runCatching { screenNumbers().map { it.first }.toSet() }.getOrElse { undoSequence(); return "Não li a tela: ${it.message}" }
-        undoSequence()
-        val hit = written.entries.firstOrNull { it.value in seen }
-        Diag.add("Em sequência pela tela: " + (hit?.let { "0x${it.key} (${it.value} apareceu)" } ?: "nenhum dos números apareceu"))
-        return hit?.let { "É o 0x${it.key}: o ${it.value} apareceu no jogo. Tudo voltou como estava; salve esse resultado." }
-            ?: "Nenhum dos números (${written.values.first()}…${written.values.last()}) apareceu na tela: o certo não está entre estes, ou o jogo só atualiza a tela quando o valor muda de novo."
+        val before = runCatching { screenNumbers().map { it.first }.toSet() }.getOrElse { return "Não li a tela: ${it.message}" }
+        val found = mutableListOf<Pair<String, Long>>()
+        for ((round, batch) in targets.chunked(300).withIndex()) {
+            // começa acima do valor de agora (ou do número digitado), pulando os números que já estão na tela
+            val now = call { d -> runCatching { d.send("read ${batch.first().first} ${batch.first().second}", quiet = true).status.toDouble().toLong() }.getOrNull() }
+            var base = start.trim().toLongOrNull() ?: ((now ?: 99L) + 1)
+            base += round * 300L
+            while ((base until base + batch.size).any { it in before }) base += batch.size
+            val written = writeSequence(batch, base.toString())
+            var seen = emptySet<Long>()
+            for (tryN in 0 until 2) {
+                delay(1200)
+                seen = runCatching { screenNumbers().map { it.first }.toSet() }.getOrDefault(emptySet())
+                if (written.values.any { it in seen }) break
+            }
+            undoSequence()
+            found += written.entries.filter { it.value in seen }.map { it.key to it.value }
+            if (found.isNotEmpty()) break
+        }
+        Diag.add("Em sequência pela tela: " + found.joinToString { "0x${it.first} (${it.second})" }.ifEmpty { "nenhum dos números apareceu" })
+        return when (found.size) {
+            0 -> "Nenhum dos números apareceu na tela: o certo não está entre estes, ou o jogo só redesenha quando o valor muda (faça ele mudar e tente de novo). Tudo voltou como estava."
+            1 -> "É o 0x${found[0].first}: o ${found[0].second} apareceu no jogo. Tudo voltou como estava; salve esse resultado."
+            else -> "${found.size} mudaram a tela: " + found.joinToString { "0x${it.first} (${it.second})" } + ". Um é o valor e os outros, cópias: edite cada um e veja qual o jogo mantém. Tudo voltou como estava."
+        }
     }
 
     suspend fun setSaved(items: List<SavedItem>, value: String): String {

@@ -578,11 +578,12 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                     // como no GameGuardian: cada um ganha um número (100, 101, 102…) e o que aparecer no jogo é o certo
                     val seqTargets = (if (chosen.isEmpty()) s.results else chosen).map { it.addr to it.type }
                     Text("Em sequência (${seqTargets.size} endereços, +1 em cada):", style = MaterialTheme.typography.labelLarge)
-                    var seqStart by remember { mutableStateOf("100") }
-                    ValueField(seqStart, "Começar em", { seqStart = it }, keyboard = KeyboardType.Number)
+                    var seqStart by remember { mutableStateOf("") }
+                    ValueField(seqStart, "Começar em (vazio: logo acima do valor de agora)", { seqStart = it }, keyboard = KeyboardType.Number)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = {
-                            run { engine.writeSequence(seqTargets, seqStart).let { w -> "${w.size} escritos (${seqStart}…): veja qual número apareceu no jogo e toque no resultado com ele." } }
+                            run { engine.writeSequence(seqTargets, seqStart.ifBlank { ((s.results.firstOrNull()?.value?.toDoubleOrNull() ?: 99.0).toLong() + 1).toString() })
+                                .let { w -> "${w.size} escritos (${w.values.firstOrNull()}…${w.values.lastOrNull()}): veja qual número apareceu no jogo e toque no resultado com ele." } }
                         }, enabled = !s.busy && seqTargets.isNotEmpty()) { Text("Escrever em sequência") }
                         FilledTonalButton(shape = MaterialTheme.shapes.medium, onClick = { run { engine.findBySequence(seqTargets, seqStart) } },
                             enabled = !s.busy && seqTargets.isNotEmpty()) { Text("🎯 Descobrir pela tela") }
