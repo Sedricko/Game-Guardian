@@ -605,6 +605,15 @@ class Engine private constructor(private val app: Context) {
      */
     @Volatile private var updateSeen = ""
 
+    /** Botão "Procurar atualização" (aba Registro): confere agora e diz o resultado, mesmo que o aviso já tenha sido fechado. */
+    suspend fun checkUpdateNow(): String = withContext(Dispatchers.IO) {
+        updateSeen = ""
+        checkUpdate().fold(
+            { Session.update?.let { (v, _) -> "Versão nova: $v. O aviso com o botão para baixar está no alto do painel." } ?: "Você já está na versão mais nova (${appVersion()})." },
+            { "Não consegui ver agora (${it.message ?: "sem internet?"}). Tente de novo." },
+        )
+    }
+
     private fun checkUpdate() = runCatching {
         val c = java.net.URL("https://api.github.com/repos/Sedricko/Game-Guardian/releases/latest").openConnection() as java.net.HttpURLConnection
         c.connectTimeout = 5000
