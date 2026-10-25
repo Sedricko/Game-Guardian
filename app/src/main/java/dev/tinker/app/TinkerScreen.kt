@@ -616,7 +616,7 @@ private fun AobSearch(engine: Engine, enabled: Boolean, run: (suspend () -> Stri
     var open by remember { mutableStateOf(false) }
     var pattern by remember { mutableStateOf("") }
     var code by remember { mutableStateOf(false) }
-    TextButton(onClick = { open = !open }) { Text((if (open) "▾ " else "▸ ") + "Busca por bytes (AOB)") }
+    TextButton(onClick = { open = !open }) { Text((if (open) "▾ " else "▸ ") + "Busca por bytes (AOB) ou texto") }
     if (!open) return
     OutlinedTextField(
         pattern, { pattern = it }, label = { Text("Bytes (ex.: 1F 20 03 D5 ?? ?? 00 B9)") }, singleLine = true,
@@ -627,6 +627,12 @@ private fun AobSearch(engine: Engine, enabled: Boolean, run: (suspend () -> Stri
         FilterChip(selected = !code, onClick = { code = false }, label = { Text("Dados") })
         FilterChip(selected = code, onClick = { code = true }, label = { Text("Código") })
         Button(shape = MaterialTheme.shapes.medium, onClick = { run { engine.searchAob(pattern, code) } }, enabled = enabled && pattern.isNotBlank()) { Text("Buscar bytes") }
+    }
+    // texto (nome de item, apelido): tenta UTF-8 e, se não achar, UTF-16; texto tem letras, então teclado do telefone
+    var text by remember { mutableStateOf("") }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedTextField(text, { text = it }, label = { Text("Texto (ex.: Madeira)") }, singleLine = true, modifier = Modifier.weight(1f))
+        Button(shape = MaterialTheme.shapes.medium, onClick = { run { engine.searchText(text) } }, enabled = enabled && text.length >= 3) { Text("Buscar texto") }
     }
 }
 
@@ -664,10 +670,8 @@ private fun PointerPanel(engine: Engine, item: SavedItem, run: (suspend () -> St
             TextButton(onClick = { engine.setPointer(item, "") }) { Text("Parar de usar o ponteiro") }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(maxOff, { maxOff = it.filter(Char::isDigit) }, label = { Text("Distância máx. (bytes)") }, singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
-            OutlinedTextField(levels, { levels = it.filter(Char::isDigit).take(1) }, label = { Text("Níveis") }, singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(0.6f))
+            ValueField(maxOff, "Distância máx. (bytes)", { maxOff = it.filter(Char::isDigit) }, Modifier.weight(1f), KeyboardType.Number)
+            ValueField(levels, "Níveis", { levels = it.filter(Char::isDigit).take(1) }, Modifier.weight(0.6f), KeyboardType.Number)
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             FilledTonalButton(shape = MaterialTheme.shapes.medium, onClick = { run { engine.scanPointers(item, maxOff.toIntOrNull() ?: 4096, levels.toIntOrNull() ?: 4) } }, enabled = !s.busy && s.process != null && !engine.stale(item)) {
@@ -681,8 +685,7 @@ private fun PointerPanel(engine: Engine, item: SavedItem, run: (suspend () -> St
             )
             // se sobrarem vários: diga o valor que o jogo mostra agora
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(now, { now = it }, label = { Text("Valor agora no jogo") }, singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii), modifier = Modifier.weight(1f))
+                ValueField(now, "Valor agora no jogo", { now = it }, Modifier.weight(1f))
                 FilledTonalButton(shape = MaterialTheme.shapes.medium, onClick = { run { engine.filterPointersByValue(item, now) } }, enabled = !s.busy && s.process != null && now.isNotBlank()) {
                     Text("Filtrar pelo valor")
                 }
@@ -751,6 +754,7 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
     var naming by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf(setOf<String>()) }
     var gone by remember { mutableStateOf<List<SavedItem>?>(null) }  // apagados que a planilha guarda (Restaurar apagado)
+    var compareText by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     LaunchedEffect(s.process) {
         while (true) {
@@ -871,6 +875,17 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
                 TextButton(onClick = { engine.removeSaved(targets); selected = emptySet() }) { Text("Remover $label") }
                 // receita: guarda os campos marcados pelo nome (classe IL2CPP) para aplicar com um toque, toda vez
                 if (chosen.isNotEmpty()) OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { naming = true }) { Text("Criar receita (${chosen.size})") }
+                // dois marcados: ficha de um ao lado da do outro, como o "Structure compare" do Cheat Engine
+                if (chosen.size == 2) OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = {
+                    scope.launch { compareText = runCatching { engine.compareObjects(chosen[0], chosen[1]) }.getOrElse { "Não comparou: ${it.message}" } }
+                }) { Text("Comparar (2)") }
+            }
+            compareText?.let { t ->
+                Panel {
+                    Text("≠ = muda de um para o outro", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(t, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+                    TextButton(onClick = { compareText = null }) { Text("Fechar") }
+                }
             }
             if (naming) {
                 // nome tem letras: teclado do telefone (o do Tinker só tem números)
@@ -890,7 +905,12 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
                 }
             }
         }
-        items(s.saved, key = { it.id }) { item ->
+        // pastas que a pessoa criou (Materiais, Status…): os sem pasta primeiro
+        s.saved.groupBy { it.folder }.toSortedMap().forEach { (folder, group) ->
+        if (folder.isNotEmpty()) item(key = "pasta-$folder") {
+            Text("📁 $folder (${group.size})", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp))
+        }
+        items(group, key = { it.id }) { item ->
             val key = item.id
             val old = engine.stale(item)
             val open = editing == key
@@ -899,7 +919,7 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
                     // a linha do endereço é estreita no painel: marcas curtas, explicadas ao abrir o salvo e na Ajuda
                     item.temp -> "\ncópia temporária do jogo: não volta ao reabrir"
                     old -> "\n⚠ de outra vez do jogo: busque de novo"
-                    item.pointer.isNotEmpty() -> if (item.verified) " · 🔗" else " · 🔗 a confirmar"
+                    item.pointer.isNotEmpty() -> if (item.verified) " · 🔗 ✓ confirmado" else " · 🔗 a confirmar"
                     item.anchor.isNotEmpty() -> "\n↳ segue " + (s.saved.firstOrNull { it.id == item.anchor }?.let { it.name.ifEmpty { "0x" + it.addr } } ?: "?") + " " + offsetText(item.offset)
                     else -> ""
                 }, "${TYPE_NAMES[item.type]} · ${item.region}",
@@ -917,8 +937,11 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
                         TextButton(onClick = { engine.removeSaved(listOf(item)); editing = null }) { Text("Remover") }
                         TextButton(onClick = { s.view = item.addr to plain(item.type); s.fichaMode = false; s.tab = TAB_MEMORY; editing = null }) { Text("Ver próximos") }
                         TextButton(onClick = { s.view = item.addr to plain(item.type); s.fichaMode = true; s.tab = TAB_MEMORY; editing = null }) { Text("Explorar ficha") }
+                        // todos os objetos do mesmo formato (no DYSMANTLE, todos os slots do inventário) vão para a Busca
+                        TextButton(onClick = { editing = null; run { engine.findSimilar(item).also { s.tab = 0 } } }, enabled = !old && !s.busy) { Text("Achar parecidos") }
                     }
                     NameEditor(item.name) { engine.rename(item, it) }
+                    FolderEditor(item.folder, s.saved.map { it.folder }.filter { it.isNotEmpty() }.distinct()) { engine.setFolder(item, it) }
                     historyText(item, System.currentTimeMillis()).takeIf { it.isNotEmpty() }?.let {
                         Text("Histórico: $it", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -932,6 +955,7 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
                     } else PointerPanel(engine, item, run)
                 }
             }
+        }
         }
     }
 }
@@ -986,6 +1010,20 @@ private fun Recipes(engine: Engine, run: (suspend () -> String) -> Unit, onInfo:
                 TextButton(onClick = { engine.deleteRecipe(r) }) { Text("Apagar", color = MaterialTheme.colorScheme.error) }
             }
         }
+    }
+}
+
+@Composable
+private fun FolderEditor(current: String, existing: List<String>, onSave: (String) -> Unit) {
+    var name by remember(current) { mutableStateOf(current) }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Pasta (ex.: Materiais)") }, singleLine = true, modifier = Modifier.weight(1f))
+        TextButton(onClick = { onSave(name) }, enabled = name != current) { Text("Mover") }
+    }
+    // pastas que já existem: um toque move para ela
+    if (existing.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        existing.filter { it != current }.forEach { f -> AssistChip(onClick = { onSave(f) }, label = { Text("📁 $f") }) }
+        if (current.isNotEmpty()) AssistChip(onClick = { onSave("") }, label = { Text("Sem pasta") })
     }
 }
 
@@ -1078,6 +1116,14 @@ private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
         TypeChips(type) { t -> s.view = center to t }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         if (center != "0") {
+            // bytes crus com o texto ao lado, como o Memory View do Cheat Engine
+            var hex by remember { mutableStateOf<String?>(null) }
+            val hexScope = rememberCoroutineScope()
+            TextButton(onClick = {
+                if (hex != null) hex = null
+                else hexScope.launch { hex = runCatching { engine.hexView(center, 16) }.getOrElse { "Não leu: ${it.message}" } }
+            }) { Text((if (hex != null) "▾ " else "▸ ") + "Ver bytes (hexadecimal)") }
+            hex?.let { Text(it, fontFamily = FontFamily.Monospace, fontSize = 10.sp, lineHeight = 13.sp, softWrap = false, modifier = Modifier.horizontalScroll(rememberScrollState())) }
             TextButton(onClick = { near = !near }) { Text((if (near) "▾ " else "▸ ") + "Buscar perto deste endereço") }
             if (near) TopArea { NearSearch(engine, listOf(center), type, chooseType = false, onError = { error = it }) }
         }
@@ -1449,14 +1495,8 @@ private fun NearSearch(engine: Engine, centers: List<String>, initialType: Strin
         Text(if (centers.size > 1) "Buscar perto de ${centers.size} endereços" else "Buscar perto", style = MaterialTheme.typography.titleSmall)
         if (chooseType) TypeChips(chosen) { chosen = it }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                value = values, onValueChange = { values = it }, label = { Text("Valores (ex.: 50;75)") },
-                singleLine = true, modifier = Modifier.weight(2f),
-            )
-            OutlinedTextField(
-                value = radius, onValueChange = { radius = it.filter(Char::isDigit) }, label = { Text("± linhas") },
-                singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f),
-            )
+            ValueField(values, "Valores (ex.: 50;75)", { values = it }, Modifier.weight(2f))
+            ValueField(radius, "± linhas", { radius = it.filter(Char::isDigit) }, Modifier.weight(1f), KeyboardType.Number)
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Button(shape = MaterialTheme.shapes.medium, onClick = { go { engine.searchNear(centers, type, radius.toIntOrNull() ?: 100, values) } }, enabled = values.isNotBlank() && !working) {

@@ -31,8 +31,8 @@ val TYPES = listOf("auto" to "Auto", "i32" to "Dword", "f32" to "Float", "i64" t
 // i32x2/i64x2: inteiro guardado em dobro (Dart/Flutter e JavaScript: 100 fica 200)
 // xi32@N/xf32@N: cifrado com a chave N bytes ao lado, como o "150X4" do GameGuardian (N de -64 a 64, de 4 em 4)
 private val XOFF = Regex("""x[if]32@-?\d{1,2}""")
-private val BASE_NAMES = TYPES.toMap() + mapOf("xi32" to "Dword 🔒", "xf32" to "Float 🔒", "i32x2" to "Dword ×2", "i64x2" to "Qword ×2")
-private val BASE_SIZES = mapOf("i8" to 1, "i16" to 2, "i32" to 4, "i64" to 8, "f32" to 4, "f64" to 8, "xi32" to 4, "xf32" to 4, "i32x2" to 4, "i64x2" to 8)
+private val BASE_NAMES = TYPES.toMap() + mapOf("xi32" to "Dword 🔒", "xf32" to "Float 🔒", "xi64" to "Qword 🔒", "xf64" to "Double 🔒", "i32x2" to "Dword ×2", "i64x2" to "Qword ×2")
+private val BASE_SIZES = mapOf("i8" to 1, "i16" to 2, "i32" to 4, "i64" to 8, "f32" to 4, "f64" to 8, "xi32" to 4, "xf32" to 4, "xi64" to 8, "xf64" to 8, "i32x2" to 4, "i64x2" to 8)
 val TYPE_NAMES: Map<String, String> = object : Map<String, String> by BASE_NAMES {
     override fun get(key: String) = BASE_NAMES[key] ?: if (XOFF.matches(key)) BASE_NAMES[key.substringBefore('@')] + " " + key.substringAfter('@') else null
     override fun containsKey(key: String) = get(key) != null
@@ -96,6 +96,8 @@ data class SavedItem(
     val il2Field: String = "",
     // temp: cópia que o jogo cria só para a tela (número solto do C#); some ao fechar o jogo, então não se procura de volta
     val temp: Boolean = false,
+    // folder: pasta que a pessoa escolheu (Materiais, Status…); vazio = sem pasta
+    val folder: String = "",
 )
 
 const val MAX_CHAINS = 200
@@ -172,7 +174,7 @@ data class SheetRequest(val id: String, val tipo: String, val jogo: String, val 
 // tipos fixos que a aba Pedidos aceita: anotações e conferências, nada de comando livre nem escrita no jogo
 // os únicos que podem ficar "sempre permitidos": só conferem e mandam informação; nota e lição mudam o que a IA faz, pedem o toque toda vez
 // versão do Code.gs que este app espera (a mesma constante VERSAO lá): sobe junto quando o script muda
-const val SCRIPT_VERSION = 10
+const val SCRIPT_VERSION = 13
 
 val TRUSTABLE_REQUESTS = setOf("autoteste", "relatorio")
 val REQUEST_TYPES = mapOf("dica" to "Dica para você", "nota" to "Anotar no jogo", "licao" to "Guardar lição da IA", "autoteste" to "Rodar o autoteste", "relatorio" to "Mandar o relatório")
@@ -281,7 +283,7 @@ object Session {
     val aiClasses = mutableStateListOf<GameClass>()  // classes que a IA recomendou: aparecem no topo da lista de classes
     var aiAsk by mutableStateOf<Pair<String, String>?>(null)  // pedido automático: (onde, pergunta) — a caixa ✨ daquela tela pergunta sozinha
     var engine by mutableStateOf<GameEngine?>(null)
-    var aiProvider by mutableStateOf("gemini")  // "gemini" ou "groq"
+    var aiProvider by mutableStateOf("groq")  // "gemini" ou "groq"; Groq de padrão: o Gemini grátis estava levando 80–110 s por resposta
     var aiReserve by mutableStateOf(true)  // sem cota ou servidor cheio: segue no outro provedor, se ele tiver chave
     var groqKeys by mutableStateOf(listOf<String>())
     var groqKeyIndex by mutableIntStateOf(0)
@@ -365,7 +367,9 @@ class Engine private constructor(private val app: Context) {
         Session.autoOverlay = prefs.getBoolean("autoOverlay", true)
         Session.ownKeypad = prefs.getBoolean("ownKeypad", true)
         // o Claude saiu do app (chave paga): quem usava passa para o Gemini
-        Session.aiProvider = prefs.getString("aiProvider", "gemini").orEmpty().takeIf { it == "gemini" || it == "groq" } ?: "gemini"
+        Session.aiProvider = prefs.getString("aiProvider", "groq").orEmpty().takeIf { it == "gemini" || it == "groq" } ?: "groq"
+        // uma vez só: quem já usava passa para o Groq (dá para voltar ao Gemini em Ajustes)
+        if (!prefs.getBoolean("groqDefaultGiven", false)) { Session.aiProvider = "groq"; prefs.edit().putBoolean("groqDefaultGiven", true).putString("aiProvider", "groq").apply() }
         Session.aiReserve = prefs.getBoolean("aiReserve", true)
         Session.groqKeys = prefs.getString("groqKeys", "").orEmpty().split('\n').filter { it.isNotBlank() }
         Session.groqKeyIndex = prefs.getInt("groqKeyIndex", 0).coerceIn(0, (Session.groqKeys.size - 1).coerceAtLeast(0))
@@ -671,7 +675,7 @@ class Engine private constructor(private val app: Context) {
         // "150X4" (como no GameGuardian): só o cifrado com a chave nessa distância
         val gg = ggXor(value)
         val list = if (gg != null) base.filter { it == "i32" || it == "f32" }.ifEmpty { listOf("i32", "f32") }.joinToString(",") { "x$it@${gg.second}" }
-            else (base + if (Session.findEncrypted) base.filter { it == "i32" || it == "f32" }.map { "x$it" } else emptyList()).joinToString(",")
+            else (base + if (Session.findEncrypted) base.filter { it != "i8" && it != "i16" }.map { "x$it" } else emptyList()).joinToString(",")
         val term = gg?.first ?: value
         // "100;250::64": busca em grupo, os valores todos a até 64 bytes um do outro (como no GameGuardian)
         val group = term.substringAfter("::", "").trim()
@@ -1039,10 +1043,12 @@ class Engine private constructor(private val app: Context) {
             val notes = notesFile?.takeIf { it.exists() }?.readText()?.takeLast(4000).orEmpty()
             val lessons = lessonsFile.takeIf { it.exists() }?.readText()?.takeLast(3000).orEmpty()
             val server = runCatching { serverHints() }.getOrDefault("")
+            val sheet = sheetAnalysis()
             withContext(Dispatchers.Main) { context() } +
                 (if (lessons.isBlank()) "" else "\n\n=== Suas lições (aprendidas em conversas anteriores, valem para qualquer jogo) ===\n$lessons") +
                 (if (notes.isBlank()) "" else "\n\n=== Suas anotações deste jogo (de outras conversas) ===\n$notes") +
-                (if (server.isBlank()) "" else "\n\n=== Sinais de que o servidor ou o antitrapaça confere valores (logcat do jogo) ===\n$server")
+                (if (server.isBlank()) "" else "\n\n=== Sinais de que o servidor ou o antitrapaça confere valores (logcat do jogo) ===\n$server") +
+                (if (sheet.isBlank()) "" else "\n\n=== Análises feitas na planilha para este jogo (as mais novas primeiro) ===\n$sheet")
         }
         // Gemini lento demais (o relatório mostrou 40–100 s por rodada): esta pergunta vai no Groq; a medida do Gemini
         // cai um terço a cada pulo, então ele volta a ser tentado depois de umas perguntas
@@ -1088,6 +1094,15 @@ class Engine private constructor(private val app: Context) {
         Diag.add("Gemini lento (${m}: ${ms / 1000} s por rodada): esta pergunta vai no Groq")
         onStep("⚡ Gemini lento: esta pergunta vai no Groq")
         return true
+    }
+
+    /** As análises escritas na planilha (aba Buscas → Análise) para o jogo aberto: a IA do app parte do que já foi descoberto. */
+    private suspend fun sheetAnalysis(): String = withContext(Dispatchers.IO) {
+        val pkg = savedPkg ?: return@withContext ""
+        val url = panelUrl("analise=1&jogo=${enc(pkg)}") ?: return@withContext ""
+        val text = panelGet(url).getOrNull() ?: return@withContext ""
+        val a = runCatching { JSONObject(text).optJSONArray("analise") }.getOrNull() ?: return@withContext ""
+        (0 until a.length()).joinToString("\n") { "- " + a.optString(it).take(800) }.take(3000)
     }
 
     private val notesFile get() = savedPkg?.let { File(app.filesDir, "notas-$it.txt") }
@@ -2595,7 +2610,7 @@ class Engine private constructor(private val app: Context) {
 
     /** Aprende a assinatura enquanto o jogo roda: bytes em volta que mudaram viram ??. */
     private fun Daemon.learnSig(item: SavedItem) {
-        val vlen = if (item.type.startsWith("x") && '@' !in item.type) 8 else TYPE_SIZES.getValue(item.type)  // cifrado: chave + valor
+        val vlen = TYPE_SIZES.getValue(item.type) * if (item.type.startsWith("x") && '@' !in item.type) 2 else 1  // cifrado: chave + valor
         val a = item.addr.toLong(16)
         val start = (a - SIG_SIDE).coerceAtLeast(0) / 8 * 8
         val words = ((a + vlen + SIG_SIDE - start + 7) / 8).toInt()
@@ -2621,6 +2636,79 @@ class Engine private constructor(private val app: Context) {
         inFile = false
         step(true, "AOB $pattern", n)
         if (n == "0") "Nenhum lugar com esses bytes${if (code) " no código" else ""}." else "$n lugares com esses bytes."
+    }
+
+    /**
+     * Achar parecidos: os objetos com o mesmo formato do salvo (no DYSMANTLE, todos os slots do inventário). Lê 0x60 bytes a
+     * partir do valor; o valor, a cópia ao lado e os ponteiros viram curinga, e o resto é o "formato" procurado como AOB.
+     * Se só ele mesmo casar, tenta de novo guardando só zeros, 1 e 1.0f (o que costuma ser igual em objetos do mesmo tipo).
+     */
+    suspend fun findSimilar(item: SavedItem): String = call { d ->
+        require(!stale(item)) { "o salvo ainda não voltou nesta vez do jogo" }
+        val a = item.addr.toLong(16)
+        val w = d.send("dump ${a.toString(16)} i32 24", quiet = true).lines.map { it.substringAfter(' ').toLongOrNull()?.toInt() }
+        require(w.size == 24 && w.all { it != null }) { "não li a memória em volta do salvo" }
+        val words = w.map { it!! }
+        val wild = BooleanArray(24)
+        val vw = maxOf(1, TYPE_SIZES.getValue(item.type) / 4)
+        for (i in 0 until minOf(24, vw * 2)) wild[i] = true  // o valor e a cópia ao lado mudam de objeto para objeto
+        for (i in 0 until 23) if ((a + 4L * i) % 8 == 0L) {
+            val q = (words[i].toLong() and 0xffffffffL) or (words[i + 1].toLong() shl 32)
+            if (q in 0x10000L..0x7fffffffffffL && words[i + 1] != 0) { wild[i] = true; wild[i + 1] = true }
+        }
+        fun pattern(loose: Boolean) = words.indices.joinToString("") { i ->
+            val x = words[i]
+            if (wild[i] || (loose && x != 0 && x != 1 && x != 0x3f800000)) "????????"
+            else (0 until 4).joinToString("") { k -> "%02x".format((x shr (8 * k)) and 0xff) }
+        }
+        var n = d.frozenGame { d.send("aob ${pattern(false)} data") }.status
+        var how = ""
+        if ((n.toLongOrNull() ?: 0) < 2) { n = d.frozenGame { d.send("aob ${pattern(true)} data") }.status; how = " (formato mais solto)" }
+        Session.canUndo = false
+        inFile = false
+        val label = item.name.ifEmpty { "0x${item.addr}" }
+        step(true, "parecidos com $label", n)
+        Diag.add("Achar parecidos com $label: $n objetos$how")
+        "$n objetos com o mesmo formato de $label$how. Veja os valores na Busca; os resultados aparecem como Dword."
+    }
+
+    /** Comparar fichas: 0x40 bytes antes e depois de dois salvos, lado a lado; ≠ marca o que muda de um para o outro. */
+    suspend fun compareObjects(x: SavedItem, y: SavedItem): String = call { d ->
+        require(!stale(x) && !stale(y)) { "os dois salvos precisam ter voltado nesta vez do jogo" }
+        fun read(i: SavedItem) = d.send("dump ${(i.addr.toLong(16) - 0x40).toString(16)} i32 33", quiet = true).lines.map { it.substringAfter(' ') }
+        val ax = read(x)
+        val ay = read(y)
+        buildString {
+            appendLine("pos      ${x.name.ifEmpty { x.addr }.take(12).padEnd(12)} ${y.name.ifEmpty { y.addr }.take(12)}")
+            for (i in ax.indices) {
+                val off = i * 4 - 0x40
+                val pos = (if (off < 0) "-0x" + (-off).toString(16) else "+0x" + off.toString(16)).padEnd(7)
+                val vx = ax[i].toLongOrNull()?.let { shown(it) } ?: "?"
+                val vy = ay.getOrNull(i)?.toLongOrNull()?.let { shown(it) } ?: "?"
+                appendLine("$pos ${if (vx == vy) " " else "≠"} ${vx.padEnd(12)} $vy")
+            }
+        }
+    }
+
+    /** Bytes crus em hexadecimal, 16 por linha, com o texto ao lado (como o Memory View do Cheat Engine). */
+    suspend fun hexView(addr: String, lines: Int = 8): String = call { d ->
+        val start = (addr.toLong(16) - 16L * (lines / 2)).coerceAtLeast(0) / 16 * 16
+        val bytes = d.send("dump ${start.toString(16)} i8 ${16 * lines}", quiet = true).lines.map { it.substringAfter(' ').toIntOrNull()?.and(0xff) }
+        bytes.chunked(16).mapIndexed { r, row ->
+            val hex = row.joinToString(" ") { b -> b?.let { "%02x".format(it) } ?: "??" }
+            val txt = row.joinToString("") { b -> if (b != null && b in 32..126) b.toChar().toString() else "." }
+            "${(start + 16L * r).toString(16)}  $hex  $txt"
+        }.joinToString("\n")
+    }
+
+    /** Busca por texto: primeiro como UTF-8 (C++, Lua), se não achar como UTF-16 (Java, C#). Os achados aparecem como Dword. */
+    suspend fun searchText(text: String): String {
+        require(text.length >= 3) { "Digite pelo menos 3 letras." }
+        val utf8 = text.toByteArray(Charsets.UTF_8).joinToString("") { "%02x".format(it) }
+        val r = searchAob(utf8, false)
+        if (!r.startsWith("Nenhum")) return "\"$text\" (UTF-8): $r"
+        val utf16 = text.toByteArray(Charsets.UTF_16LE).joinToString("") { "%02x".format(it) }
+        return "\"$text\" (UTF-16): " + searchAob(utf16, false)
     }
 
     /** Volta ao resultado de antes do último refino; tocar de novo refaz. */
@@ -2903,6 +2991,8 @@ class Engine private constructor(private val app: Context) {
         return msg + if (live.size < items.size) " ${items.size - live.size} de outra vez do jogo ficaram de fora." else ""
     }
 
+    fun setFolder(item: SavedItem, folder: String) = replace(item) { it.copy(folder = folder.trim().take(40)) }
+
     fun rename(item: SavedItem, name: String) {
         Diag.add("Salvo 0x${item.addr} renomeado para \"$name\"")
         replace(item) { it.copy(name = name.trim()) }
@@ -3091,7 +3181,7 @@ internal fun normalizeNumbers(input: String): String =
 private fun SavedItem.toJson() = JSONObject().put("addr", addr).put("type", type).put("region", region).put("value", value).put("name", name).put("frozen", frozen)
     .put("pointer", pointer).put("id", id).put("anchor", anchor).put("offset", offset).put("pid", pid)
     .put("chains", JSONArray(chains)).put("sig", sig).put("sigOff", sigOff).put("verified", verified)
-    .put("trusted", trusted).put("il2", il2).put("il2Field", il2Field).put("temp", temp).put("history", JSONArray(history)).apply { if (!seenMin.isNaN()) put("seenMin", seenMin).put("seenMax", seenMax) }  // JSON não aceita NaN
+    .put("trusted", trusted).put("il2", il2).put("il2Field", il2Field).put("temp", temp).put("folder", folder).put("history", JSONArray(history)).apply { if (!seenMin.isNaN()) put("seenMin", seenMin).put("seenMax", seenMax) }  // JSON não aceita NaN
 
 /** Namespaces de bibliotecas: vão para o fim da lista de classes (o que interessa é o código do próprio jogo). */
 private val LIBS = listOf(
@@ -3311,6 +3401,7 @@ private fun JSONObject.toSaved(): SavedItem {
         seenMin = optDouble("seenMin", Double.NaN), seenMax = optDouble("seenMax", Double.NaN), trusted = optBoolean("trusted", true),
         il2 = optString("il2", "").takeIf { IL2.matches(it) }.orEmpty(), temp = optBoolean("temp", false),
         il2Field = optString("il2Field", "").takeIf { FIELD.matches(it) }.orEmpty(),
+        folder = optString("folder", "").take(40),
     )
 }
 

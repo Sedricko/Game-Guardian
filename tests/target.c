@@ -53,8 +53,12 @@ int main(void) {
     z[0] = 40404 * 2;
     volatile long long *q = malloc(64);
     q[0] = 9000000000LL * 2;
-    printf("%d %lx %lx %lx %lx %lx %lx %lx %lx\n", getpid(), (unsigned long)&i[7], (unsigned long)&f[3], (unsigned long)v, (unsigned long)x,
-           (unsigned long)obj, (unsigned long)y, (unsigned long)z, (unsigned long)q);
+    // ObscuredLong do Unity: chave de 8 bytes e valor ^ chave logo depois
+    volatile unsigned long long *w = malloc(64);
+    w[0] = 0x1F2E3D4C5B6A7988ULL;
+    w[1] = 7777777777ULL ^ 0x1F2E3D4C5B6A7988ULL;
+    printf("%d %lx %lx %lx %lx %lx %lx %lx %lx %lx\n", getpid(), (unsigned long)&i[7], (unsigned long)&f[3], (unsigned long)v, (unsigned long)x,
+           (unsigned long)obj, (unsigned long)y, (unsigned long)z, (unsigned long)q, (unsigned long)w);
     fflush(stdout);
     pause();
     return 0;

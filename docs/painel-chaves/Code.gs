@@ -2,7 +2,7 @@
 // A planilha nunca fica pública: o link só devolve as chaves ativas para quem tem o token.
 
 // Versão do script: sobe a cada mudança. O Tinker mostra no registro e avisa quando a planilha está numa anterior.
-const VERSAO = 12;
+const VERSAO = 13;
 
 const ABA = 'Chaves';
 const COLS = ['Chave', 'Nome', 'Ativa', 'Situação', 'Atualizado', 'Provedor'];
@@ -211,6 +211,8 @@ function doGet(e) {
       lock.releaseLock();
     }
   }
+  // análises da aba Buscas para o jogo aberto: a IA do app parte do que já foi descoberto (só leitura)
+  if (p.analise) return json_({ analise: analises_(String(p.jogo || '')) });
   // aprendizado guardado (o de todas as instâncias juntas)
   if (p.memoria) return json_(memoriaGuardada_() || {});
   const ativas = linhas_().filter(r => r.ativa);
@@ -253,14 +255,16 @@ function legivel_(m) {
   const nome = pkg => (jogos[pkg] && jogos[pkg].nome) || pkg;
   const aprendizado = [['Jogo', 'Tipo', 'Texto']];
   linhas2_(m.licoes).forEach(l => aprendizado.push(['(todos os jogos)', 'lição', l]));
-  const salvos = [['Jogo', 'Nome', 'Tipo', 'Classe IL2CPP', 'Ponteiro', 'Assinatura AOB', 'Último valor', 'Reservas', 'Situação']];
+  const salvos = [['Jogo', 'Nome', 'Tipo', 'Classe IL2CPP', 'Ponteiro', 'Assinatura AOB', 'Último valor', 'Reservas', 'Situação', 'Histórico', 'Ponteiro confirmado', 'Pasta']];
   const receitas = [['Jogo', 'Receita', 'Ao abrir', 'Passos', 'Situação']];
   Object.keys(jogos).forEach(pkg => {
     const g = jogos[pkg] || {};
     linhas2_(g.notas).forEach(l => aprendizado.push([nome(pkg), 'nota', l]));
     (g.salvos || []).forEach(v => salvos.push([nome(pkg), v.name || '', v.type || '', v.il2 || '', v.pointer || '',
       v.sig ? (v.sig.match(/.{1,2}/g) || []).join(' ') + ' (valor em +' + (v.sigOff || 0) + ')' : '', String(v.value || ''), (v.chains || []).length,
-      v.apagado ? 'apagado no app' : 'ativo']));
+      v.apagado ? 'apagado no app' : 'ativo',
+      (v.history || []).slice(-10).map(h => String(h).split(':').pop()).join(' → '),
+      v.pointer ? (v.verified ? 'sim' : 'a confirmar') : '', v.folder || '']));
     (g.receitas || []).forEach(r => receitas.push([nome(pkg), r.name || '', r.auto ? 'sim' : 'não',
       (r.steps || []).map(st => (st.label || st.cls || st.ptr || 'AOB') + ' = ' + st.value + (st.freeze ? ' ❄' : '') +
         (st.cls ? ' [' + st.cls + '+' + Number(st.off || 0).toString(16) + ']' : st.ptr ? ' [' + st.ptr + ']' : st.sig ? ' [AOB]' : '')).join('; '),
@@ -645,4 +649,13 @@ function limparApagados() {
   lock.waitLock(20000);
   try { guardarMemoria_(m); } finally { lock.releaseLock(); }
   ui.alert(n + ' item(ns) apagados de vez.');
+}
+
+// as 5 análises mais novas da aba Buscas para um jogo (coluna Análise preenchida)
+function analises_(pkg) {
+  const s = SpreadsheetApp.getActive().getSheetByName('Buscas');
+  if (!s || s.getLastRow() < 2 || !pkg) return [];
+  return s.getRange(2, 1, s.getLastRow() - 1, BCOLS.length).getValues()
+    .filter(r => String(r[1]).indexOf('(' + pkg + ')') >= 0 && String(r[8]).trim())
+    .slice(0, 5).map(r => String(r[8]).slice(0, 1000));
 }

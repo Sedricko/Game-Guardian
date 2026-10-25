@@ -8,7 +8,7 @@ cc -O2 -Wall -Werror -pthread -o "$out/tinkerd" daemon/tinkerd.c -lm
 cc -O2 -o "$out/target" tests/target.c
 "$out/target" > "$out/info" & tpid=$!
 for _ in $(seq 50); do [ -s "$out/info" ] && break; sleep 0.1; done
-read -r pid iaddr faddr paddr xaddr oaddr yaddr zaddr qaddr < "$out/info"
+read -r pid iaddr faddr paddr xaddr oaddr yaddr zaddr qaddr waddr < "$out/info"
 
 got=$("$out/tinkerd" <<CMDS
 search i32 1
@@ -117,6 +117,11 @@ grep -qE "^$yaddr xi32@8 (Ch|A) 31337$" <<<"$gg" && grep -qx "ok 41414" <<<"$gg"
     && grep -qE "^$zaddr i32x2 (Ch|A) 40404$" <<<"$gg" && grep -qx "ok 101010" <<<"$gg" && grep -qE "^$qaddr i64x2 (Ch|A) 9000000000$" <<<"$gg" \
     && grep -qx "err tipo inválido: xi32@3" <<<"$gg" && grep -qx "err tipo inválido: xi32@0" <<<"$gg" && grep -qx "err tipo inválido: i32x2" <<<"$gg" \
     || { echo "FALHOU: XOR com distância / dobro"; exit 1; }
+
+# Cifrado de 8 bytes (ObscuredLong): acha, escreve trancando com a mesma chave
+x8=$(printf '%s\n' "attach $pid" "search i64,xi64 7777777777" "list 5" "write $waddr xi64 8888888888" "read $waddr xi64" "frozen" | "$out/tinkerd")
+echo "$x8"
+grep -qE "^$waddr xi64 (Ch|A) 7777777777$" <<<"$x8" && grep -qx "ok 8888888888" <<<"$x8" || { echo "FALHOU: cifrado de 8 bytes"; exit 1; }
 
 # Ponteiros: acha root → +10 → +20 e o caminho volta a dar no mesmo endereço
 ptr=$(printf '%s\n' "attach $pid" "pointers $paddr 256 3" | "$out/tinkerd")

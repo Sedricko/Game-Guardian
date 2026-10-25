@@ -81,6 +81,8 @@ static int xoff(int t) { return (t >> 8) ? ((t >> 8) - 17) * 4 : 0; }  // 0 = o 
 static int find_type(const char *s) {
     if (!strcmp(s, "xi32")) return T_I32 | XOR;
     if (!strcmp(s, "xf32")) return T_F32 | XOR;
+    if (!strcmp(s, "xi64")) return T_I64 | XOR;  // ObscuredLong/ObscuredDouble: chave de 8 bytes em addr, valor^chave em addr+8
+    if (!strcmp(s, "xf64")) return T_F64 | XOR;
     if (!strcmp(s, "i32x2")) return T_I32 | TAG;
     if (!strcmp(s, "i64x2")) return T_I64 | TAG;
     if ((!strncmp(s, "xi32@", 5) || !strncmp(s, "xf32@", 5)) && s[5]) {
@@ -97,7 +99,7 @@ static const char *tname(int t) {
     static char buf[16];
     if (t & TAG) return B(t) == T_I32 ? "i32x2" : "i64x2";
     if (!(t & XOR)) return TYPES[t].name;
-    if (!xoff(t)) return B(t) == T_I32 ? "xi32" : "xf32";
+    if (!xoff(t)) return B(t) == T_I32 ? "xi32" : B(t) == T_F32 ? "xf32" : B(t) == T_I64 ? "xi64" : "xf64";
     snprintf(buf, sizeof buf, "%s@%d", B(t) == T_I32 ? "xi32" : "xf32", xoff(t));
     return buf;
 }
@@ -350,6 +352,13 @@ static int cread(uint64_t a, unsigned char *out, int sz) {
 static int load(uint64_t a, int t, unsigned char *out, int cached) {
     if (t & TAG) return (cached ? cread(a, out, TYPES[B(t)].size) : read_mem(a, out, TYPES[B(t)].size)) || untag(t, out) ? -1 : 0;
     if (!(t & XOR)) return cached ? cread(a, out, TYPES[t].size) : read_mem(a, out, TYPES[t].size);
+    if (TYPES[B(t)].size == 8) {  // 8 bytes: chave e depois o valor trancado
+        uint64_t q[2];
+        if (cached ? cread(a, (unsigned char *)q, 16) : read_mem(a, q, 16)) return -1;
+        q[0] ^= q[1];
+        memcpy(out, q, 8);
+        return 0;
+    }
     uint32_t w[2];
     if (xoff(t)) {
         if (read_mem(a, &w[0], 4) || read_mem(a + xoff(t), &w[1], 4)) return -1;
@@ -373,6 +382,13 @@ static int store(uint64_t a, int t, const unsigned char *val) {
         return write_mem(a, &x, 8);
     }
     if (!(t & XOR)) return write_mem(a, val, TYPES[t].size);
+    if (TYPES[B(t)].size == 8) {
+        uint64_t k8, v8;
+        if (read_mem(a, &k8, 8)) return -1;
+        memcpy(&v8, val, 8);
+        v8 ^= k8;
+        return write_mem(a + 8, &v8, 8);
+    }
     uint32_t key, v;
     if (xoff(t)) {
         if (read_mem(a + xoff(t), &key, 4)) return -1;
@@ -426,12 +442,18 @@ static void scan_chunk(size_t ci, unsigned char *buf, void *ctx) {
     for (size_t i = 0; i + sc->step <= c->len; i += sc->step)
         for (int k = 0; k < sc->ntypes; k++) {
             int t = sc->types[k], sz = TYPES[B(t)].size, o = xoff(t);
-            if (i % sz || i + (t & XOR && !o ? 8 : sz) > c->len) continue;
+            if (i % sz || i + (t & XOR && !o ? 2 * sz : sz) > c->len) continue;
             if (o && ((int64_t)i + o < 0 || i + o + 4 > c->len)) continue;
             const unsigned char *p = buf + i;
             uint32_t w[2];
+            uint64_t q[2];
             unsigned char tg[8];
-            if (t & XOR) {
+            if (t & XOR && sz == 8) {
+                memcpy(q, p, 16);
+                if (q[0] < 0x10000 || q[0] > ~0ULL - 0x10000) continue;  // chave de verdade é grande e sorteada
+                q[0] ^= q[1];
+                p = (const unsigned char *)q;
+            } else if (t & XOR) {
                 if (o) { memcpy(&w[0], p, 4); memcpy(&w[1], p + o, 4); }
                 else { memcpy(w, p, 8); uint32_t kk = w[0]; w[0] = w[1]; w[1] = kk; }  // chave antes: w[1] = chave
                 if (!xor_key((int32_t)w[1])) continue;
