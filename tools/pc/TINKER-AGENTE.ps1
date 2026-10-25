@@ -14,13 +14,34 @@ $raw = "https://raw.githubusercontent.com/Sedricko/Game-Guardian/ccr-92c99132-2n
 $cfg = "$env:USERPROFILE\tinker-agente-painel.txt"   # link da planilha: fica so neste PC
 $done = "$env:USERPROFILE\tinker-agente-testado.txt" # ultima versao testada
 $log = "$env:USERPROFILE\tinker-agente-log.txt"
+$tok = "$env:USERPROFILE\tinker-agente-github.txt"  # token so de leitura do GitHub (repositorio privado): fica so neste PC
 $app = "dev.tinker.app"
 function Say($t) { $l = "$(Get-Date -Format 'HH:mm:ss') $t"; Write-Host $l; Add-Content $log $l }
+function Hdr($extra) {
+    $h = @{ "User-Agent" = "Tinker"; "Cache-Control" = "no-cache" }
+    $t = (Get-Content $tok -ErrorAction SilentlyContinue | Select-Object -First 1)
+    if ($t) { $h["Authorization"] = "Bearer $($t.Trim())" }
+    if ($extra) { $extra.Keys | ForEach-Object { $h[$_] = $extra[$_] } }
+    $h
+}
+
+# APK do release: com token vai pela API (repositorio privado); o GitHub manda para o S3, que nao aceita o token junto
+function Get-Apk($asset, $out) {
+    if (-not (Hdr).ContainsKey("Authorization")) { Invoke-WebRequest $asset.browser_download_url -OutFile $out -UseBasicParsing; return }
+    $r = $null; $loc = $null
+    try { $r = Invoke-WebRequest $asset.url -Headers (Hdr @{ "Accept" = "application/octet-stream" }) -MaximumRedirection 0 -UseBasicParsing -ErrorAction SilentlyContinue }
+    catch { $loc = $_.Exception.Response.Headers["Location"] }
+    if ($r -and $r.StatusCode -eq 200) { [IO.File]::WriteAllBytes($out, $r.Content); return }
+    if ($r) { $loc = $r.Headers.Location }
+    if (-not $loc) { throw "o GitHub nao entregou o APK (token valido?)" }
+    Invoke-WebRequest ([string]$loc) -OutFile $out -UseBasicParsing
+}
+
 function Norm($t) { ($t -replace "`r`n", "`n").TrimStart([char]0xFEFF) }
 
 function Update-Self {
     try {
-        $new = (Invoke-WebRequest "$raw/TINKER-AGENTE.ps1" -UseBasicParsing -Headers @{ "Cache-Control" = "no-cache" }).Content
+        $new = (Invoke-WebRequest "$raw/TINKER-AGENTE.ps1" -UseBasicParsing -Headers (Hdr)).Content
         if ($new -is [byte[]]) { $new = [Text.Encoding]::UTF8.GetString($new) }
         if ($new -and $new.Contains("Update-Self") -and (Norm $new) -ne (Norm (Get-Content $self -Raw -Encoding UTF8))) {
             [IO.File]::WriteAllText($self, ((Norm $new) -replace "`n", "`r`n"), (New-Object Text.UTF8Encoding $true))
@@ -70,12 +91,11 @@ function Post-Sheet($motivo, $problemas, $texto, $versao) {
 }
 
 function Test-Version {
-    $rel = Invoke-RestMethod "https://api.github.com/repos/Sedricko/Game-Guardian/releases/latest" -Headers @{ "User-Agent" = "Tinker" }
+    $rel = Invoke-RestMethod "https://api.github.com/repos/Sedricko/Game-Guardian/releases/latest" -Headers (Hdr)
     $v = $rel.tag_name.TrimStart("v")
     if ((Get-Content $done -ErrorAction SilentlyContinue) -eq $v) { return }
     Say "=== Tinker $v ==="
-    $apk = ($rel.assets | Where-Object name -like "*.apk" | Select-Object -First 1).browser_download_url
-    Invoke-WebRequest $apk -OutFile "$env:TEMP\Tinker.apk"
+    Get-Apk ($rel.assets | Where-Object name -like "*.apk" | Select-Object -First 1) "$env:TEMP\Tinker.apk"
     $inst = (& $adb install -r "$env:TEMP\Tinker.apk") -join " "
     Say "instalado: $inst"
     & $adb shell appops set $app SYSTEM_ALERT_WINDOW allow | Out-Null
@@ -109,6 +129,10 @@ if (-not (Test-Path $cfg)) {
     Write-Host "Cole o link do painel da planilha (o mesmo de Tinker > Ajustes > Link do painel) e Enter." -ForegroundColor Yellow
     Write-Host "Ele fica so neste PC, em $cfg. Enter vazio = sem planilha (resultado so no log)."
     Set-Content $cfg (Read-Host "Link")
+}
+if (-not (Test-Path $tok)) {
+    Write-Host "Token do GitHub (so leitura, github_pat_...). So precisa se o repositorio for privado; Enter vazio = sem token." -ForegroundColor Yellow
+    Set-Content $tok (Read-Host "Token")
 }
 Say "agente ligado. Deixe esta janela aberta; Ctrl+C para sair."
 while ($true) {

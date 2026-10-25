@@ -339,6 +339,7 @@ object Session {
     var findEncrypted by mutableStateOf(true)
     var useBar by mutableStateOf(false)
     var autoOverlay by mutableStateOf(true)
+    var githubToken by mutableStateOf("")  // token só de leitura do GitHub: precisa quando o repositório é privado
     var autoUpdate by mutableStateOf(false)  // baixa e instala a versão nova sozinho (root) e roda o autoteste depois
     var ownKeypad by mutableStateOf(true)  // teclado do Tinker no lugar do teclado do telefone  // ao abrir o app, já abre o menu flutuante e sai da frente (como o GameGuardian)
     var update by mutableStateOf<Pair<String, String>?>(null)
@@ -433,7 +434,7 @@ class Engine private constructor(private val app: Context) {
     fun saveSettings() {
         prefs.edit().putBoolean("autoPause", Session.autoPause).putBoolean("findEncrypted", Session.findEncrypted)
             .putBoolean("autoPointers", Session.autoPointers).putBoolean("gameLibsOnly", Session.gameLibsOnly)
-            .putBoolean("autoOverlay", Session.autoOverlay).putBoolean("ownKeypad", Session.ownKeypad).putBoolean("autoUpdate", Session.autoUpdate).putFloat("alpha", Session.alpha).putInt("panelSize2", Session.panelSize).putBoolean("panelLeft", Session.panelLeft)
+            .putBoolean("autoOverlay", Session.autoOverlay).putBoolean("ownKeypad", Session.ownKeypad).putBoolean("autoUpdate", Session.autoUpdate).putString("githubToken", Session.githubToken).putFloat("alpha", Session.alpha).putInt("panelSize2", Session.panelSize).putBoolean("panelLeft", Session.panelLeft)
             .remove("aiKey").putString("aiProvider", Session.aiProvider).putBoolean("aiReserve", Session.aiReserve)
             .putString("groqKeys", Session.groqKeys.joinToString("\n")).putInt("groqKeyIndex", Session.groqKeyIndex).putString("groqModel", Session.groqModel)
             .putString("sheetGroqKeys", Session.sheetGroqKeys.joinToString("\n")).putBoolean("aiCanTest", Session.aiCanTest).putBoolean("aiAuto", Session.aiAuto).putBoolean("aiControl", Session.aiControl)
@@ -458,6 +459,7 @@ class Engine private constructor(private val app: Context) {
         Session.autoOverlay = prefs.getBoolean("autoOverlay", true)
         Session.ownKeypad = prefs.getBoolean("ownKeypad", true)
         Session.autoUpdate = prefs.getBoolean("autoUpdate", false)
+        Session.githubToken = prefs.getString("githubToken", "").orEmpty()
         // o Claude saiu do app (chave paga): quem usava passa para o Gemini
         Session.aiProvider = prefs.getString("aiProvider", "groq").orEmpty().takeIf { it == "gemini" || it == "groq" } ?: "groq"
         // uma vez só: quem já usava passa para o Groq (dá para voltar ao Gemini em Ajustes)
@@ -622,6 +624,7 @@ class Engine private constructor(private val app: Context) {
      * e o Tinker funciona igual.
      */
     @Volatile private var updateSeen = ""
+    @Volatile private var apkApiUrl = ""  // repositório privado: o APK só vem pela API, com o token
 
     /** Botão "Procurar atualização" (aba Registro): confere agora e diz o resultado, mesmo que o aviso já tenha sido fechado. */
     suspend fun checkUpdateNow(): String = withContext(Dispatchers.IO) {
@@ -638,12 +641,14 @@ class Engine private constructor(private val app: Context) {
         c.readTimeout = 5000
         c.setRequestProperty("User-Agent", "Tinker")
         c.setRequestProperty("Accept", "application/vnd.github+json")
+        Session.githubToken.takeIf { it.isNotBlank() }?.let { c.setRequestProperty("Authorization", "Bearer $it") }
         val json = JSONObject(c.inputStream.bufferedReader().use { it.readText() })
         val latest = json.getString("tag_name").removePrefix("v")
         val mine = app.packageManager.getPackageInfo(app.packageName, 0).versionName.orEmpty()
         val assets = json.optJSONArray("assets")
-        val apk = (0 until (assets?.length() ?: 0)).map { assets!!.getJSONObject(it).optString("browser_download_url") }
-            .firstOrNull { it.endsWith(".apk") } ?: json.getString("html_url")
+        val apkAsset = (0 until (assets?.length() ?: 0)).map { assets!!.getJSONObject(it) }.firstOrNull { it.optString("name").endsWith(".apk") }
+        val apk = apkAsset?.optString("browser_download_url") ?: json.getString("html_url")
+        apkApiUrl = apkAsset?.optString("url").orEmpty()
         // a mesma versão avisa uma vez só: se a pessoa fechou o aviso, ele não volta a cada 30 min
         if (mine.isNotEmpty() && newer(latest, mine) && latest != updateSeen) {
             updateSeen = latest
@@ -660,7 +665,9 @@ class Engine private constructor(private val app: Context) {
     private fun autoInstall(version: String, url: String) {
         require(url.endsWith(".apk")) { "o release não tem APK" }
         val f = File(app.cacheDir, "update.apk")
-        val c = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+        val token = Session.githubToken.takeIf { it.isNotBlank() && apkApiUrl.isNotEmpty() }
+        val c = java.net.URL(if (token != null) apkApiUrl else url).openConnection() as java.net.HttpURLConnection
+        token?.let { c.setRequestProperty("Authorization", "Bearer $it"); c.setRequestProperty("Accept", "application/octet-stream") }
         c.connectTimeout = 10_000
         c.readTimeout = 60_000
         c.setRequestProperty("User-Agent", "Tinker")
