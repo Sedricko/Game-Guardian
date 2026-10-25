@@ -2765,6 +2765,34 @@ class Engine private constructor(private val app: Context) {
         return "\"$text\" (UTF-16): " + searchAob(utf16, false)
     }
 
+    // ---- foto do jogo: antes/depois de uma ação (ex.: pegar a recompensa do correio) e voltar como estava ----
+
+    /** Tira a foto (a memória toda vai para um arquivo) e, parado 4 s, marca o que muda sozinho para não confundir depois. */
+    suspend fun photoTake(): String = call { d ->
+        val mb = d.send("photo").status
+        delay(4000)
+        val noise = d.send("photonoise").status
+        Diag.add("Foto do jogo: $mb MB; $noise Dwords mudam sozinhos (ficam fora)")
+        "Foto tirada ($mb MB). Agora faça a ação no jogo (ex.: pegue a recompensa) e toque em Ver o que mudou."
+    }
+
+    /** O que mudou desde a foto (fora o que muda sozinho e os ponteiros): vai para a lista da Busca, onde dá para refinar. */
+    suspend fun photoDiff(): String = call { d ->
+        val n = d.send("photodiff").status
+        Session.canUndo = false
+        inFile = false
+        step(true, "o que mudou desde a foto", n)
+        "$n valores mudaram desde a foto. Refine para ficar só com os da ação (ex.: o número de presentes) e toque em Voltar como estava."
+    }
+
+    /** Põe de volta o valor da foto em todos os resultados da lista (ou só nos escolhidos). */
+    suspend fun photoRestore(addrs: List<String>?): String = call { d ->
+        val (ok, fail) = if (addrs == null) d.send("photorestore all").status.split(' ').let { (it.getOrNull(0) ?: "0") to (it.getOrNull(1) ?: "0") }
+            else addrs.map { d.send("photorestore $it").status.split(' ') }.let { r -> r.count { it.firstOrNull() == "1" }.toString() to r.count { it.firstOrNull() != "1" }.toString() }
+        Diag.add("Foto do jogo: voltaram $ok valores ($fail falharam)")
+        "$ok valores voltaram como estavam na foto" + if (fail != "0") " ($fail não deu)." else "."
+    }
+
     // ---- código: "o que escreve aqui", ver as instruções e patches ----
 
     /** "O que escreve aqui": observa o endereço por alguns segundos e devolve as instruções que escreveram nele (pc, vezes, lib+desloc.). */

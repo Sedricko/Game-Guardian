@@ -490,6 +490,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                 if (more) {
                     UnknownSearch(engine, enabled, run)
                     AobSearch(engine, enabled, run)
+                    PhotoPanel(engine, enabled, s.results.filter { it.addr + it.type in selected }.map { it.addr }, run)
                     TextButton(onClick = { s.view = null; s.tab = TAB_MEMORY }, enabled = s.process != null) { Text("Ir para endereço…") }
                 }
                 if (s.process != null) AiBox(
@@ -606,6 +607,27 @@ private fun CompareButtons(engine: Engine, enabled: Boolean, run: (suspend () ->
         if (s.value.isNotBlank()) {
             OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { run { engine.compare("incby", s.value) } }, enabled = enabled) { Text("+${s.value}", maxLines = 1) }
             OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { run { engine.compare("decby", s.value) } }, enabled = enabled) { Text("−${s.value}", maxLines = 1) }
+        }
+    }
+}
+
+/**
+ * Foto do jogo (só offline): foto antes de uma ação (pegar a recompensa do correio), ver o que mudou e voltar como estava,
+ * para a recompensa ficar de novo para pegar. Os resultados vão para a lista da Busca, onde dá para refinar antes de voltar.
+ */
+@Composable
+private fun PhotoPanel(engine: Engine, enabled: Boolean, chosen: List<String>, run: (suspend () -> String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    TextButton(onClick = { open = !open }) { Text((if (open) "▾ " else "▸ ") + "📸 Foto do jogo (antes e depois de uma ação)") }
+    if (!open) return
+    Text("1) Tire a foto antes (fique parado 4 s). 2) Faça a ação no jogo, ex.: pegue a recompensa do correio. 3) Veja o que mudou " +
+        "e refine se precisar. 4) Volte como estava: a recompensa fica para pegar de novo. Só jogo offline; pode fechar o jogo se voltar algo errado.",
+        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Button(shape = MaterialTheme.shapes.medium, onClick = { run { engine.photoTake() } }, enabled = enabled) { Text("1. Tirar foto") }
+        OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { run { engine.photoDiff() } }, enabled = enabled) { Text("2. Ver o que mudou") }
+        OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { run { engine.photoRestore(chosen.ifEmpty { null }) } }, enabled = enabled) {
+            Text(if (chosen.isEmpty()) "3. Voltar como estava (todos)" else "3. Voltar os ${chosen.size} escolhidos")
         }
     }
 }
@@ -1951,6 +1973,10 @@ private val HELP = listOf(
         "com tipo e valor ao vivo; o que muda fica destacado. Em jogo Unity IL2CPP, com os nomes do próprio jogo (Player.hp); nos outros, " +
         "com o tipo adivinhado (inteiro, decimal, ponteiro, cifrado 🔒). Toque num campo para salvar ou editar; num ponteiro, para abrir o objeto. " +
         "Salvos dentro de um objeto IL2CPP ganham o nome do campo sozinhos.",
+    "Foto do jogo" to "Para pegar de novo uma recompensa (jogo offline): Busca → Mais formas → Foto do jogo. 1) Tirar foto antes, parado 4 s. " +
+        "2) Pegue a recompensa no jogo. 3) Ver o que mudou: a lista mostra só o que mudou com a ação (o que muda sozinho e os ponteiros ficam fora); " +
+        "refine se quiser (ex.: pelo número de presentes). 4) Voltar como estava: os valores da lista (ou os escolhidos) voltam aos da foto, " +
+        "e a recompensa fica para pegar de novo. Se o jogo travar, feche e abra: o jogo volta pelo save dele.",
     "Código e patches" to "Para o recurso não diminuir: em Salvos, toque no salvo → \"O que escreve aqui?\" e gaste o recurso no jogo nos 15 s. " +
         "Aparece a instrução que muda o valor; \"Ver código\" abre Memória → Código, com as instruções traduzidas (SUB, STR…). Tocar numa " +
         "instrução deixa trocar por NOP (não faz nada) ou por outros bytes: vira um patch em Salvos → Patches de código, com liga/desliga. " +

@@ -746,6 +746,148 @@ static void cmd_compare(const char *opname, const char *value) {
     printf("ok %zu\n", nres);
 }
 
+// Foto do jogo (antes/depois): a memória gravável inteira vai para um arquivo. Depois de uma ação no jogo (pegar a
+// recompensa do correio), photodiff lista os Dwords que mudaram (fora o que muda sozinho e os ponteiros) e photorestore
+// põe de volta o valor da foto: o jogo volta a ficar como estava antes da ação. Só para jogo offline.
+static chunks_t photo;
+static int photofd = -1;
+static uint8_t *pnoise;  // 1 bit por Dword: mudou sozinho, sem ação; fica fora da diferença
+static char photopath[64];
+
+static void drop_photo(void) {
+    if (photofd >= 0) { close(photofd); unlink(photopath); }
+    photofd = -1;
+    free(photo.c);
+    photo = (chunks_t){0};
+    free(pnoise);
+    pnoise = NULL;
+}
+
+static void photo_chunk(size_t ci, unsigned char *buf, void *ctx) {
+    (void)ctx;
+    const chunk_t *c = &photo.c[ci];
+    // ilegível agora: tudo vira "muda sozinho" (não entra na diferença nem volta)
+    if (read_mem(c->addr, buf, c->len)) { memset(buf, 0, c->len); memset(pnoise + c->off / 32, 0xff, c->len / 32); }
+    if (pwrite(photofd, buf, c->len, (off_t)c->off) != (ssize_t)c->len) memset(pnoise + c->off / 32, 0xff, c->len / 32);
+}
+
+static void cmd_photo(void) {
+    drop_photo();
+    photo.want = ranges;
+    if (each_region(add_chunks, &photo)) { puts("err não leu o mapa de memória"); return; }
+    if (!photo.total) { puts("err nenhuma região marcada"); drop_photo(); return; }
+    const char *dir = access("/data/local/tmp", W_OK) ? "/tmp" : "/data/local/tmp";
+    struct statvfs fs;
+    if (!statvfs(dir, &fs) && (uint64_t)fs.f_bavail * fs.f_frsize < photo.total + (64u << 20)) {
+        printf("err sem espaço para a foto: precisa de %" PRIu64 " MB livres em %s; desmarque regiões em Ajustes\n", (photo.total >> 20) + 64, dir);
+        drop_photo();
+        return;
+    }
+    snprintf(photopath, sizeof photopath, "%s/tinker-photo", dir);
+    photofd = open(photopath, O_RDWR | O_CREAT | O_TRUNC, 0600);
+    pnoise = calloc(photo.total / 32 + 1, 1);
+    if (photofd < 0 || !pnoise) { printf("err não criou %s: %s\n", photopath, strerror(errno)); drop_photo(); return; }
+    parallel(photo.n, photo_chunk, NULL);
+    printf("ok %" PRIu64 "\n", photo.total >> 20);
+}
+
+// endereço dentro da memória fotografada (um ponteiro de verdade aponta para ela)
+static int in_photo(uint64_t v) {
+    size_t lo = 0, hi = photo.n;
+    while (lo < hi) {
+        size_t mid = (lo + hi) / 2;
+        if (v < photo.c[mid].addr) hi = mid;
+        else if (v >= photo.c[mid].addr + photo.c[mid].len) lo = mid + 1;
+        else return 1;
+    }
+    return 0;
+}
+
+// Dword dentro de um Qword que é ponteiro para a memória do jogo: voltar ele derrubaria o jogo (objeto já liberado).
+// Só o que aponta para lá conta: dois números pequenos lado a lado (1 e 12445) não são ponteiro.
+static int ptr_like(const unsigned char *b, size_t at, size_t len) {
+    size_t q = at & ~(size_t)7;
+    if (q + 8 > len) return 0;
+    uint64_t v;
+    memcpy(&v, b + q, 8);
+    v &= 0x00ffffffffffffffULL;  // Android arm64 marca ponteiros do malloc no byte de cima
+    return v >= 0x10000 && in_photo(v);
+}
+
+static void noise_chunk(size_t ci, unsigned char *buf, void *ctx) {
+    (void)ctx;
+    const chunk_t *c = &photo.c[ci];
+    unsigned char *cur = buf, *old = buf + CHUNK;
+    uint8_t *m = pnoise + c->off / 32;
+    if (read_mem(c->addr, cur, c->len) || pread(photofd, old, c->len, (off_t)c->off) != (ssize_t)c->len) { memset(m, 0xff, c->len / 32); return; }
+    for (size_t k = 0; k < c->len / 4; k++) if (memcmp(cur + k * 4, old + k * 4, 4)) m[k >> 3] |= 1 << (k & 7);
+}
+
+static void cmd_photonoise(void) {
+    if (photofd < 0) { puts("err tire a foto antes"); return; }
+    parallel(photo.n, noise_chunk, NULL);
+    size_t n = 0;
+    for (size_t i = 0; i < photo.total / 32; i++) n += __builtin_popcount(pnoise[i]);
+    printf("ok %zu\n", n);
+}
+
+static void diff_chunk(size_t ci, unsigned char *buf, void *ctx) {
+    hits_t *out = ctx;
+    const chunk_t *c = &photo.c[ci];
+    unsigned char *cur = buf, *old = buf + CHUNK;
+    const uint8_t *m = pnoise + c->off / 32;
+    if (read_mem(c->addr, cur, c->len) || pread(photofd, old, c->len, (off_t)c->off) != (ssize_t)c->len) return;
+    for (size_t k = 0; k < c->len / 4; k++) {
+        if ((m[k >> 3] & (1 << (k & 7))) || !memcmp(cur + k * 4, old + k * 4, 4)) continue;
+        if (ptr_like(cur, k * 4, c->len) || ptr_like(old, k * 4, c->len)) continue;
+        hpush(&out[ci], (hit_t){c->addr + k * 4, bits(cur + k * 4, 4), (uint16_t)T_I32, c->region});
+    }
+}
+
+static void cmd_photodiff(void) {
+    if (photofd < 0) { puts("err tire a foto antes"); return; }
+    hits_t *out = calloc(photo.n ? photo.n : 1, sizeof *out);
+    if (!out) { puts("err sem memória"); exit(1); }
+    parallel(photo.n, diff_chunk, out);
+    drop_snap();
+    nres = nprev = 0;
+    collect(out, photo.n);
+    if (nres > list_max) nres = list_max;
+    printf("ok %zu\n", nres);
+}
+
+// valor que o Dword tinha na foto
+static int photo_value(uint64_t a, uint32_t *v) {
+    size_t lo = 0, hi = photo.n;
+    while (lo < hi) {
+        size_t mid = (lo + hi) / 2;
+        const chunk_t *c = &photo.c[mid];
+        if (a < c->addr) hi = mid;
+        else if (a + 4 > c->addr + c->len) lo = mid + 1;
+        else return pread(photofd, v, 4, (off_t)(c->off + (a - c->addr))) == 4 ? 0 : -1;
+    }
+    return -1;
+}
+
+// "all": todos os resultados da lista (o que mudou, depois de refinar); ou um endereço só
+static void cmd_photorestore(const char *what) {
+    if (photofd < 0) { puts("err tire a foto antes"); return; }
+    size_t ok = 0, fail = 0;
+    uint32_t v;
+    if (!strcmp(what, "all")) {
+        if (snapfd >= 0) { puts("err refine mais antes de voltar todos"); return; }
+        for (size_t i = 0; i < nres; i++) {
+            if (!photo_value(res[i].addr, &v) && !write_mem(res[i].addr, &v, 4)) ok++;
+            else fail++;
+        }
+    } else {
+        uint64_t a = strtoull(what, NULL, 16);
+        if (!photo_value(a, &v) && !write_mem(a, &v, 4)) ok++;
+        else fail++;
+    }
+    printf("ok %zu %zu\n", ok, fail);
+}
+
 static void cmd_list(size_t n) {
     if (snapfd >= 0) { printf("ok %zu\n", snapn); return; }  // milhões ainda no arquivo: nada para mostrar
     unsigned char b[8];
@@ -1721,6 +1863,7 @@ int main(void) {
             resume_target();  // trocou de jogo: o anterior não fica parado
             pthread_mutex_lock(&frz_lock);  // a thread do congelamento usa target e memfd
             nfrz = 0;
+            drop_photo();  // a foto era do jogo anterior
             target = atoi(a1);
             char path[64];
             snprintf(path, sizeof path, "/proc/%d/mem", target);
@@ -1750,6 +1893,11 @@ int main(void) {
         else if (!strcmp(cmd, "il2classes")) cmd_il2classes();
         else if (!strcmp(cmd, "resolve")) cmd_resolve(strstr(line, "resolve") + 7);
         else if (!strcmp(cmd, "where")) cmd_where(a1);
+        else if (!strcmp(cmd, "photo")) cmd_photo();
+        else if (!strcmp(cmd, "photonoise")) cmd_photonoise();
+        else if (!strcmp(cmd, "photodiff")) cmd_photodiff();
+        else if (!strcmp(cmd, "photorestore")) cmd_photorestore(a1);
+        else if (!strcmp(cmd, "photodrop")) { drop_photo(); puts("ok"); }
         else if (!strcmp(cmd, "watch")) cmd_watch(a1, a2);
         else if (!strcmp(cmd, "list")) cmd_list(strtoul(a1, NULL, 10));
         else if (!strcmp(cmd, "read")) cmd_read(a1, a2);

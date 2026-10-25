@@ -8,7 +8,7 @@ cc -O2 -Wall -Werror -pthread -o "$out/tinkerd" daemon/tinkerd.c -lm
 cc -O2 -pthread -o "$out/target" tests/target.c
 "$out/target" > "$out/info" & tpid=$!
 for _ in $(seq 50); do [ -s "$out/info" ] && break; sleep 0.1; done
-read -r pid iaddr faddr paddr xaddr oaddr yaddr zaddr qaddr waddr taddr caddr < "$out/info"
+read -r pid iaddr faddr paddr xaddr oaddr yaddr zaddr qaddr waddr taddr caddr maddr < "$out/info"
 
 got=$("$out/tinkerd" <<CMDS
 search i32 1
@@ -137,6 +137,14 @@ t2=$(printf '%s\n' "attach $pid" "read $taddr i32" | "$out/tinkerd" | tail -1)
 pt=$(printf '%s\n' "attach $pid" "read $caddr i32" "write $caddr i32 -1869574000" "read $caddr i32" | "$out/tinkerd")
 echo "$pt"
 grep -qx "ok -1869574000" <<<"$pt" || { echo "FALHOU: escrita no código"; exit 1; }
+
+# Foto do jogo: foto, o que muda sozinho (o contador), "pega a recompensa" (marca 1 e +100), diferença e volta como estava
+m4=$(printf '%x' $((0x$maddr + 4)))
+ph=$( { printf '%s\n' "attach $pid" "photo"; sleep 0.3; printf '%s\n' "photonoise" "write $maddr i32 1" "write $m4 i32 12445" "photodiff" "list 2000"; sleep 0.1
+        printf '%s\n' "photorestore all" "read $maddr i32" "read $m4 i32" "photodrop" "photodiff"; } | "$out/tinkerd")
+echo "$ph" | grep -v '^[0-9a-f]* i32' | head -20
+grep -qE "^$maddr i32 (Ch|A) 1$" <<<"$ph" && grep -qE "^$m4 i32 (Ch|A) 12445$" <<<"$ph" && ! grep -qE "^$taddr i32" <<<"$ph" \
+    && grep -qx "ok 0" <<<"$ph" && grep -qx "ok 12345" <<<"$ph" && grep -qx "err tire a foto antes" <<<"$ph" || { echo "FALHOU: foto do jogo"; exit 1; }
 
 # Ponteiros: acha root → +10 → +20 e o caminho volta a dar no mesmo endereço
 ptr=$(printf '%s\n' "attach $pid" "pointers $paddr 256 3" | "$out/tinkerd")
