@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -151,6 +152,7 @@ fun TinkerPanel(
                 // como o GameGuardian: o jogo fechou, pergunta se reabre
                 Card(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                 ) {
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
@@ -173,6 +175,7 @@ fun TinkerPanel(
                 val context = LocalContext.current
                 Card(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                 ) {
                     Row(Modifier.padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -218,7 +221,7 @@ private fun TabBar(modifier: Modifier = Modifier) {
         TABS.forEachIndexed { i, title ->
             val on = s.tab == i
             Box(
-                Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable { s.tab = i }.padding(vertical = 10.dp, horizontal = 2.dp),
+                Modifier.weight(1f).sizeIn(minHeight = 48.dp).clip(RoundedCornerShape(12.dp)).clickable { s.tab = i }.padding(vertical = 10.dp, horizontal = 2.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 BasicText(
@@ -294,7 +297,7 @@ private fun HeaderButton(
     color: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.primary, onClick: (() -> Unit)? = null,
 ) {
     Box(
-        modifier.size(42.dp).clip(RoundedCornerShape(50))
+        modifier.size(48.dp).clip(RoundedCornerShape(50))  // 48 dp: área mínima de toque do Android
             .then(if (onClick != null) Modifier.clickable(enabled = enabled, onClick = onClick) else Modifier)
             .semantics { contentDescription = description },
         contentAlignment = Alignment.Center,
@@ -305,6 +308,7 @@ private fun HeaderButton(
 private fun Banner(text: String, onClose: () -> Unit) {
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
     ) {
         Row(Modifier.padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -317,8 +321,9 @@ private fun Banner(text: String, onClose: () -> Unit) {
 @Composable
 private fun Panel(content: @Composable () -> Unit) {
     Card(
-        shape = RoundedCornerShape(20.dp),
+        shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
         modifier = Modifier.fillMaxWidth(),
     ) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { content() } }
 }
@@ -662,8 +667,9 @@ private fun ResultCard(
 ) {
     Card(
         onClick = onClick,
-        shape = RoundedCornerShape(14.dp),
+        shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),  // linha de lista: só um relevo leve
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(Modifier.padding(start = 4.dp, end = 16.dp, top = 8.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1106,7 +1112,7 @@ private fun ClassOpener(engine: Engine) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         OutlinedTextField(cls, { cls = it }, label = { Text("Classe ou campo") }, placeholder = { Text("PlayerData, gold") }, singleLine = true, modifier = Modifier.weight(1f))
         Button(onClick = { open(cls) }, enabled = !loading && s.process != null && cls.isNotBlank(), contentPadding = PaddingValues(horizontal = 12.dp)) { Text("Abrir") }
-        if (cls.isNotBlank()) TextButton(onClick = { copy(cls) }, contentPadding = PaddingValues(0.dp), modifier = Modifier.size(40.dp)) { Text("⧉", fontSize = 18.sp) }
+        if (cls.isNotBlank()) TextButton(onClick = { copy(cls) }, contentPadding = PaddingValues(0.dp), modifier = Modifier.size(48.dp)) { Text("⧉", fontSize = 18.sp) }
     }
     // atalhos: classes abertas antes e as dos salvos que têm nome IL2CPP
     val shortcuts = (s.classes + s.saved.mapNotNull { it.il2.substringBeforeLast('+', "").ifEmpty { null } }).distinct().take(10)
@@ -1196,7 +1202,7 @@ private fun ClassRow(gc: GameClass, matched: List<String>, onOpen: () -> Unit, o
                 color = MaterialTheme.colorScheme.tertiary, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
         Text("${gc.fields} campos", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-        TextButton(onClick = onCopy, contentPadding = PaddingValues(0.dp), modifier = Modifier.size(44.dp)) { Text("⧉", fontSize = 16.sp) }
+        TextButton(onClick = onCopy, contentPadding = PaddingValues(0.dp), modifier = Modifier.size(48.dp)) { Text("⧉", fontSize = 16.sp) }
     }
 }
 
@@ -1611,8 +1617,9 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
         }
         items(s.regions, key = { it.code }) { r ->
             Card(
-                shape = RoundedCornerShape(14.dp),
+                shape = MaterialTheme.shapes.medium,
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {

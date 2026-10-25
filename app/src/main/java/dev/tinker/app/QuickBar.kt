@@ -85,12 +85,12 @@ fun QuickBar(engine: Engine, onDrag: (Float, Float) -> Unit, onKeyboard: (Boolea
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
                 "⠿", fontSize = 22.sp, color = MaterialTheme.colorScheme.primary,
-                // 44dp: é o único jeito de mover a barra, precisa ser fácil de pegar
+                // 48dp: é o único jeito de mover a barra, precisa ser fácil de pegar
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                modifier = Modifier.size(44.dp).pointerInput(Unit) { detectDragGestures { c, d -> c.consume(); onDrag(d.x, d.y) } }.padding(top = 6.dp),
+                modifier = Modifier.size(48.dp).pointerInput(Unit) { detectDragGestures { c, d -> c.consume(); onDrag(d.x, d.y) } }.padding(top = 6.dp),
             )
             TextButton(onClick = { act { if (s.paused) engine.resume() else engine.pause() } }, enabled = enabled, contentPadding = PaddingValues(0.dp),
-                modifier = Modifier.size(40.dp)) { Text(if (s.paused) "▶" else "⏸", fontSize = 18.sp) }
+                modifier = Modifier.size(48.dp)) { Text(if (s.paused) "▶" else "⏸", fontSize = 18.sp) }
             OutlinedTextField(
                 s.value, { s.value = it }, singleLine = true, placeholder = { Text("Valor") }, readOnly = own,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
@@ -108,7 +108,7 @@ fun QuickBar(engine: Engine, onDrag: (Float, Float) -> Unit, onKeyboard: (Boolea
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             if (n > 0) {
                 listOf("inc" to "↑", "dec" to "↓", "same" to "=", "changed" to "≠").forEach { (op, label) ->
-                    OutlinedButton(onClick = { act { engine.compare(op) } }, enabled = enabled, contentPadding = PaddingValues(0.dp), modifier = Modifier.size(44.dp)) {
+                    OutlinedButton(onClick = { act { engine.compare(op) } }, enabled = enabled, contentPadding = PaddingValues(0.dp), modifier = Modifier.size(48.dp)) {
                         Text(label, fontSize = 18.sp)
                     }
                 }
@@ -125,8 +125,8 @@ fun QuickBar(engine: Engine, onDrag: (Float, Float) -> Unit, onKeyboard: (Boolea
                 Modifier.weight(1f).padding(start = 4.dp), style = MaterialTheme.typography.labelMedium, maxLines = 2,
             )
             // ▢ abre o painel completo (editar, congelar, salvar); – volta para a bolinha
-            TextButton(onClick = { onKeyboard(false); onOpenPanel() }, contentPadding = PaddingValues(0.dp), modifier = Modifier.size(44.dp)) { Text("▢", fontSize = 20.sp) }
-            TextButton(onClick = { onKeyboard(false); onBubble() }, contentPadding = PaddingValues(0.dp), modifier = Modifier.size(44.dp)) { Text("–", fontSize = 22.sp) }
+            TextButton(onClick = { onKeyboard(false); onOpenPanel() }, contentPadding = PaddingValues(0.dp), modifier = Modifier.size(48.dp)) { Text("▢", fontSize = 20.sp) }
+            TextButton(onClick = { onKeyboard(false); onBubble() }, contentPadding = PaddingValues(0.dp), modifier = Modifier.size(48.dp)) { Text("–", fontSize = 22.sp) }
         }
         // editar: todos os resultados (até 50) passam para o valor do campo
         if (n in 1L..50L) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {

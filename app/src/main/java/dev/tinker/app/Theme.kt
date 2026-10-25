@@ -1,9 +1,12 @@
 package dev.tinker.app
 
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 
 // Tema escuro fixo: o app fica sobre jogos, e a identidade não deve mudar com o papel de parede.
 private val Colors = darkColorScheme(
@@ -27,5 +30,14 @@ private val Colors = darkColorScheme(
     error = Color(0xFFFF8A80),
 )
 
+// cantos arredondados em tudo: campos de texto (extraSmall), chips (small), cards (medium) e painéis
+private val TinkerShapes = Shapes(
+    extraSmall = RoundedCornerShape(12.dp),
+    small = RoundedCornerShape(16.dp),
+    medium = RoundedCornerShape(16.dp),
+    large = RoundedCornerShape(20.dp),
+    extraLarge = RoundedCornerShape(28.dp),
+)
+
 @Composable
-fun TinkerTheme(content: @Composable () -> Unit) = MaterialTheme(colorScheme = Colors, content = content)
+fun TinkerTheme(content: @Composable () -> Unit) = MaterialTheme(colorScheme = Colors, shapes = TinkerShapes, content = content)
