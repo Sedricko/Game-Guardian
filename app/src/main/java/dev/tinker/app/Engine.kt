@@ -21,7 +21,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -1768,6 +1770,66 @@ class Engine private constructor(private val app: Context) {
             require("48213" in text.filter { !it.isWhitespace() }) { "leu \"${text.take(40)}\" em vez de 48213" }
             "ok"
         }
+        // jogo de teste: o programa tests/target.c (vai no APK) imita um jogo; o Tinker faz nele o que faria num jogo de verdade
+        val bench = app.applicationInfo.nativeLibraryDir + "/libtinkertarget.so"
+        if (File(bench).exists()) withTarget(bench) { t, a ->
+            val (iaddr, faddr, paddr, xaddr, oaddr) = a.subList(0, 5)
+            val (caddr, maddr) = a[10] to a[11]
+            check("jogo de teste: Dword, Float e refino") {
+                require(t.call("search i32 123456789").status == "1") { "não achou o Dword" }
+                t.call("write $iaddr i32 987654321")
+                require(t.call("refine 987654321").status == "1" && t.call("read $iaddr i32").status == "987654321") { "a escrita ou o refino falhou" }
+                require(t.call("search f64,f32 3.5").let { t.call("list 1000").lines.any { l -> l.startsWith("$faddr f32") } }) { "não achou o Float" }
+                "ok"
+            }
+            check("jogo de teste: cifrado 🔒 (XOR)") {
+                t.call("search i32,f32,xi32,xf32 777777")
+                require(t.call("list 20").lines.any { it.startsWith("$xaddr xi32") }) { "não achou o valor cifrado" }
+                t.call("write $xaddr xi32 888888")
+                require(t.call("read $xaddr xi32").status == "888888") { "a escrita cifrada falhou" }
+                "ok"
+            }
+            check("jogo de teste: ponteiros") {
+                val chain = t.call("pointers $paddr 256 3").lines.firstOrNull { Regex("""\S+\+[0-9a-f]+ 10 20""").matches(it) } ?: error("não achou o caminho")
+                require(t.call("resolve $chain").status == paddr) { "o caminho $chain não volta ao endereço" }
+                "ok ($chain)"
+            }
+            check("jogo de teste: congelar") {
+                t.call("freeze $iaddr i32 424242")
+                t.call("write $iaddr i32 1")
+                Thread.sleep(400)
+                val v = t.call("read $iaddr i32").status
+                t.call("unfreeze all")
+                require(v == "424242") { "não segurou (leu $v)" }
+                "ok"
+            }
+            check("jogo de teste: AOB e grupo") {
+                require((t.call("aob ????????2b02000000000000 data").status.toLongOrNull() ?: 0) >= 1) { "a AOB não achou" }
+                require(t.call("group i32,f32 4321;99.5 16").status == "2") { "a busca em grupo não achou vida e ouro juntos" }
+                "ok"
+            }
+            check("jogo de teste: IL2CPP (nomes dos campos)") {
+                val gold = (oaddr.toLong(16) + 0x14).toString(16)
+                val r = t.call("il2cpp $gold").lines
+                require("class Game.Player $oaddr" in r && "field 14 08 gold" in r) { "não deu nome ao campo: ${r.take(3)}" }
+                "ok"
+            }
+            check("jogo de teste: patch no código") {
+                t.call("write $caddr i32 -1869574000")
+                require(t.call("read $caddr i32").status == "-1869574000") { "não escreveu no código" }
+                "ok"
+            }
+            check("jogo de teste: foto (o que mudou)") {
+                t.call("photo")
+                t.call("photonoise")
+                t.call("write $maddr i32 1")
+                val n = t.call("photodiff").status.toLongOrNull() ?: 0
+                val found = t.call("list 2000").lines.any { it.startsWith("$maddr i32") }
+                t.call("photodrop")
+                require(found) { "a foto não mostrou a mudança ($n)" }
+                "ok"
+            }
+        }?.let { msg -> check("jogo de teste") { error(msg) } } else check("jogo de teste") { error("não veio no APK") }
         // speedhack e unrandomizer precisam rodar código dentro do jogo; isto só confere se o sistema permite a base disso
         check("base do speedhack e unrandomizer") {
             val r = withSelf { t -> t.call("canattach").status }
@@ -1795,6 +1857,29 @@ class Engine private constructor(private val app: Context) {
     }
 
     /** Um daemon à parte, ligado a ele mesmo: as funções são testadas na memória dele, sem tocar no jogo. */
+    /** Abre o jogo de teste como root, um daemon ligado nele, roda block e fecha os dois. Devolve o erro, se não abriu. */
+    private suspend fun withTarget(path: String, block: suspend (Daemon, List<String>) -> Unit): String? {
+        val proc = ProcessBuilder("su", "-c", "exec $path").start()
+        var pid = ""
+        try {
+            val info = withTimeout(5000) { runInterruptible { proc.inputStream.bufferedReader().readLine() } }?.trim()?.split(' ').orEmpty()
+            require(info.size >= 18) { "o jogo de teste não abriu" }
+            pid = info[0]
+            val t = Daemon(app.applicationInfo.nativeLibraryDir + "/libtinkerd.so") {}
+            try {
+                t.call("attach $pid")
+                // ordem do target.c: i f p x o y z q w ticks código correio …
+                block(t, info.drop(1))
+            } finally { t.close() }
+            return null
+        } catch (e: Exception) {
+            return e.message ?: e.toString()
+        } finally {
+            if (pid.isNotEmpty()) runCatching { ProcessBuilder("su", "-c", "kill -9 $pid").start().waitFor() }
+            proc.destroy()
+        }
+    }
+
     private fun <T> withSelf(block: (Daemon) -> T): T {
         val t = Daemon(app.applicationInfo.nativeLibraryDir + "/libtinkerd.so") {}
         try {

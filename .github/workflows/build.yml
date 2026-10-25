@@ -28,6 +28,9 @@ jobs:
           mkdir -p app/src/main/jniLibs/arm64-v8a
           "$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang" \
             -O2 -Wall -Werror -pthread -o app/src/main/jniLibs/arm64-v8a/libtinkerd.so daemon/tinkerd.c -lm
+          # jogo de teste: o mesmo alvo do teste do daemon, para o autoteste usar no aparelho no lugar de um jogo
+          "$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang" \
+            -O2 -pthread -o app/src/main/jniLibs/arm64-v8a/libtinkertarget.so tests/target.c
 
       - uses: actions/setup-java@v6
         with:
