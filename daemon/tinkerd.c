@@ -35,6 +35,11 @@ static const char *REGIONS[] = {"Jh", "J", "Ch", "Ca", "Cd", "Cb", "A", "S", "As
 static unsigned ranges = ~(1u << R_V);  // padrão: tudo menos memória de vídeo
 
 static pid_t target;
+
+// Valores para o autoteste do app: um daemon à parte se liga a ele mesmo e testa busca, refino, escrita, congelamento e
+// AOB aqui, sem encostar no jogo. volatile e fora de função: ficam na memória gravável do próprio daemon.
+volatile int32_t tinker_selftest_i = 271828182;
+volatile char tinker_selftest_aob[] = "TINKER-AUTOTESTE-AOB";
 static int memfd = -1;
 
 // old: o valor na última busca/refino, para "aumentou/diminuiu/mudou"
@@ -1480,8 +1485,8 @@ int main(void) {
             FILE *f = fopen("/sys/fs/selinux/enforce", "r");
             if (f) { se = (char)fgetc(f); fclose(f); }
             uname(&u);
-            printf("ok uid=%d kernel=%s pagina=%ld selinux=%s\n", getuid(), u.release, sysconf(_SC_PAGESIZE),
-                   se == '1' ? "enforcing" : se == '0' ? "permissive" : "?");
+            printf("ok uid=%d kernel=%s pagina=%ld selinux=%s pid=%d\n", getuid(), u.release, sysconf(_SC_PAGESIZE),
+                   se == '1' ? "enforcing" : se == '0' ? "permissive" : "?", (int)getpid());
             continue;
         }
         // buffer de falhas: por que um app (o jogo ou o Tinker) caiu

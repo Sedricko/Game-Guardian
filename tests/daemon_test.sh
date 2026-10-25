@@ -193,6 +193,17 @@ mapfile -t fz < <(grep -E '^(ok|err)' <<<"$frz")
 [ "${fz[2]}" = "ok" ] && [ "${fz[3]}" = "ok 1" ] && grep -qE "^$iaddr i32 0$" <<<"$frz" && [ "${fz[5]}" = "ok 424242" ] \
     && [ "${fz[8]}" = "ok 5" ] && [ "${fz[9]}" = "ok 0" ] && [ "${fz[10]}" = "err valor inválido: 1.5" ] || { echo "FALHOU: congelar no daemon"; exit 1; }
 
+# Autoteste do app: o daemon se liga a ele mesmo e acha os próprios valores de teste (não toca em outro processo)
+sp="$out/self.fifo"; mkfifo "$sp"
+"$out/tinkerd" < "$sp" > "$out/self.out" & spid=$!
+exec 7> "$sp"; echo info >&7; sleep 0.3
+dpid=$(grep -o 'pid=[0-9]*' "$out/self.out" | cut -d= -f2)
+printf '%s\n' "attach $dpid" "search i32 271828182" "aobfind $(printf 'TINKER-AUTOTESTE-AOB' | od -An -tx1 | tr -d ' \n')" >&7; sleep 0.5
+exec 7>&-; wait $spid 2>/dev/null || true
+cat "$out/self.out"
+mapfile -t sf < <(grep -E '^(ok|err)' "$out/self.out")
+[ -n "$dpid" ] && [ "${sf[2]}" = "ok" ] && [[ "${sf[3]}" =~ ^ok\ [1-9] ]] && [[ "${sf[4]}" =~ ^ok\ [1-9] ]] || { echo "FALHOU: autoteste no próprio daemon"; exit 1; }
+
 # Daemon saindo com o jogo pausado (app caiu no meio da busca): o jogo tem que voltar a rodar
 printf '%s\n' "attach $pid" "pause" | "$out/tinkerd" >/dev/null
 grep -q '^State:.*S (sleeping)' /proc/$pid/status || { echo "FALHOU: jogo ficou pausado após EOF"; grep State /proc/$pid/status; exit 1; }

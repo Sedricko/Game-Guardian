@@ -1189,18 +1189,37 @@ class Engine private constructor(private val app: Context) {
             check("congelamento no daemon") { "${call { d -> d.send("frozen", quiet = true).status }} valores congelados" }
             if (Session.engine?.il2cpp == true) check("classes IL2CPP") { "${listClasses().size} classes" }
         }
+        // memória de verdade, sem tocar no jogo: um daemon à parte se liga a ele mesmo e faz o ciclo todo nos valores de teste dele
+        check("memória: busca, refino, escrita, congelamento e AOB") {
+            val t = Daemon(app.applicationInfo.nativeLibraryDir + "/libtinkerd.so") {}
+            try {
+                val pid = t.call("info").status.substringAfter("pid=", "").substringBefore(' ').toIntOrNull() ?: error("daemon sem pid (versão antiga)")
+                t.call("attach $pid")
+                require((t.call("search i32 271828182").status.toLongOrNull() ?: 0) >= 1) { "a busca não achou o valor de teste" }
+                val hits = t.call("list 20").lines
+                val addr = (hits.firstOrNull { " Cd " in it } ?: hits.firstOrNull())?.substringBefore(' ') ?: error("lista vazia")
+                t.call("write $addr i32 314159")
+                require(t.call("read $addr i32").status == "314159") { "a escrita não gravou" }
+                require((t.call("refine 314159").status.toLongOrNull() ?: 0) >= 1) { "o refino perdeu o valor" }
+                t.call("freeze $addr i32 777")
+                t.call("write $addr i32 1")
+                Thread.sleep(400)
+                require(t.call("read $addr i32").status == "777") { "o congelamento não segurou o valor" }
+                t.call("unfreeze all")
+                val hex = "TINKER-AUTOTESTE-AOB".toByteArray().joinToString("") { "%02x".format(it) }
+                require((t.call("aobfind $hex").status.toLongOrNull() ?: 0) >= 1) { "a AOB não achou o marcador" }
+                "tudo certo (testado no próprio daemon, o jogo não foi tocado)"
+            } finally {
+                t.close()
+            }
+        }
         check("print da tela") { call { d -> d.send("screencap", quiet = true).lines.size }.let { require(it > 0) { "veio vazio" }; "ok" } }
         check("app em primeiro plano") { call { d -> d.send("focus", quiet = true).lines.firstOrNull()?.removePrefix("| ")?.trim()?.take(120) ?: "?" } }
         check("painel de chaves") { syncKeys() }
         check("planilha (aprendizado)") { cloudPull() }
-        check("Gemini") {
-            if (Session.geminiKeys.isEmpty()) "sem chave"
-            else Assistant.geminiModels(Session.geminiKey).size.let { require(it > 0) { "chave recusada ou sem internet" }; "$it modelos na chave em uso" }
-        }
-        check("Groq") {
-            if (Session.groqKeys.isEmpty()) "sem chave"
-            else Assistant.groqModels(Session.groqKey).size.let { require(it > 0) { "chave recusada ou sem internet" }; "$it modelos na chave em uso" }
-        }
+        // uma pergunta curtinha de verdade em cada IA (1 pedido da cota de cada): responde e quanto demora
+        check("Gemini") { if (Session.geminiKeys.isEmpty()) "sem chave" else Assistant.pingGemini() }
+        check("Groq") { if (Session.groqKeys.isEmpty()) "sem chave" else Assistant.pingGroq() }
         check("menu flutuante") { if (android.provider.Settings.canDrawOverlays(app)) "permitido" else error("sem permissão de sobreposição") }
         val ok = out.count { it.startsWith("OK") }
         sendReport("autoteste: $ok de ${out.size} ok")

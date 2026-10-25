@@ -288,6 +288,28 @@ jogo abrir, use propor_receita com os salvos."""
         return true
     }
 
+    /** Autoteste: uma pergunta curtinha ao Gemini (1 pedido da cota) para ver se responde e quanto demora. */
+    fun pingGemini(): String {
+        val t0 = System.currentTimeMillis()
+        val body = JSONObject().put("contents", JSONArray().put(JSONObject().put("role", "user")
+            .put("parts", JSONArray().put(JSONObject().put("text", "Responda só: ok"))))).toString()
+        val (code, reply) = http("models/${Session.geminiModel.trim()}:generateContent", Session.geminiKey, body)
+        require(code == 200) { "código $code: " + runCatching { JSONObject(reply).optJSONObject("error")?.optString("message").orEmpty() }.getOrDefault("").take(160) }
+        return "${Session.geminiModel} respondeu em ${System.currentTimeMillis() - t0} ms"
+    }
+
+    /** Autoteste: uma pergunta curtinha ao Groq (1 pedido da cota). */
+    fun pingGroq(): String {
+        if (Session.groqModels.isEmpty()) Session.groqModels = groqModels(Session.groqKey)
+        val model = Session.groqModel.ifEmpty { Session.groqModels.firstOrNull() ?: error("a chave não mostrou modelos") }
+        val t0 = System.currentTimeMillis()
+        val body = JSONObject().put("model", model).put("max_completion_tokens", 20)
+            .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", "Responda só: ok"))).toString()
+        val (code, reply) = groqHttp("chat/completions", Session.groqKey, body)
+        require(code == 200) { "código $code: " + runCatching { JSONObject(reply).optJSONObject("error")?.optString("message").orEmpty() }.getOrDefault("").take(160) }
+        return "$model respondeu em ${System.currentTimeMillis() - t0} ms"
+    }
+
     /** Modelos do Groq que a chave pode usar para conversa com ferramentas, o melhor primeiro (vazio: chave errada ou sem internet). */
     fun groqModels(key: String): List<String> {
         if (key.isBlank()) return emptyList()
