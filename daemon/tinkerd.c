@@ -815,13 +815,21 @@ static void photo_chunk(size_t ci, unsigned char *buf, void *ctx) {
     // ilegível agora: tudo vira "muda sozinho" (não entra na diferença nem volta)
     if (read_mem(c->addr, buf, c->len)) { memset(buf, 0, c->len); memset(pnoise + c->off / 32, 0xff, c->len / 32); }
     if (pwrite(photofd, buf, c->len, (off_t)c->off) != (ssize_t)c->len) memset(pnoise + c->off / 32, 0xff, c->len / 32);
+    // grava já e tira do cache: GBs de foto no cache faziam o Android fechar o jogo e o Tinker por falta de memória
+    sync_file_range(photofd, (off_t)c->off, c->len, SYNC_FILE_RANGE_WAIT_BEFORE | SYNC_FILE_RANGE_WRITE | SYNC_FILE_RANGE_WAIT_AFTER);
+    posix_fadvise(photofd, (off_t)c->off, c->len, POSIX_FADV_DONTNEED);
 }
 
 static void cmd_photo(void) {
     drop_photo();
-    photo.want = ranges;
+    photo.want = ranges & ~((1u << 1) | (1u << 7));  // sem J (código e cache do Java) e sem pilha: mudam sozinhos e não guardam o jogo
     if (each_region(add_chunks, &photo)) { puts("err não leu o mapa de memória"); return; }
     if (!photo.total) { puts("err nenhuma região marcada"); drop_photo(); return; }
+    if (photo.total > (3ULL << 30)) {
+        printf("err foto grande demais (%" PRIu64 " MB): em Ajustes deixe só Ca e A nas regiões e tente de novo\n", photo.total >> 20);
+        drop_photo();
+        return;
+    }
     const char *dir = access("/data/local/tmp", W_OK) ? "/tmp" : "/data/local/tmp";
     struct statvfs fs;
     if (!statvfs(dir, &fs) && (uint64_t)fs.f_bavail * fs.f_frsize < photo.total + (64u << 20)) {

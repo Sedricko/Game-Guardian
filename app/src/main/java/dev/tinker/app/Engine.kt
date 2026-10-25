@@ -2967,6 +2967,7 @@ class Engine private constructor(private val app: Context) {
 
     /** Tira a foto (a memória toda vai para um arquivo) e, parado 4 s, marca o que muda sozinho para não confundir depois. */
     suspend fun photoTake(): String {
+        Diag.add("Foto do jogo: tirando…")  // se o Android fechar tudo no meio, o registro mostra que foi aqui
         val mb = call { d -> d.send("photo").status }
         delay(4000)  // fora do call: o daemon fica livre enquanto espera
         val noise = call { d -> d.send("photonoise").status }
