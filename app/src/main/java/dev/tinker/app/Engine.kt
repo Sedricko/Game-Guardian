@@ -407,6 +407,7 @@ class Engine private constructor(private val app: Context) {
         }
         scope.launch { freezeLoop() }
         scope.launch { watchFields() }
+        scope.launch { watchNeighbors() }
         scope.launch { checkUpdate() }
         // o jogo reabriu (PID novo): escolhe de novo sozinho e os salvos voltam pela restauração
         scope.launch {
@@ -913,6 +914,56 @@ class Engine private constructor(private val app: Context) {
                     val key = "${c.name.substringAfterLast('.')}.${r.label.substringBefore(" · ").removePrefix("<").substringBefore(">k__BackingField")}"
                     if (seen.merge(key, 1, Int::plus) == 3) notesFile?.let { appendNote(it, "Muda enquanto joga: $key (+${r.off.toString(16)}, ${r.type})", 8000) }
                 }
+            }
+        }
+    }
+
+    /**
+     * Vizinhos dos salvos: com o jogo aberto, a cada 5 s lê 100 Dwords acima e 100 abaixo de cada salvo (até 4) e guarda o
+     * que mudou (quantas vezes e os valores). Vale para qualquer jogo (o mapa de campos acima é só IL2CPP); vai no relatório.
+     */
+    private class Neighbor(var changes: Int = 0, val values: MutableList<String> = mutableListOf())
+    private val neighbors = java.util.concurrent.ConcurrentHashMap<String, java.util.TreeMap<Long, Neighbor>>()
+    private var neighborPid = 0
+
+    private suspend fun watchNeighbors() {
+        val last = HashMap<String, List<Long?>>()
+        while (true) {
+            delay(5000)
+            if (!Session.watchFields || Session.process == null || Session.busy) continue
+            if (currentPid != neighborPid) { neighborPid = currentPid; neighbors.clear(); last.clear() }  // jogo reaberto: endereços novos
+            for (item in Session.saved.filter { !stale(it) }.take(4)) runCatching {
+                val a = item.addr.toLong(16)
+                val start = (a - 400).coerceAtLeast(0)
+                val now = call { d -> d.send("dump ${start.toString(16)} i32 201", quiet = true).lines }.map { it.substringAfter(' ').toLongOrNull() }
+                val key = "${item.name.ifEmpty { "0x${item.addr}" }} (0x${item.addr})"
+                val before = last.put(key, now) ?: return@runCatching
+                if (before.size != now.size) return@runCatching
+                val map = neighbors.getOrPut(key) { java.util.TreeMap() }
+                now.forEachIndexed { i, v ->
+                    if (v == null || before[i] == null || v == before[i]) return@forEachIndexed
+                    val n = map.getOrPut(start + i * 4L - a) { Neighbor(values = mutableListOf(shown(before[i]!!))) }
+                    n.changes++
+                    shown(v).let { if (n.values.lastOrNull() != it) n.values += it }
+                    if (n.values.size > 8) n.values.removeAt(0)
+                }
+            }
+        }
+    }
+
+    // número que parece Float (ex.: 1065353216 = 1.0) aparece como Float; o resto como inteiro
+    private fun shown(v: Long): String {
+        val i = v.toInt()
+        val f = java.lang.Float.intBitsToFloat(i)
+        return if (i in -1_000_000..1_000_000 || !f.isFinite() || kotlin.math.abs(f) !in 1e-4f..1e7f) i.toString() else "%.3g".format(java.util.Locale.US, f) + "f"
+    }
+
+    private fun neighborsText(): String = buildString {
+        neighbors.forEach { (key, map) ->
+            if (map.isEmpty()) return@forEach
+            appendLine("$key:")
+            map.entries.sortedByDescending { it.value.changes }.take(40).sortedBy { it.key }.forEach { (off, n) ->
+                appendLine("  ${if (off < 0) "-0x${(-off).toString(16)}" else "+0x${off.toString(16)}"}: ${n.values.joinToString(" → ")} (${n.changes}x)")
             }
         }
     }
@@ -2629,6 +2680,7 @@ class Engine private constructor(private val app: Context) {
                 appendLine()
                 appendLine("=== Salvos (${Session.saved.size}) ===")
                 Session.saved.forEach { appendLine(savedLine(it)) }
+                neighborsText().takeIf { it.isNotBlank() }?.let { appendLine("\n=== Vizinhos dos salvos que mudaram (100 Dwords acima e abaixo, a cada 5 s) ===\n$it") }
             }
             val log = Diag.export().lines()
             val problems = log.filter { l ->

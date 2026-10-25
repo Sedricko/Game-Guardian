@@ -1848,7 +1848,7 @@ private fun GeminiModels(engine: Engine) {
         }
     }
     Toggle("Mapa de campos enquanto joga", "A cada minuto o Tinker olha as classes que você já salvou ou abriu e anota sozinho os campos que mudam " +
-        "jogando (velocidade, distância, vida). Sem IA e sem gastar cota.", s.watchFields) { s.watchFields = it; engine.saveSettings() }
+        "jogando (velocidade, distância, vida). Em qualquer jogo, vigia também 100 Dwords acima e abaixo de cada salvo e manda o que mudou no relatório. Sem IA e sem gastar cota.", s.watchFields) { s.watchFields = it; engine.saveSettings() }
     Toggle("Escolher sozinho o modelo mais rápido", "A cada conversa nova usa, entre os 3 melhores (sem Lite), o que respondeu mais rápido. " +
         "O tempo de cada um aparece ao lado do nome.", s.geminiAutoModel) { s.geminiAutoModel = it; engine.saveSettings() }
 }
