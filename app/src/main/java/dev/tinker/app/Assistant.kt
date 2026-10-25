@@ -293,7 +293,16 @@ jogo abrir, use propor_receita com os salvos."""
         val t0 = System.currentTimeMillis()
         val body = JSONObject().put("contents", JSONArray().put(JSONObject().put("role", "user")
             .put("parts", JSONArray().put(JSONObject().put("text", "Responda só: ok"))))).toString()
-        val (code, reply) = http("models/${Session.geminiModel.trim()}:generateContent", Session.geminiKey, body)
+        var (code, reply) = http("models/${Session.geminiModel.trim()}:generateContent", Session.geminiKey, body)
+        var tries = 0
+        // como numa pergunta de verdade: modelo fechado (404) sai da lista e o próximo bom responde
+        while (code == 404 && tries++ < 3) {
+            tired[Session.geminiModel.trim()] = System.currentTimeMillis() + 7 * 86_400_000L
+            val m = pickGemini(Session.geminiModels, Session.geminiSpeed, tiredModels()) ?: break
+            Diag.add("Gemini: modelo ${Session.geminiModel} não aceita esta chave, usando $m")
+            Session.geminiModel = m
+            http("models/$m:generateContent", Session.geminiKey, body).let { code = it.first; reply = it.second }
+        }
         require(code == 200) { "código $code: " + runCatching { JSONObject(reply).optJSONObject("error")?.optString("message").orEmpty() }.getOrDefault("").take(160) }
         return "${Session.geminiModel} respondeu em ${System.currentTimeMillis() - t0} ms"
     }
@@ -395,7 +404,10 @@ jogo abrir, use propor_receita com os salvos."""
                     http("models/$m:generateContent", Session.geminiKey, body).let { code = it.first; reply = it.second }
                 }
                 // modelo saiu de linha ou nome errado: escolhe sozinho o melhor da conta e tenta de novo
-                if (code == 404) geminiModels(Session.geminiKey).firstOrNull()?.let { m ->
+                // a lista ainda mostra modelos fechados para chaves novas (ex.: gemini-2.5-flash): o que deu 404 fica de fora
+                if (code == 404) tired[Session.geminiModel.trim()] = System.currentTimeMillis() + 7 * 86_400_000L
+                if (code == 404) (pickGemini(Session.geminiModels, Session.geminiSpeed, tiredModels())
+                    ?: geminiModels(Session.geminiKey).firstOrNull { it !in tiredModels() })?.let { m ->
                     Diag.add("Gemini: modelo ${Session.geminiModel} não existe mais, usando $m")
                     Session.geminiModel = m
                     http("models/$m:generateContent", Session.geminiKey, body).let { code = it.first; reply = it.second }

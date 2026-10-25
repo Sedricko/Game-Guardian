@@ -303,7 +303,8 @@ function guardarRelatorio_(r) {
   const row = [new Date(), String(r.jogo || ''), String(r.versao || ''), String(r.motivo || ''), String(r.problemas || '').slice(0, 5000)].concat(partes);
   s.insertRowAfter(1);  // o mais novo em cima
   s.getRange(2, 2, 1, RCOLS.length - 1).setNumberFormat('@');
-  s.getRange(2, 1, 1, RCOLS.length).setValues([row]);
+  // texto que começa com = + - @ vira fórmula (#ERROR!) mesmo em célula de texto: o apóstrofo segura como texto
+  s.getRange(2, 1, 1, RCOLS.length).setValues([row.map(v => typeof v === 'string' && /^[=+\-@]/.test(v) ? "'" + v : v)]);
   if (s.getLastRow() > 201) s.deleteRows(202, s.getLastRow() - 201);  // guarda os 200 últimos
 }
 

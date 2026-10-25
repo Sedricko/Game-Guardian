@@ -1242,7 +1242,7 @@ class Engine private constructor(private val app: Context) {
             if (auto) delay(3000)
             runCatching {
                 val text = ready ?: report().readText()  // quem acabou de gerar o relatório manda ele (antes saíam dois iguais)
-                val problems = text.substringAfter("=== Resumo de problemas", "").substringBefore("=== Registro do Tinker").take(5000)
+                val problems = text.substringAfter("=== Resumo de problemas", "").substringAfter("===").substringBefore("=== Registro do Tinker").trim().take(5000)
                 val body = JSONObject().put("jogo", p?.let { "${it.label} (${it.pkg})" } ?: "nenhum")
                     .put("versao", runCatching { app.packageManager.getPackageInfo(app.packageName, 0).versionName }.getOrNull().orEmpty())
                     .put("motivo", reason).put("problemas", problems).put("texto", text.take(400_000)).toString()  // a planilha guarda até 405 mil letras
