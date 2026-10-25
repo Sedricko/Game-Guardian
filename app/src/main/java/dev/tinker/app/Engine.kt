@@ -285,7 +285,8 @@ class Engine private constructor(private val app: Context) {
         fun get(c: Context) = instance ?: synchronized(this) { instance ?: Engine(c.applicationContext).also { instance = it } }
     }
 
-    private var daemon: Daemon? = null
+    @Volatile private var daemon: Daemon? = null
+    private val daemonStart = Any()
     private var closedPid = 0
     private val freezeFailing = HashSet<String>()  // endereços congelados que estão falhando (avisa uma vez)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -404,14 +405,17 @@ class Engine private constructor(private val app: Context) {
 
     private suspend fun <T> call(start: Boolean = true, work: (Daemon) -> T): T = withContext(Dispatchers.IO) {
         // laços de fundo nunca abrem um su novo: o usuário pode ter acabado de tocar em Sair
-        val d = daemon ?: if (!start) throw IOException("daemon parado") else try {
-            Daemon(app.applicationInfo.nativeLibraryDir + "/libtinkerd.so") { Diag.add("[daemon stderr] $it") }.also {
-                daemon = it
-                Diag.add("Daemon iniciado com root: ${runCatching { it.call("info").status }.getOrElse { "info indisponível (${it.message})" }}")
+        // uma trava só para abrir: duas chamadas juntas abriam dois daemons (o registro mostrava "Daemon iniciado" duas vezes)
+        val d = daemon ?: if (!start) throw IOException("daemon parado") else synchronized(daemonStart) {
+            daemon ?: try {
+                Daemon(app.applicationInfo.nativeLibraryDir + "/libtinkerd.so") { Diag.add("[daemon stderr] $it") }.also {
+                    daemon = it
+                    Diag.add("Daemon iniciado com root: ${runCatching { it.call("info").status }.getOrElse { "info indisponível (${it.message})" }}")
+                }
+            } catch (e: IOException) {
+                Diag.add("Falha ao iniciar o daemon: ${e.message}")
+                throw e
             }
-        } catch (e: IOException) {
-            Diag.add("Falha ao iniciar o daemon: ${e.message}")
-            throw e
         }
         try {
             work(d)
@@ -1209,7 +1213,7 @@ class Engine private constructor(private val app: Context) {
      * Manda o relatório para a aba Relatórios do painel. auto (o jogo fechou sozinho): no máximo um a cada 10 min,
      * 3 s depois, para a falha do Android já estar no registro.
      */
-    fun sendReport(reason: String, auto: Boolean = false) {
+    fun sendReport(reason: String, auto: Boolean = false, ready: String? = null) {
         val url = panelUrl("relatorio=1") ?: return
         val now = System.currentTimeMillis()
         if (auto && now - lastAutoReport < 600_000) return
@@ -1218,7 +1222,7 @@ class Engine private constructor(private val app: Context) {
         scope.launch(Dispatchers.IO) {
             if (auto) delay(3000)
             runCatching {
-                val text = report().readText()
+                val text = ready ?: report().readText()  // quem acabou de gerar o relatório manda ele (antes saíam dois iguais)
                 val problems = text.substringAfter("=== Resumo de problemas", "").substringBefore("=== Registro do Tinker").take(5000)
                 val body = JSONObject().put("jogo", p?.let { "${it.label} (${it.pkg})" } ?: "nenhum")
                     .put("versao", runCatching { app.packageManager.getPackageInfo(app.packageName, 0).versionName }.getOrNull().orEmpty())
