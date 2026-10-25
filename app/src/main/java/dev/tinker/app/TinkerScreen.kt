@@ -579,6 +579,8 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                         TextButton(onClick = { s.view = hit.addr to plain(hit.type); s.fichaMode = false; s.codeMode = false; s.tab = TAB_MEMORY; editing = null }) { Text("Ver próximos") }
                         TextButton(onClick = { s.view = hit.addr to plain(hit.type); s.fichaMode = true; s.codeMode = false; s.tab = TAB_MEMORY; editing = null }) { Text("Ver ficha") }
                         TextButton(onClick = { s.status = copyAddress(ctx, hit.addr) }) { Text("Copiar endereço") }
+                        // ex.: a marca "recompensa pega" achada pela Foto do jogo: qual instrução marca ela (o resultado aparece em Salvos)
+                        TextButton(onClick = { engine.watchLater(SavedItem(hit.addr, plain(hit.type), hit.region, hit.value)); editing = "-" }, enabled = !s.busy) { Text("O que escreve aqui?") }
                     }
                 }
             }
@@ -620,14 +622,38 @@ private fun PhotoPanel(engine: Engine, enabled: Boolean, chosen: List<String>, r
     var open by remember { mutableStateOf(false) }
     TextButton(onClick = { open = !open }) { Text((if (open) "▾ " else "▸ ") + "📸 Foto do jogo (antes e depois de uma ação)") }
     if (!open) return
-    Text("1) Tire a foto antes (fique parado 4 s). 2) Faça a ação no jogo, ex.: pegue a recompensa do correio. 3) Veja o que mudou " +
-        "e refine se precisar. 4) Volte como estava: a recompensa fica para pegar de novo. Só jogo offline; pode fechar o jogo se voltar algo errado.",
+    Text("Antes: faça um backup do save. 1) Tire a foto (fique parado 4 s). 2) Pegue a recompensa no jogo. 3) Veja o que mudou; marque o " +
+        "contador que aumentou (os presentes) e volte todos menos ele: o que você ganhou fica e a recompensa volta. Deu certo? Pegue de novo e " +
+        "use Liberar de novo quantas vezes quiser. Só jogo offline.",
         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    // backup antes de experimentar: se algo der errado, o progresso volta
+    var backups by remember { mutableStateOf<List<String>?>(null) }
+    val scope = rememberCoroutineScope()
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { run { engine.backupSave() } }, enabled = enabled) { Text("💾 Backup do save") }
+        TextButton(onClick = { scope.launch { backups = runCatching { engine.listBackups() }.getOrDefault(emptyList()) } }, enabled = enabled) { Text("Voltar um backup…") }
+    }
+    backups?.let { list ->
+        if (list.isEmpty()) Text("Nenhum backup deste jogo ainda.", style = MaterialTheme.typography.bodySmall)
+        list.take(8).forEach { name ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(name.removeSuffix(".tar"), Modifier.weight(1f), fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                TextButton(onClick = { backups = null; run { engine.restoreSave(name) } }) { Text("Voltar este (fecha o jogo)") }
+            }
+        }
+    }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Button(shape = MaterialTheme.shapes.medium, onClick = { run { engine.photoTake() } }, enabled = enabled) { Text("1. Tirar foto") }
         OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { run { engine.photoDiff() } }, enabled = enabled) { Text("2. Ver o que mudou") }
         OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { run { engine.photoRestore(chosen.ifEmpty { null }) } }, enabled = enabled) {
             Text(if (chosen.isEmpty()) "3. Voltar como estava (todos)" else "3. Voltar os ${chosen.size} escolhidos")
+        }
+        // marque o contador da recompensa (o que aumentou): ele fica, o resto volta e a recompensa fica para pegar de novo
+        if (chosen.isNotEmpty()) OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { run { engine.photoRestore(chosen, except = true) } }, enabled = enabled) {
+            Text("3. Voltar todos, menos os ${chosen.size} escolhidos")
+        }
+        if (Session.release.isNotEmpty()) Button(shape = MaterialTheme.shapes.medium, onClick = { run { engine.releaseAgain() } }, enabled = enabled) {
+            Text("🔁 Liberar de novo (${Session.release.size})")
         }
     }
 }

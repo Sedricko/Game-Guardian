@@ -141,10 +141,23 @@ grep -qx "ok -1869574000" <<<"$pt" || { echo "FALHOU: escrita no código"; exit 
 # Foto do jogo: foto, o que muda sozinho (o contador), "pega a recompensa" (marca 1 e +100), diferença e volta como estava
 m4=$(printf '%x' $((0x$maddr + 4)))
 ph=$( { printf '%s\n' "attach $pid" "photo"; sleep 0.3; printf '%s\n' "photonoise" "write $maddr i32 1" "write $m4 i32 12445" "photodiff" "list 2000"; sleep 0.1
-        printf '%s\n' "photorestore all" "read $maddr i32" "read $m4 i32" "photodrop" "photodiff"; } | "$out/tinkerd")
+        printf '%s\n' "photorestore except $m4" "read $m4 i32" "photorestore all" "read $maddr i32" "read $m4 i32" "photodrop" "photodiff"; } | "$out/tinkerd")
 echo "$ph" | grep -v '^[0-9a-f]* i32' | head -20
 grep -qE "^$maddr i32 (Ch|A) 1$" <<<"$ph" && grep -qE "^$m4 i32 (Ch|A) 12445$" <<<"$ph" && ! grep -qE "^$taddr i32" <<<"$ph" \
-    && grep -qx "ok 0" <<<"$ph" && grep -qx "ok 12345" <<<"$ph" && grep -qx "err tire a foto antes" <<<"$ph" || { echo "FALHOU: foto do jogo"; exit 1; }
+    && grep -qx "ok 0" <<<"$ph" && grep -qx "ok 12345" <<<"$ph" && grep -qx "err tire a foto antes" <<<"$ph" \
+    && grep -qx "ok 1 0" <<<"$ph" && grep -qx "ok 12445" <<<"$ph" || { echo "FALHOU: foto do jogo"; exit 1; }
+
+# Backup do save: guarda a pasta do jogo, muda o save, volta o backup e o save antigo reaparece
+mkdir -p "$out/data/com.teste.jogo/files" "$out/data/com.teste.jogo/cache"; echo v1 > "$out/data/com.teste.jogo/files/save.dat"; echo lixo > "$out/data/com.teste.jogo/cache/x"
+bk=$(printf '%s\n' "backup com.teste.jogo" "backup ../etc" | TINKER_DATA_DIR="$out/data" TINKER_SAVES_DIR="$out/saves" "$out/tinkerd")
+echo "$bk"
+name=$(grep -oE '^ok [0-9-]+\.tar' <<<"$bk" | cut -d' ' -f2)
+echo v2 > "$out/data/com.teste.jogo/files/save.dat"
+rs=$(printf '%s\n' "backups com.teste.jogo" "restoresave com.teste.jogo $name" "restoresave com.teste.jogo ../x.tar" | TINKER_DATA_DIR="$out/data" TINKER_SAVES_DIR="$out/saves" "$out/tinkerd")
+echo "$rs"
+[ -n "$name" ] && grep -qx "err pacote inválido" <<<"$bk" && grep -qx "ok 1" <<<"$rs" && grep -qx "err backup inválido" <<<"$rs" \
+    && [ "$(cat "$out/data/com.teste.jogo/files/save.dat")" = v1 ] && ! tar -tf "$out/saves/com.teste.jogo/$name" | grep -q cache/x \
+    || { echo "FALHOU: backup do save"; exit 1; }
 
 # Ponteiros: acha root → +10 → +20 e o caminho volta a dar no mesmo endereço
 ptr=$(printf '%s\n' "attach $pid" "pointers $paddr 256 3" | "$out/tinkerd")

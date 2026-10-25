@@ -3,6 +3,7 @@
 // Linhas de texto livre (ex.: crashlog) começam com "| " para não confundir o protocolo.
 #define _GNU_SOURCE
 #define _FILE_OFFSET_BITS 64  // pread em endereços acima de 2 GB mesmo num build 32 bits
+#include <ctype.h>
 #include <dirent.h>
 #include <elf.h>
 #include <stddef.h>
@@ -25,6 +26,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <sys/uio.h>
 #include <sys/utsname.h>
@@ -874,9 +876,18 @@ static void cmd_photorestore(const char *what) {
     if (photofd < 0) { puts("err tire a foto antes"); return; }
     size_t ok = 0, fail = 0;
     uint32_t v;
-    if (!strcmp(what, "all")) {
+    // "except A,B,C": todos menos esses (ex.: o contador de presentes, para não perder o que ganhou)
+    int except = !strncmp(what, "except ", 7);
+    if (!strcmp(what, "all") || except) {
         if (snapfd >= 0) { puts("err refine mais antes de voltar todos"); return; }
         for (size_t i = 0; i < nres; i++) {
+            if (except) {
+                char key[24];
+                snprintf(key, sizeof key, "%" PRIx64, res[i].addr);
+                const char *f = strstr(what + 7, key);
+                size_t L = strlen(key);
+                if (f && (f == what + 7 || f[-1] == ',') && (f[L] == ',' || !f[L] || f[L] == '\n')) continue;
+            }
             if (!photo_value(res[i].addr, &v) && !write_mem(res[i].addr, &v, 4)) ok++;
             else fail++;
         }
@@ -1738,6 +1749,97 @@ static void cmd_screencap(void) {
 }
 
 // Toques na tela para a IA controlar o jogo: só números passam (nada de texto vai para o shell).
+// Roda um programa (sem shell no meio) e espera; a saída vai para o nada. Devolve o código de saída (127: não existe).
+static int run_quiet(char *const argv[]) {
+    fflush(stdout);
+    pid_t pid = fork();
+    if (pid < 0) return -1;
+    if (pid == 0) {
+        int nul = open("/dev/null", O_WRONLY);
+        if (nul >= 0) { dup2(nul, 1); dup2(nul, 2); }
+        execvp(argv[0], argv);
+        _exit(127);
+    }
+    int st = 0;
+    waitpid(pid, &st, 0);
+    return WIFEXITED(st) ? WEXITSTATUS(st) : -1;
+}
+
+// Backup do save do jogo: a pasta de dados do app (/data/data/pacote, sem cache) vira um .tar guardado pelo Tinker.
+// Antes de experimentar (Foto do jogo, patch), um backup deixa voltar o progresso se algo der errado.
+static const char *data_dir(void) { const char *d = getenv("TINKER_DATA_DIR"); return d ? d : "/data/data"; }
+static const char *saves_dir(void) { const char *d = getenv("TINKER_SAVES_DIR"); return d ? d : "/data/local/tmp/tinker-saves"; }
+
+static int valid_pkg(const char *p) {
+    if (!*p || strlen(p) > 120 || strstr(p, "..")) return 0;
+    for (; *p; p++) if (!(isalnum((unsigned char)*p) || *p == '.' || *p == '_')) return 0;
+    return 1;
+}
+
+static void cmd_backup(const char *pkg) {
+    if (!valid_pkg(pkg)) { puts("err pacote inválido"); return; }
+    char src[512], dir[512], file[600], name[64];
+    snprintf(src, sizeof src, "%s/%s", data_dir(), pkg);
+    struct stat st;
+    if (stat(src, &st) || !S_ISDIR(st.st_mode)) { printf("err sem pasta de dados: %s\n", src); return; }
+    snprintf(dir, sizeof dir, "%s/%s", saves_dir(), pkg);
+    char *mk[] = {"mkdir", "-p", dir, NULL};
+    if (run_quiet(mk)) { printf("err não criou %s\n", dir); return; }
+    time_t now = time(NULL);
+    strftime(name, sizeof name, "%Y%m%d-%H%M%S.tar", localtime(&now));
+    snprintf(file, sizeof file, "%s/%s", dir, name);
+    char exc1[200], exc2[200];
+    snprintf(exc1, sizeof exc1, "--exclude=%s/cache", pkg);
+    snprintf(exc2, sizeof exc2, "--exclude=%s/code_cache", pkg);
+    char *tar[] = {"tar", "-cf", file, exc1, exc2, "-C", (char *)data_dir(), (char *)pkg, NULL};
+    int r = run_quiet(tar);
+    if (r && stat(file, &st)) { printf("err o tar falhou (%d)\n", r); return; }
+    stat(file, &st);
+    printf("ok %s %lld\n", name, (long long)st.st_size);
+}
+
+static void cmd_backups(const char *pkg) {
+    if (!valid_pkg(pkg)) { puts("err pacote inválido"); return; }
+    char dir[512];
+    snprintf(dir, sizeof dir, "%s/%s", saves_dir(), pkg);
+    DIR *d = opendir(dir);
+    int n = 0;
+    for (struct dirent *e; d && (e = readdir(d));) {
+        size_t L = strlen(e->d_name);
+        if (L < 5 || strcmp(e->d_name + L - 4, ".tar")) continue;
+        char f[800];
+        struct stat st;
+        snprintf(f, sizeof f, "%s/%s", dir, e->d_name);
+        if (!stat(f, &st)) { printf("save %s %lld\n", e->d_name, (long long)st.st_size); n++; }
+    }
+    if (d) closedir(d);
+    printf("ok %d\n", n);
+}
+
+// Volta um backup: fecha o jogo, devolve os arquivos, o dono (o usuário do app) e o contexto do SELinux.
+static void cmd_restoresave(const char *pkg, const char *name) {
+    if (!valid_pkg(pkg)) { puts("err pacote inválido"); return; }
+    size_t L = strlen(name);
+    if (L < 5 || L > 60 || strcmp(name + L - 4, ".tar") || strchr(name, '/') || strstr(name, "..")) { puts("err backup inválido"); return; }
+    char file[800], dst[512], own[64];
+    snprintf(file, sizeof file, "%s/%s/%s", saves_dir(), pkg, name);
+    snprintf(dst, sizeof dst, "%s/%s", data_dir(), pkg);
+    struct stat st, ds;
+    if (stat(file, &st)) { puts("err esse backup não existe"); return; }
+    if (stat(dst, &ds)) { printf("err sem pasta de dados: %s\n", dst); return; }
+    char *stop[] = {"am", "force-stop", (char *)pkg, NULL};
+    run_quiet(stop);  // jogo aberto escreveria o save de novo por cima
+    char *tar[] = {"tar", "-xf", file, "-C", (char *)data_dir(), NULL};
+    int r = run_quiet(tar);
+    if (r) { printf("err o tar falhou (%d)\n", r); return; }
+    snprintf(own, sizeof own, "%u:%u", (unsigned)ds.st_uid, (unsigned)ds.st_gid);
+    char *ch[] = {"chown", "-R", own, dst, NULL};
+    run_quiet(ch);
+    char *rc[] = {"restorecon", "-R", dst, NULL};
+    run_quiet(rc);  // fora do Android não existe: tudo bem
+    puts("ok");
+}
+
 static void cmd_input(const char *kind, char *const args[], int n) {
     int need = !strcmp(kind, "tap") ? 2 : !strcmp(kind, "swipe") ? 5 : !strcmp(kind, "keyevent") ? 1 : -1;
     if (need < 0 || n < need) { puts("err uso: input tap X Y | input swipe X1 Y1 X2 Y2 MS | input keyevent N"); return; }
@@ -1876,6 +1978,10 @@ int main(void) {
             else puts("ok");
             continue;
         }
+        // backup do save não precisa do jogo aberto (até melhor fechado)
+        if (!strcmp(cmd, "backup")) { cmd_backup(a1); continue; }
+        if (!strcmp(cmd, "backups")) { cmd_backups(a1); continue; }
+        if (!strcmp(cmd, "restoresave")) { cmd_restoresave(a1, a2); continue; }
         if (!target) { puts("err nenhum jogo escolhido"); continue; }
         if (!alive()) { puts("err o jogo fechou"); continue; }
         if (!strcmp(cmd, "regions")) cmd_regions();
@@ -1896,7 +2002,7 @@ int main(void) {
         else if (!strcmp(cmd, "photo")) cmd_photo();
         else if (!strcmp(cmd, "photonoise")) cmd_photonoise();
         else if (!strcmp(cmd, "photodiff")) cmd_photodiff();
-        else if (!strcmp(cmd, "photorestore")) cmd_photorestore(a1);
+        else if (!strcmp(cmd, "photorestore")) cmd_photorestore(strcmp(a1, "except") ? a1 : strstr(line, "except"));
         else if (!strcmp(cmd, "photodrop")) { drop_photo(); puts("ok"); }
         else if (!strcmp(cmd, "watch")) cmd_watch(a1, a2);
         else if (!strcmp(cmd, "list")) cmd_list(strtoul(a1, NULL, 10));

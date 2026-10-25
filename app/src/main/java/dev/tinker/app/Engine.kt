@@ -291,6 +291,7 @@ object Session {
     val aiProposals = mutableStateListOf<AiProposal>()
     val sheetRequests = mutableStateListOf<SheetRequest>()
     val patches = mutableStateListOf<CodePatch>()
+    var release by mutableStateOf<List<Pair<String, String>>>(emptyList())  // valores que liberaram a recompensa (Foto do jogo)
     var alwaysRequests by mutableStateOf(setOf<String>())
     var autoReports by mutableStateOf(true)  // relatório sozinho a cada 10 min de jogo (com atividade nova) e ao fechar o jogo pelo Tinker  // tipos que a pessoa mandou lembrar
     val aiUndo = mutableStateListOf<AiUndo>()
@@ -2785,12 +2786,54 @@ class Engine private constructor(private val app: Context) {
         "$n valores mudaram desde a foto. Refine para ficar só com os da ação (ex.: o número de presentes) e toque em Voltar como estava."
     }
 
-    /** Põe de volta o valor da foto em todos os resultados da lista (ou só nos escolhidos). */
-    suspend fun photoRestore(addrs: List<String>?): String = call { d ->
-        val (ok, fail) = if (addrs == null) d.send("photorestore all").status.split(' ').let { (it.getOrNull(0) ?: "0") to (it.getOrNull(1) ?: "0") }
-            else addrs.map { d.send("photorestore $it").status.split(' ') }.let { r -> r.count { it.firstOrNull() == "1" }.toString() to r.count { it.firstOrNull() != "1" }.toString() }
-        Diag.add("Foto do jogo: voltaram $ok valores ($fail falharam)")
-        "$ok valores voltaram como estavam na foto" + if (fail != "0") " ($fail não deu)." else "."
+    /**
+     * Põe de volta o valor da foto: em todos os resultados da lista, só nos escolhidos, ou em todos menos os escolhidos
+     * (except: o contador de presentes fica, o resto volta, e a recompensa fica para pegar de novo sem perder o que ganhou).
+     * O que voltou fica guardado em Session.release: "Liberar de novo" escreve os mesmos valores outra vez.
+     */
+    suspend fun photoRestore(addrs: List<String>?, except: Boolean = false): String = call { d ->
+        val (ok, fail) = when {
+            addrs == null -> d.send("photorestore all").status
+            except -> d.send("photorestore except ${addrs.joinToString(",")}").status
+            else -> addrs.map { d.send("photorestore $it").status.split(' ') }.let { r -> "${r.count { it.firstOrNull() == "1" }} ${r.count { it.firstOrNull() != "1" }}" }
+        }.split(' ').let { (it.getOrNull(0) ?: "0") to (it.getOrNull(1) ?: "0") }
+        // o que voltou (lido agora, já com o valor da foto): para liberar de novo sem tirar foto
+        val back = if (addrs != null && !except) addrs else d.send("list 2000", quiet = true).lines.map { it.substringBefore(' ') }.filter { a -> addrs?.contains(a) != true }
+        val values = back.take(500).mapNotNull { a -> runCatching { a to d.send("read $a i32", quiet = true).status }.getOrNull() }
+        withContext(Dispatchers.Main) { Session.release = values }
+        Diag.add("Foto do jogo: voltaram $ok valores ($fail falharam)" + if (except) ", menos ${addrs?.size} escolhidos" else "")
+        "$ok valores voltaram como estavam na foto" + (if (fail != "0") " ($fail não deu)" else "") + ". Se a recompensa reapareceu, pegue e use Liberar de novo."
+    }
+
+    /** Escreve outra vez os valores que liberaram a recompensa (sem tirar foto de novo). Vale nesta vez do jogo. */
+    suspend fun releaseAgain(): String = call { d ->
+        val list = Session.release
+        require(list.isNotEmpty()) { "use Voltar como estava primeiro" }
+        val ok = list.count { (a, v) -> runCatching { d.send("write $a i32 $v").status }.isSuccess }
+        Diag.add("Liberar de novo: $ok de ${list.size} valores")
+        "Liberado de novo: $ok de ${list.size} valores voltaram. Pegue a recompensa no jogo."
+    }
+
+    // ---- backup do save do jogo (pasta de dados do app, sem cache) ----
+
+    private fun gamePkg() = Session.process?.pkg ?: savedPkg ?: error("escolha o jogo primeiro")
+
+    suspend fun backupSave(): String = call { d ->
+        val r = d.send("backup ${gamePkg()}").status.split(' ')
+        val kb = (r.getOrNull(1)?.toLongOrNull() ?: 0) / 1024
+        Diag.add("Backup do save: ${r[0]} ($kb KB)")
+        "Backup do save guardado: ${r[0]} ($kb KB). Se algo der errado, volte ele aqui."
+    }
+
+    suspend fun listBackups(): List<String> = call { d ->
+        d.send("backups ${gamePkg()}", quiet = true).lines.filter { it.startsWith("save ") }.map { it.split(' ')[1] }.sortedDescending()
+    }
+
+    /** Volta um backup: o jogo é fechado antes (aberto, ele salvaria por cima). */
+    suspend fun restoreSave(name: String): String = call { d ->
+        d.send("restoresave ${gamePkg()} $name")
+        Diag.add("Backup do save voltou: $name")
+        "Save de $name de volta. Abra o jogo de novo."
     }
 
     // ---- código: "o que escreve aqui", ver as instruções e patches ----
