@@ -2,7 +2,7 @@
 // A planilha nunca fica pública: o link só devolve as chaves ativas para quem tem o token.
 
 // Versão do script: sobe a cada mudança. O Tinker mostra no registro e avisa quando a planilha está numa anterior.
-const VERSAO = 15;
+const VERSAO = 16;
 
 const ABA = 'Chaves';
 const COLS = ['Chave', 'Nome', 'Ativa', 'Situação', 'Atualizado', 'Provedor'];
@@ -344,11 +344,12 @@ function linhas2_(t) {
   return String(t || '').split('\n').map(l => l.trim()).filter(l => l);
 }
 
-// junta sem repetir (a data no começo da linha não conta), como no app
-function juntarLinhas_(a, b) {
-  const tem = linhas2_(a);
+// junta sem repetir (a data no começo da linha não conta), como no app; fora: textos apagados (sem a data) que não voltam
+function juntarLinhas_(a, b, fora) {
+  const sem = l => l.replace(/^\S+\s/, '').trim();
+  const tem = linhas2_(a).filter(l => !(fora && fora.has(sem(l))));
   const vistos = new Set(tem.map(l => l.replace(/^\S+\s/, '')));
-  linhas2_(b).forEach(l => { const k = l.replace(/^\S+\s/, ''); if (!vistos.has(k)) { vistos.add(k); tem.push(l); } });
+  linhas2_(b).forEach(l => { const k = l.replace(/^\S+\s/, ''); if (!vistos.has(k) && !(fora && fora.has(sem(l)))) { vistos.add(k); tem.push(l); } });
   return tem.length ? tem.join('\n') + '\n' : '';
 }
 
@@ -361,7 +362,10 @@ function juntarMemoria_(velha, nova) {
   // apagado no app: continua guardado aqui (a planilha é o banco e não perde nada), só marcado; o app não traz de volta
   const apagados = Array.from(new Set((velha.apagados || []).concat(nova.apagados || []))).slice(-2000);
   const fora = new Set(apagados);
-  const m = { tinker: 'memoria-ia', versao: 2, licoes: juntarLinhas_(velha.licoes, nova.licoes), jogos: {}, apagados: apagados };
+  // lições e notas apagadas na planilha (pela pessoa ou pelo Claude a pedido dela): ficam numa lista e não voltam do app
+  const linhasApagadas = Array.from(new Set(lista2_(velha.linhasApagadas).concat(lista2_(nova.linhasApagadas)).map(String))).slice(-500);
+  const foraL = new Set(linhasApagadas);
+  const m = { tinker: 'memoria-ia', versao: 2, licoes: juntarLinhas_(velha.licoes, nova.licoes, foraL), jogos: {}, apagados: apagados, linhasApagadas: linhasApagadas };
   const pkgs = new Set(Object.keys(velha.jogos || {}).concat(Object.keys(nova.jogos || {})));
   pkgs.forEach(pkg => {
     const a = (velha.jogos || {})[pkg] || {}, b = (nova.jogos || {})[pkg] || {};
@@ -376,7 +380,7 @@ function juntarMemoria_(velha, nova) {
     // patches de código: pela id; o mais novo vale (ligado/desligado, suspeito)
     const patches = (a.patches || []).slice();
     (b.patches || []).forEach(p => { const i = patches.findIndex(x => x.id === p.id); if (i < 0) patches.push(p); else patches[i] = Object.assign({}, patches[i], p); });
-    m.jogos[pkg] = { nome: b.nome || a.nome || pkg, notas: juntarLinhas_(a.notas, b.notas), patches: patches,
+    m.jogos[pkg] = { nome: b.nome || a.nome || pkg, notas: juntarLinhas_(a.notas, b.notas, foraL), patches: patches,
       receitas: receitas.map(r => Object.assign(r, { apagado: fora.has(r.id) })),
       salvos: salvos.map(v => Object.assign(v, { apagado: fora.has(v.id) })) };
   });

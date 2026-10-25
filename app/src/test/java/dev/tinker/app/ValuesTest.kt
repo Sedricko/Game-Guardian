@@ -226,6 +226,13 @@ class ValuesTest {
     }
 
     @Test
+    fun droppedLines() {
+        assertEquals("25/10 boa\n", dropLines("25/10 boa\n25/10 ruim\n", setOf("ruim")))
+        assertEquals("", dropLines("24/10 ruim\n", setOf("ruim")))
+        assertEquals("a b\n", dropLines("a b\n", emptySet()))
+    }
+
+    @Test
     fun screenNumbers() {
         assertEquals(1234L, screenNumber("1.234"))
         assertEquals(1234L, screenNumber("1,234"))

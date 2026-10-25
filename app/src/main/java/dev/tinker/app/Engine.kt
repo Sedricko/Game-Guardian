@@ -231,7 +231,7 @@ data class SheetRequest(val id: String, val tipo: String, val jogo: String, val 
 // tipos fixos que a aba Pedidos aceita: anotações e conferências, nada de comando livre nem escrita no jogo
 // os únicos que podem ficar "sempre permitidos": só conferem e mandam informação; nota e lição mudam o que a IA faz, pedem o toque toda vez
 // versão do Code.gs que este app espera (a mesma constante VERSAO lá): sobe junto quando o script muda
-const val SCRIPT_VERSION = 14
+const val SCRIPT_VERSION = 16
 
 val TRUSTABLE_REQUESTS = setOf("autoteste", "relatorio")
 val REQUEST_TYPES = mapOf("dica" to "Dica para você", "nota" to "Anotar no jogo", "licao" to "Guardar lição da IA", "autoteste" to "Rodar o autoteste", "relatorio" to "Mandar o relatório")
@@ -1284,6 +1284,12 @@ class Engine private constructor(private val app: Context) {
                 if (keep.length() != a.length()) sf.writeText(keep.toString())
             }
         }
+        // lições e notas apagadas na planilha (o texto sem a data): saem daqui também, senão o app mandava de volta
+        val goneLines = j.optJSONArray("linhasApagadas")?.let { a -> (0 until a.length()).map { a.optString(it).trim() } }.orEmpty().filter { it.isNotEmpty() }.toSet()
+        if (goneLines.isNotEmpty()) {
+            lessonsFile.takeIf { it.exists() }?.let { f -> f.writeText(dropLines(f.readText(), goneLines)) }
+            app.filesDir.listFiles { f -> f.name.startsWith("notas-") }?.forEach { f -> f.writeText(dropLines(f.readText(), goneLines)) }
+        }
         // versão 1 tinha só "notas" (texto por jogo); a 2 tem "jogos" com notas, receitas e salvos
         val games = j.optJSONObject("jogos") ?: JSONObject().apply { j.optJSONObject("notas")?.let { n -> n.keys().forEach { put(it, JSONObject().put("notas", n.optString(it))) } } }
         var count = 0; var recipes = 0; var saved = 0
@@ -1291,7 +1297,7 @@ class Engine private constructor(private val app: Context) {
             if (!PKG.matches(pkg)) return@forEach  // vira nome de arquivo: nada de / ou ..
             val g = games.optJSONObject(pkg) ?: return@forEach
             val f = File(app.filesDir, "notas-$pkg.txt")
-            val notes = mergeLines(f.takeIf { it.exists() }?.readText().orEmpty(), g.optString("notas"))
+            val notes = dropLines(mergeLines(f.takeIf { it.exists() }?.readText().orEmpty(), g.optString("notas")), goneLines)
             if (notes.isNotEmpty()) f.writeText(notes)
             recipes += mergeRecipes(pkg, g.optJSONArray("receitas") ?: JSONArray())
             mergePatches(pkg, g.optJSONArray("patches") ?: JSONArray())
@@ -3952,6 +3958,13 @@ private val WATCH_TYPES = setOf("i8", "i16", "i32", "i64", "f32", "f64", "xi32",
 private val PKG = Regex("""[A-Za-z0-9._]{1,120}""")  // nome de pacote que vira nome de arquivo
 
 /** Linhas de memória: as de agora mais as novas que ainda não estavam (a data do começo não conta). */
+/** Tira as linhas cujo texto (sem a data do começo) está em gone. */
+internal fun dropLines(text: String, gone: Set<String>): String {
+    if (gone.isEmpty()) return text
+    val keep = text.lines().filter { it.isNotBlank() && it.substringAfter(' ').trim() !in gone }
+    return if (keep.isEmpty()) "" else keep.joinToString("\n", postfix = "\n")
+}
+
 internal fun mergeLines(old: String, new: String): String {
     val have = old.lines().filter { it.isNotBlank() }
     val seen = have.map { it.substringAfter(' ') }.toHashSet()
