@@ -10,6 +10,7 @@ function onOpen() {
     .addItem('Ligar análise automática dos relatórios', 'ligarAnalise')
     .addItem('Definir o link da implantação', 'definirLink')
     .addItem('Gerar novo token (invalida o link antigo)', 'novoToken')
+    .addItem('Consertar relatórios com #ERROR!', 'consertarRelatorios')
     .addToUi();
   abaPedidos_();  // a aba Pedidos já fica pronta para usar
 }
@@ -553,4 +554,15 @@ function marcarAparelho_(nome, versao, autoteste) {
   s.getRange(linha, 1, 1, 2).setNumberFormat('@');
   s.getRange(linha, 1, 1, 3).setValues([[nome, String(versao || ''), new Date()]]);
   if (autoteste) s.getRange(linha, 4).setValue(Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd/MM HH:mm') + ' ' + autoteste);
+}
+
+// relatórios antigos guardados como fórmula (começavam com "="): voltam a ser texto
+function consertarRelatorios() {
+  const s = SpreadsheetApp.getActive().getSheetByName(RELS);
+  if (!s || s.getLastRow() < 2) return;
+  const r = s.getRange(2, 1, s.getLastRow() - 1, RCOLS.length);
+  const f = r.getFormulas();
+  let n = 0;
+  f.forEach((row, i) => row.forEach((x, j) => { if (x) { s.getRange(i + 2, j + 1).setValue("'" + x); n++; } }));
+  SpreadsheetApp.getUi().alert(n + ' célula(s) consertada(s).');
 }

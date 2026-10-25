@@ -2484,7 +2484,7 @@ class Engine private constructor(private val app: Context) {
         val crash = section("Falhas registradas pelo Android (crash)", "crashlog")
         val game = if (p != null) section("Logcat do jogo", "logs") else "=== Logcat do jogo ===\n(nenhum jogo escolhido)"
         val text = buildString {
-            appendLine("=== Relatório do Tinker ===")
+            appendLine("Relatório do Tinker")  // sem "=" na frente: a planilha lia como fórmula (#ERROR!)
             appendLine("Gerado em: ${java.text.SimpleDateFormat("dd/MM/yyyy HH:mm:ss", java.util.Locale.US).format(java.util.Date())}")
             appendLine("App: Tinker ${runCatching { app.packageManager.getPackageInfo(app.packageName, 0).versionName }.getOrNull()}")
             appendLine("Aparelho: ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} · Android ${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT}) · ${android.os.Build.SUPPORTED_ABIS.joinToString()}")
