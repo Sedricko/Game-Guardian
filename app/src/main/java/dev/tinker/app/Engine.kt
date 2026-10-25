@@ -1676,20 +1676,6 @@ class Engine private constructor(private val app: Context) {
     }
 
     /** Linhas do logcat do jogo que indicam servidor/antitrapaça recusando valores (ex.: PBC_SHOULD_BE_LESS_THAN_EQUAL no Sonic Forces). */
-    /**
-     * Jogo online (conta no servidor): o logcat mostra login, conexão viva (wss, RTM) e o Play Integrity. Dois sinais bastam.
-     * Nele a IA não propõe escrever: ajuda a ler e entender (25/10: no Last Garden a IA congelou 99999 e o jogo caiu).
-     */
-    private suspend fun onlineSigns(): List<String> {
-        val logs = runCatching { call { d -> d.send("logs", quiet = true).lines } }.getOrDefault(emptyList())
-        return ONLINE_WORDS.filter { w -> logs.any { it.contains(w, ignoreCase = true) } }
-    }
-
-    private suspend fun onlineRefusal(): String? = onlineSigns().takeIf { it.size >= 2 }?.let {
-        "Este jogo é online (no logcat: ${it.joinToString()}): aqui não proponho mudar valores, código nem receitas, só ajudo a ler e " +
-            "entender a memória (busca, ficha, Lua, o que escreve). Diga isso à pessoa e sugira um jogo offline para editar."
-    }
-
     private suspend fun serverHints(): String = call { d -> d.send("logs", quiet = true).lines }
         .filter { l -> SERVER_WORDS.any { l.contains(it, ignoreCase = true) } }.takeLast(10).joinToString("\n") { it.removePrefix("| ").take(300) }
 
@@ -1905,7 +1891,6 @@ class Engine private constructor(private val app: Context) {
             mapOf("endereco" to "endereço da primeira instrução", "bytes" to "bytes novos em hex, 8 dígitos por instrução, como na memória (NOP = 1f2003d5)",
                 "nome" to "nome curto (ex.: Madeira não diminui)", "motivo" to "o que a instrução fazia e o que passa a fazer"),
             listOf("endereco", "bytes", "nome")) { a ->
-            onlineRefusal()?.let { return@AiTool it }
             val addr = parseAddress(a.optString("endereco")) ?: return@AiTool "Endereço inválido."
             createPatch(addr, a.optString("bytes"), a.optString("nome").take(60), a.optString("motivo"), apply = false)
         },
@@ -1931,7 +1916,6 @@ class Engine private constructor(private val app: Context) {
                 "motivo" to "por que este é o campo certo, em uma frase"),
             listOf("endereco", "tipo", "valor")) { a ->
             val addr = parseAddress(a.optString("endereco")) ?: return@AiTool "Endereço inválido."
-            onlineRefusal()?.let { return@AiTool it }
             val type = a.optString("tipo").trim()
             val value = normalizeNumbers(a.optString("valor"))
             if (type !in TYPE_SIZES) return@AiTool "Tipo inválido: use i32, f32, i64, f64, xi32 ou xf32."
@@ -1999,7 +1983,6 @@ class Engine private constructor(private val app: Context) {
         AiTool("propor_receita", "Sugere criar uma receita com salvos (aplica tudo de uma vez, e sozinha ao abrir o jogo). Aparece um botão para a pessoa.",
             mapOf("nome" to "nome da receita", "salvos" to "nomes ou endereços dos salvos, separados por vírgula, ou todos", "ao_abrir" to "sim para aplicar sozinha quando o jogo abrir"),
             listOf("nome", "salvos")) { a ->
-            onlineRefusal()?.let { return@AiTool it }
             val items = matchSaved(a.optString("salvos"), Session.saved.toList())
             if (items.isEmpty()) return@AiTool "Nenhum salvo com esses nomes. Veja os nomes com ver_salvos (ou aplique as edições antes)."
             val p = AiProposal("", "", "", a.optString("ao_abrir").trim().lowercase().startsWith("s"), a.optString("nome").take(40).ifBlank { "Receita" },
@@ -2067,7 +2050,6 @@ class Engine private constructor(private val app: Context) {
             "valor original. Se o jogo desfez o teste, é cópia (ou é recalculado); se ficou, é o verdadeiro. Só funciona se a pessoa ligou " +
             "\"IA pode testar valores\" em Ajustes.",
             mapOf("endereco" to "endereço em hexadecimal", "tipo" to "i32, f32, i64, f64, xi32 ou xf32"), listOf("endereco", "tipo")) { a ->
-            onlineRefusal()?.let { return@AiTool it }
             if (!Session.aiCanTest && !Session.aiAuto) return@AiTool "A pessoa não deixou a IA testar valores (Ajustes → Assistente → IA pode testar valores). Use ver_endereco ou peça para ela conferir."
             val addr = parseAddress(a.optString("endereco")) ?: return@AiTool "Endereço inválido."
             val type = a.optString("tipo").trim().takeIf { it in TYPE_SIZES } ?: return@AiTool "Tipo inválido."
@@ -3860,7 +3842,6 @@ internal fun mergeLines(old: String, new: String): String {
 }
 
 /** Logcat do jogo: sinais de servidor ou antitrapaça conferindo valores. */
-private val ONLINE_WORDS = listOf("requestIntegrityToken", "Login succeed", "login success", "wss://", "[RTM]")
 private val SERVER_WORDS = listOf("PBC_", "cheat", "hack", "tamper", "invalid value", "validation", "mismatch", "rejected", "banned", "integrity", "speedhack")
 
 private val PROBLEM_WORDS = listOf("erro", "falha", "aviso", "fechou", "exception")
