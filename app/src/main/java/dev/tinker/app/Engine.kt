@@ -37,6 +37,10 @@ fun plain(type: String) = type.removePrefix("x")
 // a chave que vinha fixa no app (versões até 2.19): sai da lista de quem ainda tem; só o hash fica, para reconhecer
 private const val OLD_FIXED_KEY_SHA256 = "55c7b7cfa2a2f58d5da503db4b2d1188f423212cc586a53e75172c9720fc2e31"
 
+// painel de chaves da pessoa (repositório privado, uso pessoal): entra uma vez; desligou em Ajustes, não volta
+private const val DEFAULT_KEY_SOURCE =
+    "https://script.google.com/macros/s/AKfycbyZGlMdkrGmTJxLlrbmlsHKYdSzeKUrTpcw7xOmbqOUqgQRRLS1/exec?token=83d59744f0c64b6ea7d3a09ad8d6609c346b880808dd4644a1771be761d60de3"
+
 private fun sha256(text: String) = java.security.MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
 
 val TABS = listOf("Busca", "Salvos", "Memória", "Registro", "Ajustes")
@@ -338,6 +342,10 @@ class Engine private constructor(private val app: Context) {
         Session.geminiModel = prefs.getString("geminiModel", Session.geminiModel).orEmpty().ifBlank { "gemini-2.5-flash" }
         Session.geminiAutoModel = prefs.getBoolean("geminiAuto", true)
         Session.keySource = prefs.getString("keySource", "").orEmpty()
+        if (!prefs.getBoolean("defaultSourceGiven", false)) {
+            if (Session.keySource.isBlank()) Session.keySource = DEFAULT_KEY_SOURCE
+            prefs.edit().putBoolean("defaultSourceGiven", true).putString("keySource", Session.keySource).apply()
+        }
         Session.sheetKeys = prefs.getString("sheetKeys", "").orEmpty().split('\n').filter { it.isNotBlank() }.toSet()
         if (Session.keySource.isNotBlank()) scope.launch { Diag.add(syncKeys()) }
         Session.watchFields = prefs.getBoolean("watchFields", true)
