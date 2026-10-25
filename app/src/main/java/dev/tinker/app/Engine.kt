@@ -1122,6 +1122,30 @@ class Engine private constructor(private val app: Context) {
     }
 
     /** Salvos novos do backup: entram como "de outra vez do jogo" e voltam pela restauração quando o jogo abrir. */
+    /** Salvos deste jogo guardados na planilha que foram apagados no app (a planilha não apaga nada: ficam marcados). */
+    suspend fun deletedInSheet(): List<SavedItem> = withContext(Dispatchers.IO) {
+        val pkg = savedPkg ?: error("escolha o jogo primeiro")
+        val url = panelUrl("memoria=1") ?: error("sem link da planilha em Ajustes")
+        val j = JSONObject(panelGet(url).getOrThrow())
+        val gone = deleted()
+        val a = j.optJSONObject("jogos")?.optJSONObject(pkg)?.optJSONArray("salvos") ?: return@withContext emptyList()
+        (0 until a.length()).mapNotNull { runCatching { a.getJSONObject(it).toSaved() }.getOrNull() }.filter { it.id in gone }
+    }
+
+    /**
+     * Volta um salvo apagado: entra com id nova (a antiga continua apagada, então não some de novo na próxima junção)
+     * e é reencontrado pelo ponteiro ou pela AOB, como um salvo de outra vez do jogo.
+     */
+    fun restoreDeleted(item: SavedItem): String {
+        val back = item.copy(id = java.util.UUID.randomUUID().toString(), pid = -1, frozen = false)
+        Session.saved.add(back)
+        storeSaved()
+        backupMemorySoon()
+        val label = item.name.ifEmpty { "0x${item.addr}" }
+        Diag.add("Salvo restaurado da planilha: $label (${item.type})")
+        return "$label voltou para os salvos: o Tinker procura pelo ponteiro ou pela AOB."
+    }
+
     private fun mergeSaved(pkg: String, a: JSONArray): Int {
         val current = pkg == savedPkg
         val have = if (current) Session.saved.toList() else jsonFile("saved-$pkg.json").let { x -> (0 until x.length()).mapNotNull { runCatching { x.getJSONObject(it).toSaved() }.getOrNull() } }

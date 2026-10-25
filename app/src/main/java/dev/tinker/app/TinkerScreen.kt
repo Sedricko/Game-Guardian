@@ -747,6 +747,8 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
     var porting by remember { mutableStateOf(false) }
     var naming by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf(setOf<String>()) }
+    var gone by remember { mutableStateOf<List<SavedItem>?>(null) }  // apagados que a planilha guarda (Restaurar apagado)
+    val scope = rememberCoroutineScope()
     LaunchedEffect(s.process) {
         while (true) {
             runCatching { engine.refreshSaved() }
@@ -760,7 +762,7 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             // exportar/importar é raro: recolhido, os salvos e as ações do dia a dia ficam em cima
-            TextButton(onClick = { porting = !porting }) { Text((if (porting) "▾ " else "▸ ") + "Exportar / importar lista") }
+            TextButton(onClick = { porting = !porting }) { Text((if (porting) "▾ " else "▸ ") + "Exportar, importar ou restaurar apagado") }
             if (porting) FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = {
                     val file = File(context.cacheDir, "reports").apply { mkdirs() }
@@ -779,6 +781,26 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
                     if (text.isNullOrBlank()) info = "A área de transferência está vazia." else import(text)
                 }) { Text("Colar lista") }
                 if (openFile != null) OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { openFile.launch(arrayOf("application/json", "text/plain", "*/*")) }) { Text("Abrir arquivo") }
+                // a planilha guarda o que foi apagado aqui: dá para trazer de volta sem buscar de novo
+                if (s.keySource.isNotBlank()) OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = {
+                    info = "Procurando na planilha…"
+                    scope.launch {
+                        runCatching { engine.deletedInSheet() }
+                            .onSuccess { gone = it; info = if (it.isEmpty()) "Nenhum salvo apagado deste jogo na planilha." else null }
+                            .onFailure { info = "Não li a planilha: ${it.message}" }
+                    }
+                }) { Text("Restaurar apagado") }
+            }
+            gone?.takeIf { it.isNotEmpty() }?.let { list ->
+                Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Apagados que a planilha guarda:", style = MaterialTheme.typography.titleSmall)
+                    list.forEach { item ->
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                            Text("${item.name.ifEmpty { "0x${item.addr}" }} · ${item.type} · último ${item.value}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                            TextButton(onClick = { info = engine.restoreDeleted(item); gone = list - item }) { Text("Restaurar") }
+                        }
+                    }
+                }
             }
             info?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 4.dp)) }
             if (s.restoreInfo.isNotEmpty()) Text(s.restoreInfo, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 4.dp))
