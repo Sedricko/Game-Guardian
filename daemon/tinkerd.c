@@ -311,6 +311,29 @@ static uint64_t bits(const unsigned char *p, int sz) { uint64_t x = 0; memcpy(&x
 typedef struct { uint64_t addr, off; uint32_t len; uint8_t region; } chunk_t;
 typedef struct { chunk_t *c; size_t n, cap; uint64_t total; unsigned want; } chunks_t;
 
+// v cai dentro de algum pedaço (estão em ordem de endereço): é um ponteiro para a memória do jogo
+static int in_chunks(const chunks_t *cs, uint64_t v) {
+    size_t lo = 0, hi = cs->n;
+    while (lo < hi) {
+        size_t mid = (lo + hi) / 2;
+        if (v < cs->c[mid].addr) hi = mid;
+        else if (v >= cs->c[mid].addr + cs->c[mid].len) lo = mid + 1;
+        else return 1;
+    }
+    return 0;
+}
+
+// os 8 bytes alinhados em volta de "at" são um ponteiro? Cifrado de verdade tem chave sorteada, não metade de um ponteiro
+// (25/10, Last Garden: o 🔒 achava "valores" dentro da memória do Lua; congelar escreveu em ponteiros e o jogo caiu)
+static int ptr_at(const unsigned char *b, size_t len, size_t at, const chunks_t *cs) {
+    size_t q = at & ~(size_t)7;
+    if (q + 8 > len) return 0;
+    uint64_t v;
+    memcpy(&v, b + q, 8);
+    v &= 0x00ffffffffffffffULL;  // Android arm64 marca ponteiros do malloc no byte de cima
+    return v >= 0x10000 && in_chunks(cs, v);
+}
+
 static void add_chunks(uint64_t s, uint64_t e, int region, void *ctx) {
     chunks_t *cs = ctx;
     if (!(cs->want & (1u << region))) return;
@@ -484,12 +507,14 @@ static void scan_chunk(size_t ci, unsigned char *buf, void *ctx) {
             if (t & XOR && sz == 8) {
                 memcpy(q, p, 16);
                 if (q[0] < 0x10000 || q[0] > ~0ULL - 0x10000) continue;  // chave de verdade é grande e sorteada
+                if (ptr_at(buf, c->len, i, &sc->cs)) continue;
                 q[0] ^= q[1];
                 p = (const unsigned char *)q;
             } else if (t & XOR) {
                 if (o) { memcpy(&w[0], p, 4); memcpy(&w[1], p + o, 4); }
                 else { memcpy(w, p, 8); uint32_t kk = w[0]; w[0] = w[1]; w[1] = kk; }  // chave antes: w[1] = chave
                 if (!xor_key((int32_t)w[1])) continue;
+                if (ptr_at(buf, c->len, i, &sc->cs) || ptr_at(buf, c->len, i + (o ? o : 4), &sc->cs)) continue;
                 w[0] ^= w[1];
                 p = (const unsigned char *)w;
             } else if (t & TAG) {
@@ -813,16 +838,7 @@ static void cmd_photo(void) {
 }
 
 // endereço dentro da memória fotografada (um ponteiro de verdade aponta para ela)
-static int in_photo(uint64_t v) {
-    size_t lo = 0, hi = photo.n;
-    while (lo < hi) {
-        size_t mid = (lo + hi) / 2;
-        if (v < photo.c[mid].addr) hi = mid;
-        else if (v >= photo.c[mid].addr + photo.c[mid].len) lo = mid + 1;
-        else return 1;
-    }
-    return 0;
-}
+static int in_photo(uint64_t v) { return in_chunks(&photo, v); }
 
 // Dword dentro de um Qword que é ponteiro para a memória do jogo: voltar ele derrubaria o jogo (objeto já liberado).
 // Só o que aponta para lá conta: dois números pequenos lado a lado (1 e 12445) não são ponteiro.

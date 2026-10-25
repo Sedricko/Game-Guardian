@@ -8,7 +8,7 @@ cc -O2 -Wall -Werror -pthread -o "$out/tinkerd" daemon/tinkerd.c -lm
 cc -O2 -pthread -o "$out/target" tests/target.c
 "$out/target" > "$out/info" & tpid=$!
 for _ in $(seq 50); do [ -s "$out/info" ] && break; sleep 0.1; done
-read -r pid iaddr faddr paddr xaddr oaddr yaddr zaddr qaddr waddr taddr caddr maddr kaddr ltaddr lnaddr < "$out/info"
+read -r pid iaddr faddr paddr xaddr oaddr yaddr zaddr qaddr waddr taddr caddr maddr kaddr ltaddr lnaddr ppaddr < "$out/info"
 
 got=$("$out/tinkerd" <<CMDS
 search i32 1
@@ -262,6 +262,13 @@ mapfile -t lo < <(grep -E '^(ok|err)' <<<"$lu")
 [ "${lo[2]}" = "ok 1" ] && grep -q "^$lnaddr li " <<<"$lu" && grep -q "^lua $lnaddr int gold 31415$" <<<"$lu" \
     && grep -q " num leaf 2.5$" <<<"$lu" && grep -q " str name hero$" <<<"$lu" && grep -q " table bag " <<<"$lu" \
     && [ "$(grep -c '^lua ' <<<"$lu")" = 8 ] && [ "${lo[7]}" = "ok 999" ] || { echo "FALHOU: Lua"; exit 1; }
+
+# Ponteiro não vira Dword 🔒: metade de baixo como "chave", de cima como "valor cifrado"
+pl=$(printf '%s\n' "attach $pid" "read $ppaddr i32" "read $(printf '%x' $((0x$ppaddr + 4))) i32" | "$out/tinkerd" | grep '^ok -\?[0-9]' | cut -d' ' -f2 | tr '\n' ' ')
+read -r plo phi <<<"$pl"
+pv=$(( (plo ^ phi) )); pv=$(( pv > 2147483647 ? pv - 4294967296 : (pv < -2147483648 ? pv + 4294967296 : pv) ))
+px=$(printf '%s\n' "attach $pid" "search xi32 $pv" "list 100000" | "$out/tinkerd")
+! grep -q "^$ppaddr xi32" <<<"$px" || { echo "FALHOU: ponteiro achado como Dword 🔒"; exit 1; }
 
 # Autoteste do app: o daemon se liga a ele mesmo e acha os próprios valores de teste (não toca em outro processo)
 sp="$out/self.fifo"; mkfifo "$sp"

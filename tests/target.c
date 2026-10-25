@@ -109,9 +109,12 @@ int main(void) {
     for (int k = 0; k < 4; k++) { nodes[k * 24 + 9] = 0x44; memcpy(nodes + k * 24 + 16, &str[k], 8); }
     lt[8] = 0x05; lt[11] = 3;  // 2^3 = 8 nós
     memcpy(lt + 24, &nodes, 8);
-    printf("%d %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx\n", getpid(), (unsigned long)&i[7], (unsigned long)&f[3], (unsigned long)v, (unsigned long)x,
+    // ponteiro para a memória do jogo: as duas metades não podem passar por um Dword 🔒 (chave + valor cifrado)
+    void **pp = malloc(64);
+    pp[0] = a;
+    printf("%d %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx\n", getpid(), (unsigned long)&i[7], (unsigned long)&f[3], (unsigned long)v, (unsigned long)x,
            (unsigned long)obj, (unsigned long)y, (unsigned long)z, (unsigned long)q, (unsigned long)w, (unsigned long)&ticks, (unsigned long)never_called, (unsigned long)mail, (unsigned long)tick_once,
-           (unsigned long)lt, (unsigned long)nodes);
+           (unsigned long)lt, (unsigned long)nodes, (unsigned long)pp);
     fflush(stdout);
     pause();
     return 0;
