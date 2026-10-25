@@ -40,7 +40,8 @@ aprendizado, nunca as chaves: é o que você passa para quem for analisar os pro
 - Salvo mandado por várias instâncias: cada caminho de ponteiro ganha um voto por aparelho (confirmado ao reabrir vale 3);
   o mais votado vira o ponteiro sugerido. A assinatura AOB se junta byte a byte (o que muda entre aparelhos vira ??).
 - Aba **Problemas**: os erros dos relatórios agrupados, com quantas vezes, jogos, versões e quando. Refeita a cada
-  relatório; para ficar em dia de hora em hora use **Tinker → Ligar análise automática dos relatórios** (uma vez).
+  relatório, com um **Diagnóstico (IA)**: o Gemini (com uma chave ativa da aba Chaves) escreve a causa provável e o
+  que corrigir, dois problemas novos por vez. É só texto: nenhuma correção roda sozinha. Para ficar em dia de hora em hora use **Tinker → Ligar análise automática dos relatórios** (uma vez).
 
 ## Segurança
 

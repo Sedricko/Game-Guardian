@@ -73,6 +73,8 @@ data class SavedItem(
     val trusted: Boolean = true,
     // il2: "Namespace.Classe+offset" do objeto IL2CPP onde o valor mora; com ele o salvo volta procurando o objeto pela classe
     val il2: String = "",
+    // il2Field: nome do campo ("<Gold>k__BackingField"); o jogo atualiza e o offset muda, o nome não: o salvo acha o offset novo
+    val il2Field: String = "",
     // temp: cópia que o jogo cria só para a tela (número solto do C#); some ao fechar o jogo, então não se procura de volta
     val temp: Boolean = false,
 )
@@ -136,6 +138,7 @@ data class ListItem(val index: Int, val addr: String, val label: String, val val
 data class Step(
     val cls: String, val off: Long, val type: String, val value: String, val freeze: Boolean, val label: String,
     val ptr: String = "", val sig: String = "", val sigOff: Int = 0,
+    val field: String = "",  // nome do campo IL2CPP: o offset certo é achado por ele se o jogo atualizar
 )
 
 /** Motor do jogo, reconhecido pelas bibliotecas do APK; bits do processo (32 ou 64). */
@@ -588,8 +591,9 @@ class Engine private constructor(private val app: Context) {
     }
 
     /** Roda work com o jogo pausado (se a opção estiver ligada) e sempre continua o jogo depois. */
-    private fun <T> Daemon.frozenGame(work: () -> T): T {
-        val auto = Session.autoPause && !Session.paused
+    private fun <T> Daemon.frozenGame(few: Boolean = false, work: () -> T): T {
+        // poucos candidatos (refino rápido, em milissegundos): não pausa; pausar e continuar o jogo dava um tranco à toa
+        val auto = Session.autoPause && !Session.paused && !few
         if (auto) send("pause", quiet = true)
         try {
             return work()
@@ -629,7 +633,7 @@ class Engine private constructor(private val app: Context) {
 
     suspend fun refine(value: String): String = call { d ->
         val before = Session.count
-        val n = d.frozenGame { d.send("refine ${value.arg()}") }.status
+        val n = d.frozenGame(few = (before ?: Long.MAX_VALUE) < 20_000) { d.send("refine ${value.arg()}") }.status
         Session.canUndo = true
         step(false, value.trim(), n)
         when {
@@ -657,7 +661,7 @@ class Engine private constructor(private val app: Context) {
     /** Refino comparando com o valor anterior: inc, dec, same, changed; incby/decby com quanto mudou. */
     suspend fun compare(op: String, value: String = ""): String = call { d ->
         val before = Session.count
-        val n = d.frozenGame { d.send("compare $op ${if (value.isBlank()) "" else value.arg()}".trimEnd()) }.status
+        val n = d.frozenGame(few = !inFile && (before ?: Long.MAX_VALUE) < 20_000) { d.send("compare $op ${if (value.isBlank()) "" else value.arg()}".trimEnd()) }.status
         // enquanto os candidatos estão no arquivo do daemon (milhões) não há desfazer
         Session.canUndo = !inFile
         inFile = inFile && n.toLong() > 2_000_000
@@ -741,6 +745,17 @@ class Engine private constructor(private val app: Context) {
         return "${c.name.substringAfterLast('.')}.${f?.name ?: "+0x" + off.toString(16)}"
     }
 
+    /**
+     * Offset de agora do campo pelo nome, lido no próprio objeto: jogo atualizado mudou o campo de lugar e o salvo
+     * (ou a receita) acompanha sozinho, sem IA. Sem nome ou sem achar, fica o offset guardado.
+     */
+    private fun Daemon.liveOffset(obj: Long, field: String, old: Long): Long {
+        if (field.isEmpty()) return old
+        val head = Session.engine?.header ?: 0x10L
+        val c = il2((obj + head).toString(16)) ?: return old
+        return c.fields.firstOrNull { it.name == field }?.offset?.toLong() ?: old
+    }
+
     /** Marca o salvo com a classe e o offset IL2CPP (e o nome do campo, se ele não tem nome). */
     private fun Daemon.tagIl2(item: SavedItem) {
         // número solto do C# (System.Int32...): é cópia que o jogo cria para mostrar na tela e joga fora; não volta pela classe
@@ -756,7 +771,7 @@ class Engine private constructor(private val app: Context) {
         val tag = "${c.name}+${off.toString(16)}"
         if (!IL2.matches(tag)) return
         if (item.name.isEmpty()) Diag.add("Salvo 0x${item.addr} é o campo $name (IL2CPP)")
-        replace(item) { it.copy(name = it.name.ifEmpty { name }, il2 = tag) }
+        replace(item) { it.copy(name = it.name.ifEmpty { name }, il2 = tag, il2Field = f.name.takeIf { n -> FIELD.matches(n) }.orEmpty()) }
         // a IA fica sabendo nas próximas conversas, sem depender dela lembrar de anotar (se ainda não sabe desse campo)
         notesFile?.let { nf ->
             val known = nf.takeIf { it.exists() }?.readText().orEmpty()
@@ -773,10 +788,15 @@ class Engine private constructor(private val app: Context) {
     private fun Daemon.fromIl2cpp(item: SavedItem, pid: Int, why: MutableList<String>): String? {
         if (item.il2.isEmpty()) return null
         val cls = item.il2.substringBeforeLast('+')
-        val off = item.il2.substringAfterLast('+').toLongOrNull(16) ?: return null
+        val saved = item.il2.substringAfterLast('+').toLongOrNull(16) ?: return null
         val objs = runCatching { send("il2objs $cls", quiet = true).lines }.getOrElse { return null.also { _ -> why += "IL2CPP: ${it.message}" } }
             .mapNotNull { it.removePrefix("obj ").toLongOrNull(16) }
         if (objs.isEmpty()) return null.also { why += "IL2CPP: nenhum objeto $cls agora" }
+        val off = liveOffset(objs[0], item.il2Field, saved)
+        if (off != saved) {
+            Diag.add("${label(item)}: o campo ${item.il2Field} mudou de +${saved.toString(16)} para +${off.toString(16)} (jogo atualizado); salvo corrigido")
+            replace(item) { it.copy(il2 = "$cls+${off.toString(16)}") }
+        }
         val at = objs.map { (it + off).toString(16) }
         fun read(a: String) = runCatching { send("read $a ${item.type}", quiet = true).status }.getOrDefault("?")
         val wanted = telling(item)
@@ -1784,7 +1804,7 @@ class Engine private constructor(private val app: Context) {
             val v = readable(it.value, it.type) ?: it.value
             val label = it.name.ifEmpty { it.il2.ifEmpty { it.addr } }
             when {
-                it.il2.isNotEmpty() -> Step(it.il2.substringBeforeLast('+'), it.il2.substringAfterLast('+').toLong(16), it.type, v, it.frozen, label)
+                it.il2.isNotEmpty() -> Step(it.il2.substringBeforeLast('+'), it.il2.substringAfterLast('+').toLong(16), it.type, v, it.frozen, label, field = it.il2Field)
                 it.pointer.isNotEmpty() -> Step("", 0, it.type, v, it.frozen, label, ptr = it.pointer)
                 sigUseful(it.sig) -> Step("", 0, it.type, v, it.frozen, label, sig = it.sig, sigOff = it.sigOff)
                 else -> null
@@ -1825,7 +1845,7 @@ class Engine private constructor(private val app: Context) {
                     when {
                         o.isEmpty() -> null.also { notes += "${st.label}: classe ainda não carregou" }
                         o.size > 1 -> null.also { notes += "${st.label}: ${o.size} objetos, não sei qual" }
-                        else -> (o[0] + st.off).toString(16)
+                        else -> (o[0] + d.liveOffset(o[0], st.field, st.off)).toString(16)  // campo mudou de lugar: pelo nome
                     }
                 }
                 st.ptr.isNotEmpty() -> runCatching { d.send("resolve ${st.ptr}", quiet = true).status }.getOrNull()
@@ -1856,6 +1876,7 @@ class Engine private constructor(private val app: Context) {
                     it.copy(
                         name = it.name.ifEmpty { st.label },
                         il2 = if (st.cls.isNotEmpty()) "${st.cls}+${st.off.toString(16)}" else it.il2,
+                        il2Field = it.il2Field.ifEmpty { st.field },
                         pointer = it.pointer.ifEmpty { st.ptr }, chains = if (st.ptr.isNotEmpty() && st.ptr !in it.chains) it.chains + st.ptr else it.chains,
                         sig = it.sig.ifEmpty { st.sig }, sigOff = if (it.sig.isEmpty()) st.sigOff else it.sigOff,
                     )
@@ -2669,7 +2690,7 @@ internal fun normalizeNumbers(input: String): String =
 private fun SavedItem.toJson() = JSONObject().put("addr", addr).put("type", type).put("region", region).put("value", value).put("name", name).put("frozen", frozen)
     .put("pointer", pointer).put("id", id).put("anchor", anchor).put("offset", offset).put("pid", pid)
     .put("chains", JSONArray(chains)).put("sig", sig).put("sigOff", sigOff).put("verified", verified)
-    .put("trusted", trusted).put("il2", il2).put("temp", temp).put("history", JSONArray(history)).apply { if (!seenMin.isNaN()) put("seenMin", seenMin).put("seenMax", seenMax) }  // JSON não aceita NaN
+    .put("trusted", trusted).put("il2", il2).put("il2Field", il2Field).put("temp", temp).put("history", JSONArray(history)).apply { if (!seenMin.isNaN()) put("seenMin", seenMin).put("seenMax", seenMax) }  // JSON não aceita NaN
 
 /** Namespaces de bibliotecas: vão para o fim da lista de classes (o que interessa é o código do próprio jogo). */
 private val LIBS = listOf(
@@ -2683,7 +2704,7 @@ private val CLASS_NAME = Regex("""[A-Za-z0-9_.`<>]{1,120}""")  // vai para o dae
 private fun Recipe.toJson() = JSONObject().put("id", id).put("name", name).put("auto", auto).put("steps", JSONArray().apply {
     steps.forEach {
         put(JSONObject().put("cls", it.cls).put("off", it.off).put("type", it.type).put("value", it.value).put("freeze", it.freeze).put("label", it.label)
-            .apply { if (it.ptr.isNotEmpty()) put("ptr", it.ptr); if (it.sig.isNotEmpty()) put("sig", it.sig).put("sigOff", it.sigOff) })
+            .apply { if (it.field.isNotEmpty()) put("field", it.field); if (it.ptr.isNotEmpty()) put("ptr", it.ptr); if (it.sig.isNotEmpty()) put("sig", it.sig).put("sigOff", it.sigOff) })
     }
 })
 
@@ -2704,11 +2725,13 @@ private fun JSONObject.toRecipe(): Recipe {
         require(cls.isNotEmpty() || ptr.isNotEmpty() || sig.isNotEmpty()) { "Receita inválida: passo sem classe, ponteiro ou assinatura" }
         val v = normalizeNumbers(j.getString("value"))
         require(Regex("""-?[0-9.eE+-]{1,40}""").matches(v)) { "Receita inválida: valor $v" }
-        Step(cls, j.optLong("off", 0).coerceIn(0L, 0x10000L), type, v, j.optBoolean("freeze", false), j.optString("label", cls).take(60), ptr, sig, j.optInt("sigOff", 0).coerceIn(0, 191))
+        Step(cls, j.optLong("off", 0).coerceIn(0L, 0x10000L), type, v, j.optBoolean("freeze", false), j.optString("label", cls).take(60), ptr, sig, j.optInt("sigOff", 0).coerceIn(0, 191),
+            field = j.optString("field", "").takeIf { FIELD.matches(it) }.orEmpty())
     }
     return Recipe(optString("id", "").ifEmpty { java.util.UUID.randomUUID().toString() }, optString("name", "Receita").take(40), steps, optBoolean("auto", false))
 }
 
+private val FIELD = Regex("""[A-Za-z0-9_.<>`$]{1,120}""")  // nome de campo IL2CPP (ex.: <Gold>k__BackingField)
 private val IL2 = Regex("""[A-Za-z0-9_.<>`]{1,120}\+[0-9a-f]{1,6}""")  // vai para o daemon: sem espaço nem quebra de linha
 
 private val AOB = Regex("""([0-9a-f]{2}|\?\?){1,192}""")
@@ -2886,6 +2909,7 @@ private fun JSONObject.toSaved(): SavedItem {
         history = optJSONArray("history")?.let { a -> List(a.length()) { a.getString(it) } }.orEmpty().takeLast(20),
         seenMin = optDouble("seenMin", Double.NaN), seenMax = optDouble("seenMax", Double.NaN), trusted = optBoolean("trusted", true),
         il2 = optString("il2", "").takeIf { IL2.matches(it) }.orEmpty(), temp = optBoolean("temp", false),
+        il2Field = optString("il2Field", "").takeIf { FIELD.matches(it) }.orEmpty(),
     )
 }
 
