@@ -29,6 +29,10 @@ O Tinker também manda o que a IA aprendeu (lições e a biblioteca de cada jogo
 o que vem de todas as instâncias. A aba **Aprendizado** mostra tudo para ler; a aba escondida **MemoriaBruta** é a que o
 Tinker usa. Uma instância nova (ou reinstalada) pega o aprendizado de lá ao abrir.
 
+## Versão do script
+
+O `Code.gs` tem `const VERSAO` no começo. O número aparece no menu (**Tinker vN**) e embaixo do painel. Ele também aparece no registro do app: "Painel de chaves: … · script vN". Se o app avisar "desatualizado", cole o Code.gs novo e faça **Nova versão** na implantação.
+
 ## Pedidos e Aparelhos
 
 Na aba **Pedidos** você escolhe o **Tipo** e escreve o **Texto**:

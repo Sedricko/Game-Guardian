@@ -152,6 +152,9 @@ data class SheetRequest(val id: String, val tipo: String, val jogo: String, val 
 
 // tipos fixos que a aba Pedidos aceita: anotações e conferências, nada de comando livre nem escrita no jogo
 // os únicos que podem ficar "sempre permitidos": só conferem e mandam informação; nota e lição mudam o que a IA faz, pedem o toque toda vez
+// versão do Code.gs que este app espera (a mesma constante VERSAO lá): sobe junto quando o script muda
+const val SCRIPT_VERSION = 10
+
 val TRUSTABLE_REQUESTS = setOf("autoteste", "relatorio")
 val REQUEST_TYPES = mapOf("dica" to "Dica para você", "nota" to "Anotar no jogo", "licao" to "Guardar lição da IA", "autoteste" to "Rodar o autoteste", "relatorio" to "Mandar o relatório")
 
@@ -1892,7 +1895,10 @@ class Engine private constructor(private val app: Context) {
             saveSettings()
             (got + gotGroq).count { it !in old }
         }
-        "Painel de chaves: ${got.size} do Gemini e ${gotGroq.size} do Groq" + (if (added > 0) ", $added novas" else "") + "."
+        // versão do Code.gs na planilha: abaixo da que este app espera, as abas novas (Pedidos, Buscas…) não funcionam
+        val v = j.optInt("versao", 0)
+        "Painel de chaves: ${got.size} do Gemini e ${gotGroq.size} do Groq" + (if (added > 0) ", $added novas" else "") +
+            " · script v$v" + (if (v < SCRIPT_VERSION) " (desatualizado: este app precisa da v$SCRIPT_VERSION; cole o Code.gs novo e faça Nova versão)" else "") + "."
     }
 
     /** Pergunta ao Google quais modelos a chave pode usar; se o escolhido não está entre eles, troca pelo melhor. */

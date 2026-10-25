@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- Painel do Tinker · muda junto com o Code.gs (a versão aparece embaixo, ao lado do link) -->
 <html>
 <head>
 <base target="_top">
@@ -44,6 +45,7 @@
   <h3 style="margin-top:12px">Link de leitura (para análise)</h3>
   <div class="s">Só os relatórios (aba Relatórios) e o aprendizado, nunca as chaves. É este que você passa para o Claude analisar os problemas.</div>
   <div id="leitura" class="link"></div>
+  <div id="versao" class="s"></div>
   <button onclick="copiar('leitura')">Copiar link de leitura</button>
 <script>
   function msg(t) { document.getElementById('msg').textContent = t || ''; }
@@ -64,6 +66,7 @@
     });
     document.getElementById('link').textContent = d.link || 'Implante como App da Web (veja o LEIAME) para ter o link.';
     document.getElementById('leitura').textContent = d.leitura || '';
+    document.getElementById('versao').textContent = d.versao ? 'Script v' + d.versao : 'Script antigo (sem versão): cole o Code.gs novo';
   }
   function fail(e) { msg(e.message || String(e)); }
   function run(fn, arg) { msg('…'); google.script.run.withSuccessHandler(show).withFailureHandler(fail)[fn](arg); }

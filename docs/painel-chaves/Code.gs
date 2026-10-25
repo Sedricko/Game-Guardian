@@ -1,11 +1,14 @@
 // Painel de chaves do Tinker: planilha privada com as chaves do Gemini e do Groq e um link (App da Web) que o Tinker lê.
 // A planilha nunca fica pública: o link só devolve as chaves ativas para quem tem o token.
 
+// Versão do script: sobe a cada mudança. O Tinker mostra no registro e avisa quando a planilha está numa anterior.
+const VERSAO = 10;
+
 const ABA = 'Chaves';
 const COLS = ['Chave', 'Nome', 'Ativa', 'Situação', 'Atualizado', 'Provedor'];
 
 function onOpen() {
-  SpreadsheetApp.getUi().createMenu('Tinker')
+  SpreadsheetApp.getUi().createMenu('Tinker v' + VERSAO)
     .addItem('Abrir painel', 'abrirPainel')
     .addItem('Ligar análise automática dos relatórios', 'ligarAnalise')
     .addItem('Definir o link da implantação', 'definirLink')
@@ -129,6 +132,7 @@ function dadosPainel() {
     })),
     link: url ? url + '?token=' + token_() : '',
     leitura: url ? url + '?leitura=' + leitura_() : '',
+    versao: VERSAO,
   };
 }
 
@@ -201,7 +205,7 @@ function doGet(e) {
     try {
       if (p.feito) return json_({ ok: marcarPedido_(p.feito, p.situacao, p.resposta) });
       marcarAparelho_(p.aparelho, p.versao);
-      return json_({ pedidos: pedidos_() });
+      return json_({ pedidos: pedidos_(), versao: VERSAO });
     } finally {
       lock.releaseLock();
     }
@@ -213,6 +217,7 @@ function doGet(e) {
   return json_({
     chaves: ativas.filter(r => r.provedor === 'gemini').map(r => r.chave),
     groq: ativas.filter(r => r.provedor === 'groq').map(r => r.chave),
+    versao: VERSAO,
   });
 }
 
