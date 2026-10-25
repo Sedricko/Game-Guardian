@@ -1146,6 +1146,45 @@ class Engine private constructor(private val app: Context) {
         }.onFailure { Diag.add("Aprendizado não foi para a planilha: ${it.message}") } }
     }
 
+    /**
+     * Autoteste: confere as partes do Tinker neste aparelho, só com leituras (nada é escrito no jogo), e manda o
+     * resultado junto do relatório para a planilha. Bom depois de cada atualização.
+     */
+    suspend fun selfTest(): String = withContext(Dispatchers.IO) {
+        val out = mutableListOf<String>()
+        suspend fun check(name: String, work: suspend () -> String) {
+            val t0 = System.currentTimeMillis()
+            val r = runCatching { work() }
+            val line = (if (r.isSuccess) "OK" else "FALHA") + " $name: " + (r.getOrNull() ?: r.exceptionOrNull()?.message ?: "?") +
+                " (${System.currentTimeMillis() - t0} ms)"
+            out += line
+            Diag.add("Autoteste $line")
+        }
+        check("daemon e root") { call { d -> d.send("info", quiet = true).status }.also { require("uid=0" in it) { "sem root: $it" } } }
+        check("jogo") { Session.process?.let { "${it.label} (PID ${it.pid}), ${Session.engine ?: "motor ?"}" } ?: "nenhum escolhido (escolha um para testar a memória)" }
+        if (Session.process != null && daemon?.isAttached == true) {
+            check("regiões de memória") { "${call { d -> d.send("regions", quiet = true).lines.size }} tipos" }
+            check("congelamento no daemon") { "${call { d -> d.send("frozen", quiet = true).status }} valores congelados" }
+            if (Session.engine?.il2cpp == true) check("classes IL2CPP") { "${listClasses().size} classes" }
+        }
+        check("print da tela") { call { d -> d.send("screencap", quiet = true).lines.size }.let { require(it > 0) { "veio vazio" }; "ok" } }
+        check("app em primeiro plano") { call { d -> d.send("focus", quiet = true).lines.firstOrNull()?.removePrefix("| ")?.trim()?.take(120) ?: "?" } }
+        check("painel de chaves") { syncKeys() }
+        check("planilha (aprendizado)") { cloudPull() }
+        check("Gemini") {
+            if (Session.geminiKeys.isEmpty()) "sem chave"
+            else Assistant.geminiModels(Session.geminiKey).size.let { require(it > 0) { "chave recusada ou sem internet" }; "$it modelos na chave em uso" }
+        }
+        check("Groq") {
+            if (Session.groqKeys.isEmpty()) "sem chave"
+            else Assistant.groqModels(Session.groqKey).size.let { require(it > 0) { "chave recusada ou sem internet" }; "$it modelos na chave em uso" }
+        }
+        check("menu flutuante") { if (android.provider.Settings.canDrawOverlays(app)) "permitido" else error("sem permissão de sobreposição") }
+        val ok = out.count { it.startsWith("OK") }
+        sendReport("autoteste: $ok de ${out.size} ok")
+        "Autoteste: $ok de ${out.size} ok (o resultado foi para a planilha)\n" + out.joinToString("\n")
+    }
+
     @Volatile private var lastAutoReport = 0L
 
     /**

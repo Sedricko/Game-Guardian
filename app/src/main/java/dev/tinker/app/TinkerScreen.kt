@@ -1914,6 +1914,8 @@ private fun LogTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, onE
                     info = "Relatório copiado (${clip.length / 1024} KB). Cole onde quiser."
                 }
             }, enabled = !working) { Text("Copiar tudo") }
+            // confere tudo neste aparelho (só leituras) e manda o resultado para a planilha
+            FilledTonalButton(shape = MaterialTheme.shapes.medium, onClick = { fetch { info = "Testando…"; info = engine.selfTest() } }, enabled = !working) { Text("Autoteste") }
             OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { fetch { engine.crashLog() } }, enabled = !working) { Text("Ver falhas") }
             OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { fetch { engine.gameLog() } }, enabled = !working && Session.process != null) { Text("Ver logcat do jogo") }
             // dois toques: apagar o registro não tem volta
