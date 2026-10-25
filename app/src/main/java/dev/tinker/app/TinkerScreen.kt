@@ -386,7 +386,7 @@ private fun AppIcon(p: GameProcess?, size: Int) {
 }
 
 @Composable
-private fun ValueField(value: String, label: String, onChange: (String) -> Unit, modifier: Modifier = Modifier, keyboard: KeyboardType = KeyboardType.Decimal) {
+private fun ValueField(value: String, label: String, onChange: (String) -> Unit, modifier: Modifier = Modifier, keyboard: KeyboardType = KeyboardType.Decimal, hex: Boolean = false) {
     // teclado do Tinker (Ajustes): o campo não chama o teclado do telefone, que cobre o jogo; tocar abre o do Tinker
     val own = Session.ownKeypad
     var pad by remember { mutableStateOf(false) }
@@ -402,10 +402,10 @@ private fun ValueField(value: String, label: String, onChange: (String) -> Unit,
             readOnly = own,
             interactionSource = taps,
             textStyle = MaterialTheme.typography.titleLarge,
-            keyboardOptions = KeyboardOptions(keyboardType = keyboard),
+            keyboardOptions = KeyboardOptions(keyboardType = if (hex) KeyboardType.Ascii else keyboard),
             modifier = Modifier.fillMaxWidth(),
         )
-        if (own && pad) NumPad(onKey = { onChange(applyKey(value, it)) }, onDone = { pad = false }, compact = landscape())
+        if (own && pad) NumPad(onKey = { onChange(applyKey(value, it)) }, onDone = { pad = false }, compact = landscape(), hex = hex)
     }
 }
 
@@ -1305,10 +1305,8 @@ private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
             if (hex != null) {
                 var at by remember(center) { mutableStateOf(center) }
                 var bytes by remember { mutableStateOf("") }
-                OutlinedTextField(at, { at = it.filter { c -> c.isLetterOrDigit() }.lowercase() }, label = { Text("Escrever a partir de (endereço)") }, singleLine = true,
-                    textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace), modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(bytes, { bytes = it }, label = { Text("Bytes (ex.: 1F 20 03 D5)") }, singleLine = true,
-                    textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace), modifier = Modifier.fillMaxWidth())
+                ValueField(at, "Escrever a partir de (endereço)", { at = it.filter { c -> c.isLetterOrDigit() }.lowercase() }, hex = true)
+                ValueField(bytes, "Bytes (ex.: 1F2003D5)", { bytes = it }, hex = true)
                 Button(shape = MaterialTheme.shapes.medium, enabled = bytes.isNotBlank() && at.toLongOrNull(16) != null, onClick = {
                     run { engine.writeBytes(at, bytes).also { hex = runCatching { engine.hexView(center, 16) }.getOrElse { e -> "Não leu: ${e.message}" } } }
                 }) { Text("Escrever bytes") }
@@ -1417,8 +1415,8 @@ private fun CodeView(engine: Engine, center: String, run: (suspend () -> String)
                         if (r.where.isNotEmpty()) TextButton(onClick = { s.status = copyAddress(ctx, r.where) }) { Text("Copiar lib+desloc.") }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(bytes, { bytes = it.filter { c -> c.isLetterOrDigit() }.lowercase().take(32) }, label = { Text("Bytes novos (8 dígitos por instrução)") },
-                            singleLine = true, textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace), modifier = Modifier.weight(1f))
+                        ValueField(bytes, "Bytes novos (8 dígitos por instrução)", { bytes = it.filter { c -> c.isLetterOrDigit() }.lowercase().take(32) },
+                            Modifier.weight(1f), hex = true)
                         TextButton(onClick = { open = null; run { engine.createPatch(r.addr, bytes, "Patch em ${r.where.ifEmpty { r.addr }}", "era ${r.text}") } },
                             enabled = bytes.length >= 8 && bytes.length % 8 == 0 && !s.busy) { Text("Aplicar") }
                     }
