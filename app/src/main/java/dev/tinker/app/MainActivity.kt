@@ -21,6 +21,8 @@ class MainActivity : ComponentActivity() {
         val engine = Engine.get(this)
         // agente do PC no emulador: am start -n dev.tinker.app/.MainActivity --ez autoteste true (o autoteste só lê e usa o jogo de teste)
         if (savedInstanceState == null && intent?.getBooleanExtra("autoteste", false) == true) engine.selfTestToFile()
+        // missões do agente: um passo do Tinker por vez, só no Jogo de Teste (ver Engine.mission)
+        if (savedInstanceState == null) intent?.getStringExtra("missao")?.let { engine.missionStep(it) }
         // como o GameGuardian: abrir o app já abre o menu flutuante e sai da frente (a permissão é pedida só na primeira vez)
         if (savedInstanceState == null && Session.autoOverlay) {
             if (Settings.canDrawOverlays(this)) openOverlay()

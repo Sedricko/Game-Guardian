@@ -29,6 +29,7 @@ import org.json.JSONObject
 import java.io.File
 import java.io.IOException
 
+const val TEST_GAME = "dev.tinker.testgame"  // Jogo de Teste (módulo testgame): o único em que o agente faz missões
 val TYPES = listOf("auto" to "Auto", "i32" to "Dword", "f32" to "Float", "i64" to "Qword", "f64" to "Double", "i16" to "Word", "i8" to "Byte")
 // xi32/xf32: valor cifrado com a chave do lado (Anti-Cheat Toolkit do Unity); o daemon decifra ao ler e cifra ao escrever
 // i32x2/i64x2: inteiro guardado em dobro (Dart/Flutter e JavaScript: 100 fica 200)
@@ -1684,6 +1685,39 @@ class Engine private constructor(private val app: Context) {
      */
     // no escopo do app: com o painel fechando no meio, o teste da tela era cancelado ("rememberCoroutineScope left the composition")
     suspend fun selfTest(): String = scope.async { selfTestIn() }.await()
+
+    /**
+     * Missões do agente do PC: o mesmo caminho da tela (escolher, buscar, refinar, desconhecido, comparar, escrever,
+     * congelar), um passo por vez, resultado em files/missao.txt. Só no Jogo de Teste, nunca num jogo de verdade.
+     */
+    fun missionStep(cmd: String) {
+        scope.launch(Dispatchers.IO) {
+            val r = runCatching { mission(cmd.trim()) }.getOrElse { "erro ${it.message}" }
+            File(app.filesDir, "missao.tmp").apply { writeText(r) }.renameTo(File(app.filesDir, "missao.txt"))
+        }
+    }
+
+    private suspend fun mission(cmd: String): String {
+        val w = cmd.split(' ').filter { it.isNotEmpty() }
+        val arg = w.drop(1).joinToString(" ")
+        if (w.firstOrNull() == "escolher") {
+            val pid = call { d -> d.send("ps", quiet = true).lines.firstNotNullOfOrNull { l -> l.substringBefore(' ').toIntOrNull()?.takeIf { l.substringAfter(' ') == TEST_GAME } } }
+                ?: error("o Jogo de Teste não está aberto")
+            return "ok " + attach(GameProcess(pid, TEST_GAME, "Jogo de Teste", null))
+        }
+        require(Session.process?.pkg == TEST_GAME) { "missão só no Jogo de Teste" }
+        val msg = when (w.firstOrNull()) {
+            "buscar" -> search(if (w[1] == "auto") emptySet() else setOf(w[1]), w.drop(2).joinToString(" "))
+            "refinar" -> refine(arg)
+            "desconhecido" -> startUnknown(setOf(w.getOrElse(1) { "i32" }))
+            "comparar" -> compare(w[1], w.drop(2).joinToString(" "))
+            "escrever" -> writeAll(arg)
+            "congelar" -> list().second.take(1).also { withContext(Dispatchers.Main) { addSaved(it, frozen = true, name = "missão") } }.let { "congelado ${it.size}" }
+            else -> error("passo desconhecido: $cmd")
+        }
+        val (count, hits) = list()
+        return "ok $msg\ncount ${count ?: 0}\n" + hits.take(10).joinToString("\n") { "${it.addr} ${it.type} ${it.value}" }
+    }
 
     /** Para o agente do PC: resultado e registro em files/autoteste.txt (ele lê pelo adb e manda para a planilha). */
     fun selfTestToFile() {

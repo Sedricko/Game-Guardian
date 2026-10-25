@@ -138,6 +138,149 @@ function Set-PanelLink {
     Say "link da planilha colocado no Tinker do emulador"
 }
 
+# ===== Missoes: o agente usa o Tinker no Jogo de Teste como uma pessoa faria e mede o que resolveu =====
+$game = "dev.tinker.testgame"
+function Ui { & $adb shell uiautomator dump /sdcard/ui.xml | Out-Null; [xml](((& $adb shell cat /sdcard/ui.xml) -join "") -replace '^[^<]*', '') }
+function Val($label) {
+    Front-Game
+    $t = ((Ui).SelectNodes("//node") | ForEach-Object { $_.text }) -join "`n"
+    if ($t -match "$label`: (-?[\d.]+)") { [double]$Matches[1] } else { $null }
+}
+function Front-Game { & $adb shell am start -n "$game/.GameActivity" | Out-Null; Start-Sleep 1 }
+function Tap($text) {
+    Front-Game
+    $n = (Ui).SelectNodes("//node") | Where-Object { $_.text -eq $text } | Select-Object -First 1
+    if (-not $n) { throw "botao '$text' nao achado" }
+    $b = [regex]::Matches($n.bounds, "\d+") | ForEach-Object { [int]$_.Value }
+    & $adb shell input tap ([int](($b[0] + $b[2]) / 2)) ([int](($b[1] + $b[3]) / 2))
+    Start-Sleep -Milliseconds 700
+}
+# um passo do Tinker (escolher/buscar/refinar/desconhecido/comparar/escrever/congelar); devolve a contagem
+function Step($cmd) {
+    & $adb shell rm -f /data/data/$app/files/missao.txt
+    & $adb shell am start -f 0x10008000 -n "$app/.MainActivity" --es missao "'$cmd'" | Out-Null
+    for ($k = 0; $k -lt 120; $k++) {
+        Start-Sleep -Milliseconds 500
+        $t = & $adb shell cat /data/data/$app/files/missao.txt 2>$null
+        if ($LASTEXITCODE -eq 0 -and $t) {
+            $t = $t -join "`n"
+            if ($t -like "erro*") { throw "Tinker: $t" }
+            if ($t -match "count (\d+)") { return [long]$Matches[1] } else { return 0 }
+        }
+    }
+    throw "o Tinker nao respondeu ao passo '$cmd'"
+}
+# busca, muda no jogo, refina ate sobrar 1 (ou 6 rodadas); devolve [contagem final, refinos, primeira contagem]
+function Narrow($type, $label, $button, $fmt) {
+    $v = Val $label
+    $first = Step "buscar $type $(& $fmt $v)"
+    $c = $first; $n = 0
+    while ($c -gt 1 -and $n -lt 6) { Tap $button; $v = Val $label; $c = Step "refinar $(& $fmt $v)"; $n++ }
+    @($c, $n, $first)
+}
+function Mission($name, [scriptblock]$body) {
+    $t0 = Get-Date
+    try { $r = & $body; $script:mres += "OK $name`: $r ($([int]((Get-Date) - $t0).TotalSeconds) s)" }
+    catch { $script:mres += "FALHA $name`: $($_.Exception.Message) ($([int]((Get-Date) - $t0).TotalSeconds) s)" }
+    Say ($script:mres[-1])
+}
+
+# menu flutuante desligado nas missoes: a bolinha/painel cobriria os botoes do jogo
+function Set-NoOverlay {
+    & $adb shell am force-stop $app
+    $f = "/data/data/$app/shared_prefs/tinker.xml"
+    $xml = (& $adb shell cat $f 2>$null) -join "`n"
+    if (-not $xml.Contains("</map>")) { return }
+    $xml = $xml -replace '\s*<boolean name="autoOverlay" value="[a-z]+"\s*/>', ''
+    $xml = $xml.Replace("</map>", "    <boolean name=`"autoOverlay`" value=`"false`" />`n</map>")
+    $tmp = "$env:TEMP\tinker-prefs.xml"
+    [IO.File]::WriteAllText($tmp, $xml, (New-Object Text.UTF8Encoding $false))
+    & $adb push $tmp /data/local/tmp/tinker-prefs.xml | Out-Null
+    & $adb shell "cat /data/local/tmp/tinker-prefs.xml > $f; rm /data/local/tmp/tinker-prefs.xml"
+}
+
+function Run-Missions($v) {
+    $script:mres = @()
+    Set-NoOverlay
+    & $adb shell am force-stop $game
+    & $adb shell pm clear $game | Out-Null  # valores novos sorteados a cada rodada
+    Front-Game
+    Start-Sleep 2
+    Step "escolher" | Out-Null
+    $int = { param($x) [long]$x }
+    Mission "ouro (Dword com 6 copias iguais)" {
+        $r = Narrow "i32" "Ouro" "+1 ouro" $int
+        Step "escrever 7777" | Out-Null; Start-Sleep 1
+        if ((Val "Ouro") -ne 7777) { throw "editou $($r[0]) enderecos mas a tela nao mudou" }
+        "achou $($r[2]), sobraram $($r[0]) em $($r[1]) refinos; a tela mudou"
+    }
+    Mission "gemas (cifrado, chave nova a cada mudanca)" {
+        $r = Narrow "i32" "Gemas" "+1 gema" $int
+        if ($r[0] -lt 1) { throw "nao achou (comecou com $($r[2]))" }
+        Step "escrever 55" | Out-Null; Start-Sleep 1
+        if ((Val "Gemas") -ne 55) { throw "sobraram $($r[0]) mas a tela nao mudou" }
+        "sobraram $($r[0]) em $($r[1]) refinos"
+    }
+    Mission "vida (Float com decimal)" {
+        $r = Narrow "f32" "Vida" "-10 vida" { param($x) ([double]$x).ToString([Globalization.CultureInfo]::InvariantCulture) }
+        Step "escrever 999" | Out-Null; Start-Sleep 1
+        if ((Val "Vida") -ne 999) { throw "sobraram $($r[0]) mas a tela nao mudou" }
+        "sobraram $($r[0]) em $($r[1]) refinos"
+    }
+    Mission "pontos (guardados em dobro, Auto)" {
+        $r = Narrow "auto" "Pontos" "+5 pontos" $int
+        if ($r[0] -lt 1) { throw "Auto nao achou valor em dobro" }
+        Step "escrever 4321" | Out-Null; Start-Sleep 1
+        if ((Val "Pontos") -ne 4321) { throw "sobraram $($r[0]) mas a tela nao mudou" }
+        "sobraram $($r[0]) em $($r[1]) refinos"
+    }
+    Mission "diamantes (64 bits, Auto)" {
+        $r = Narrow "auto" "Diamantes" "+1 diamante" $int
+        Step "escrever 6000000000" | Out-Null; Start-Sleep 1
+        if ((Val "Diamantes") -ne 6000000000) { throw "sobraram $($r[0]) mas a tela nao mudou" }
+        "sobraram $($r[0]) em $($r[1]) refinos"
+    }
+    Mission "madeira (mostrada inteira, guardada Float, Auto)" {
+        $r = Narrow "auto" "Madeira" "+1 madeira" $int
+        Step "escrever 500" | Out-Null; Start-Sleep 1
+        if ((Val "Madeira") -ne 500) { throw "sobraram $($r[0]) mas a tela nao mudou" }
+        "sobraram $($r[0]) em $($r[1]) refinos"
+    }
+    Mission "pocoes (numero pequeno num inventario cheio)" {
+        $r = Narrow "i32" "Poções" "Achar poção" $int
+        Step "escrever 9" | Out-Null; Start-Sleep 1
+        if ((Val "Poções") -ne 9) { throw "sobraram $($r[0]) mas a tela nao mudou" }
+        "comecou com $($r[2]), sobraram $($r[0]) em $($r[1]) refinos"
+    }
+    Mission "energia (muda sozinha; faixa + congelar)" {
+        $e = Val "Energia"; $c = Step "buscar i32 $e~$($e + 3)"; $n = 0
+        while ($c -gt 1 -and $n -lt 6) { Start-Sleep 2; $e = Val "Energia"; $c = Step "refinar $e~$($e + 3)"; $n++ }
+        Step "escrever 10" | Out-Null; Step "congelar" | Out-Null; Start-Sleep 4
+        $e = Val "Energia"
+        if ($e -gt 11) { throw "congelou mas a energia foi a $e" }
+        "sobraram $c em $n refinos; congelada em $e"
+    }
+    Mission "xp (escondido: valor desconhecido)" {
+        $c = Step "desconhecido i32"; $n = 0
+        while ($c -gt 1 -and $n -lt 8) {
+            if ($n % 2) { Start-Sleep 1; $c = Step "comparar same" } else { Tap "+1 ouro"; $c = Step "comparar inc" }
+            $n++
+        }
+        if ($c -lt 1) { throw "nenhum candidato sobrou" }
+        "sobraram $c em $n comparacoes"
+    }
+    Mission "jogo atualizado (campos mudam de lugar)" {
+        Tap "Atualizar jogo"
+        $r = Narrow "i32" "Ouro" "+1 ouro" $int
+        Step "escrever 8888" | Out-Null; Start-Sleep 1
+        if ((Val "Ouro") -ne 8888) { throw "na versao nova a tela nao mudou" }
+        "achou de novo: sobraram $($r[0]) em $($r[1]) refinos"
+    }
+    $ok = ($script:mres | Where-Object { $_ -like "OK*" }).Count
+    $fails = ($script:mres | Where-Object { $_ -like "FALHA*" }) -join "`n"
+    Post-Sheet "agente PC: missoes $ok de $($script:mres.Count) ok" $fails ($script:mres -join "`n") $v
+}
+
 function Test-Version {
     $rel = Invoke-RestMethod "https://api.github.com/repos/Sedricko/Game-Guardian/releases/latest" -Headers (Hdr)
     $v = $rel.tag_name.TrimStart("v")
@@ -178,6 +321,9 @@ function Test-Version {
     if ($fails) { Say $fails }
     Post-Sheet "agente PC: $first" $fails ($out + "`n`n=== crash ===`n" + $crash) $v
     Send-Shots $v
+    if ((& $adb shell pm list packages $game) -match $game) {
+        try { Run-Missions $v } catch { Say "missoes pararam: $($_.Exception.Message)" }
+    }
     Set-Content $done $v
 }
 
