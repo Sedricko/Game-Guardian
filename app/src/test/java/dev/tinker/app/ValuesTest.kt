@@ -204,8 +204,9 @@ class ValuesTest {
         val p = retryPlans("i32", "1250")
         assertEquals("i32,f32,i64,f64,xi32,xf32", p[0].first)
         assertEquals(Triple("i32x2,i64x2", "1250", "como inteiro em dobro (jogos em Flutter ou JavaScript)"), p[1])
-        assertEquals(Triple("f32,f64", "1243.75~1256.25", "como número com casas decimais (1243.75~1256.25)"), p[2])
-        assertEquals("12~13", retryPlans("i32,f32,i64,f64,xi32,xf32", "12.5").single().second)  // já tinha todos os tipos
+        assertEquals("como valor cifrado (chave ao lado)", p[2].third)
+        assertEquals(Triple("f32,f64", "1243.75~1256.25", "como número com casas decimais (1243.75~1256.25)"), p[3])
+        assertEquals("12~13", retryPlans("i32,f32,i64,f64,xi32,xf32", "12.5").last().second)  // já tinha todos os tipos
         assertEquals(emptyList<Triple<String, String, String>>(), retryPlans("i32,f32,i64,f64,xi32,xf32", "100;200"))
     }
 

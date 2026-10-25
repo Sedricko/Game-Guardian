@@ -206,6 +206,8 @@ internal fun retryPlans(types: String, value: String): List<Triple<String, Strin
     if (types != all) plans += Triple(all, value, "procurando em todos os tipos e nos cifrados")
     // Flutter (Dart) e jogos em JavaScript guardam inteiro em dobro: 100 fica 200
     if (value.toLongOrNull() != null) plans += Triple("i32x2,i64x2", value, "como inteiro em dobro (jogos em Flutter ou JavaScript)")
+    // cifrado com a chave em outra posição (o "X4" do GameGuardian), sem a pessoa precisar saber a distância
+    if (value.toDoubleOrNull() != null) plans += Triple("xi32@4,xi32@-4,xi32@8,xi32@-8,xf32@4,xf32@-4,xf32@8,xf32@-8", value, "como valor cifrado (chave ao lado)")
     val v = value.toDoubleOrNull()
     if (v != null) {
         val d = maxOf(0.5, kotlin.math.abs(v) * 0.005)
@@ -691,7 +693,7 @@ class Engine private constructor(private val app: Context) {
         inFile = false
         step(true, value.trim() + if (how.isEmpty()) "" else " ($how)", found)
         if (how.isNotEmpty()) "Não achei como pedido; achei $found $how. Mude o valor no jogo e refine."
-        else if (found == "0") "Nada encontrado (tentei também todos os tipos, cifrados e o número arredondado). Dicas: use Auto; se o número da tela é arredondado (1.2K), busque uma faixa como 1150~1250; ou marque mais regiões em Ajustes." + byName
+        else if (found == "0") "Nada encontrado (tentei também todos os tipos, cifrados com a chave em qualquer lado, em dobro e o número arredondado). Dicas: use Auto; se o número da tela é arredondado (1.2K), busque uma faixa como 1150~1250; ou marque mais regiões em Ajustes." + byName
         else "$found encontrados. Mude o valor no jogo e refine."
     }
 
