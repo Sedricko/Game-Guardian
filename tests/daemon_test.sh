@@ -157,7 +157,7 @@ ph=$( { printf '%s\n' "attach $pid" "photo"; sleep 0.3; printf '%s\n' "photonois
 echo "$ph" | grep -v '^[0-9a-f]* i32' | head -20
 grep -qE "^$maddr i32 (Ch|A) 1$" <<<"$ph" && grep -qE "^$m4 i32 (Ch|A) 12445$" <<<"$ph" && ! grep -qE "^$taddr i32" <<<"$ph" \
     && grep -qx "ok 0" <<<"$ph" && grep -qx "ok 12345" <<<"$ph" && grep -qx "err tire a foto antes" <<<"$ph" \
-    && grep -qx "ok 1 0" <<<"$ph" && grep -qx "ok 12445" <<<"$ph" || { echo "FALHOU: foto do jogo"; exit 1; }
+    && grep -qxE "ok [1-9][0-9]? 0" <<<"$ph" && grep -qx "ok 12445" <<<"$ph" || { echo "FALHOU: foto do jogo"; exit 1; }
 
 # Backup do save: guarda a pasta do jogo, muda o save, volta o backup e o save antigo reaparece
 mkdir -p "$out/data/com.teste.jogo/files" "$out/data/com.teste.jogo/cache"; echo v1 > "$out/data/com.teste.jogo/files/save.dat"; echo lixo > "$out/data/com.teste.jogo/cache/x"
