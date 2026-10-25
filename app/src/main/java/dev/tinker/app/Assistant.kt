@@ -412,6 +412,7 @@ jogo abrir, use propor_receita com os salvos."""
                     .apply { if (think) put("generationConfig", JSONObject().put("thinkingConfig", JSONObject().put("thinkingLevel", "low"))) }
                     .toString()
                 var body = body(lowThinking)
+                geminiSwapEarly(Session.geminiModel.trim())
                 val sent = System.currentTimeMillis()
                 var (code, reply) = http("models/${Session.geminiModel.trim()}:generateContent", Session.geminiKey, body)
                 noteSpeed(Session.geminiModel.trim(), code, System.currentTimeMillis() - sent)
@@ -543,6 +544,23 @@ jogo abrir, use propor_receita com os salvos."""
         code == 429 || code == 401 || code == 403 || (code == 400 && "api key" in reply.lowercase())
 
     /** Troca para a próxima chave do Gemini; false se só há uma. */
+    /**
+     * Antes de mandar: a chave de agora já fez hoje os pedidos que este modelo aguenta (aprendido nos dias anteriores)?
+     * Passa para uma que ainda tem. Nenhuma tem: fica, e se o limite subiu o app aprende o número novo.
+     */
+    private fun geminiSwapEarly(model: String) {
+        val limit = Session.geminiLimit[model] ?: return
+        if (Session.geminiUseDay != quotaDay()) return  // dia novo: tudo zerado
+        fun used(k: Int) = Session.geminiUseModel["$k|$model"] ?: 0
+        if (used(Session.geminiKeyIndex) < limit) return
+        val n = Session.geminiKeys.size
+        val next = (1 until n).map { (Session.geminiKeyIndex + it) % n }.firstOrNull { used(it) < limit } ?: return
+        val msg = "Gemini: chave ${Session.geminiKeyIndex + 1} já fez ${used(Session.geminiKeyIndex)} de $limit pedidos de $model hoje; passando antes para a chave ${next + 1} de $n"
+        Session.geminiKeyIndex = next
+        Diag.add(msg)
+        Diag.ai(msg)
+    }
+
     private fun nextGeminiKey(why: String): Boolean {
         val n = Session.geminiKeys.size
         if (n < 2) return false
@@ -592,9 +610,16 @@ jogo abrir, use propor_receita com os salvos."""
             val text = (if (code < 400) c.inputStream else c.errorStream)?.bufferedReader()?.use { it.readText() }.orEmpty()
             // contador de cota por chave: quantos pedidos hoje e quando acabou
             if (body != null) Session.geminiKeys.indexOf(key).takeIf { it >= 0 }?.let { k ->
-                if (Session.geminiUseDay != quotaDay()) { Session.geminiUse.clear(); Session.geminiOut.clear(); Session.geminiUseDay = quotaDay() }
+                if (Session.geminiUseDay != quotaDay()) { Session.geminiUse.clear(); Session.geminiOut.clear(); Session.geminiUseModel.clear(); Session.geminiUseDay = quotaDay() }
                 Session.geminiUse[k] = (Session.geminiUse[k] ?: 0) + 1
+                val model = path.substringAfter("models/").substringBefore(':')
+                val used = Session.geminiUseModel.merge("$k|$model", 1, Int::plus) ?: 1
                 if (code == 429 && geminiWait(code, text) == null) {
+                    // aprende: este modelo aguenta used-1 pedidos por dia; da próxima vez a chave é trocada antes de chegar lá.
+                    // Só sobe: o contador pode ter perdido pedidos (app fechado à força) e contaria menos que o real
+                    val learned = maxOf(used - 1, Session.geminiLimit[model] ?: 0).coerceAtLeast(1)
+                    if (Session.geminiLimit[model] != learned) Diag.add("Gemini: aprendi que $model aguenta $learned pedidos por dia por chave")
+                    Session.geminiLimit[model] = learned
                     val at = java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date())
                     if (Session.geminiOut[k] == null) reportOut(key, at)
                     Session.geminiOut[k] = at

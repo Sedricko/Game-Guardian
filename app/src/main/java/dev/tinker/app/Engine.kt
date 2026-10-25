@@ -352,6 +352,8 @@ object Session {
     var aiControl by mutableStateOf(false)  // modo autônomo 2: a IA toca e arrasta na tela do jogo para fazer o valor mudar
     var watchFields by mutableStateOf(true)  // enquanto joga, anota sozinho os campos das classes conhecidas que mudam
     var gameUpdated by mutableStateOf(false)  // o jogo mudou de versão desde a última vez: a IA conserta os salvos que não voltarem
+    val geminiUseModel = java.util.concurrent.ConcurrentHashMap<String, Int>()  // "chave|modelo" → pedidos de hoje (a cota é por modelo)
+    val geminiLimit = java.util.concurrent.ConcurrentHashMap<String, Int>()  // modelo → pedidos por dia aprendidos (quando a cota acabou)
     val geminiUse = mutableStateMapOf<Int, Int>()  // pedidos de hoje por chave (índice); o dia vira à meia-noite do Pacífico, como a cota
     val geminiOut = mutableStateMapOf<Int, String>()  // chave → hora em que a cota acabou hoje
     var geminiUseDay = quotaDay()
@@ -409,6 +411,8 @@ class Engine private constructor(private val app: Context) {
             .putString("geminiModel", Session.geminiModel).putBoolean("geminiAuto", Session.geminiAutoModel).putBoolean("watchFields", Session.watchFields)
             .putString("alwaysRequests", Session.alwaysRequests.joinToString(",")).putBoolean("autoReports", Session.autoReports)
             .putString("geminiUse", quotaDay() + ";" + Session.geminiUse.entries.joinToString(",") { "${it.key}=${it.value}" } + ";" + Session.geminiOut.entries.joinToString(",") { "${it.key}=${it.value}" })
+            .putString("geminiUseModel", quotaDay() + ";" + Session.geminiUseModel.entries.joinToString(",") { "${it.key}=${it.value}" })
+            .putString("geminiLimit", Session.geminiLimit.entries.joinToString(",") { "${it.key}=${it.value}" })
             .putString("geminiSpeed", Session.geminiSpeed.entries.joinToString("\n") { "${it.key}=${it.value}" }).apply()
     }
 
@@ -477,6 +481,10 @@ class Engine private constructor(private val app: Context) {
             use.split(',').forEach { e -> e.split('=').takeIf { it.size == 2 }?.let { (k, n) -> k.toIntOrNull()?.let { Session.geminiUse[it] = n.toIntOrNull() ?: 0 } } }
             out.split(',').forEach { e -> e.split('=', limit = 2).takeIf { it.size == 2 }?.let { (k, t) -> k.toIntOrNull()?.let { Session.geminiOut[it] = t } } }
         }
+        prefs.getString("geminiUseModel", "").orEmpty().split(';').takeIf { it.size == 2 && it[0] == quotaDay() }?.get(1)?.split(',')
+            ?.forEach { e -> e.split('=').takeIf { it.size == 2 }?.let { (k, n) -> n.toIntOrNull()?.let { Session.geminiUseModel[k] = it } } }
+        prefs.getString("geminiLimit", "").orEmpty().split(',')
+            .forEach { e -> e.split('=').takeIf { it.size == 2 }?.let { (m, n) -> n.toIntOrNull()?.let { Session.geminiLimit[m] = it } } }
         prefs.getString("geminiSpeed", "").orEmpty().lines().forEach { l -> l.split('=').takeIf { it.size == 2 }?.let { (m, ms) -> ms.toLongOrNull()?.let { Session.geminiSpeed[m] = it } } }
         Session.alpha = prefs.getFloat("alpha", Session.alpha)
         Session.panelLeft = prefs.getBoolean("panelLeft", false)
