@@ -24,7 +24,7 @@ Responder sempre em **português do Brasil**, curto e direto. O usuário testa n
 | Planilha | `docs/painel-chaves/Code.gs`, `Painel.html`, `LEIAME.md` | App da Web: chaves, Pedidos, Aparelhos, Buscas, Relatórios, Problemas, Salvos, Receitas, Patches |
 
 Versões: `app/build.gradle.kts` (`versionCode`/`versionName`), `VERSAO` no Code.gs, `SCRIPT_VERSION` no Engine.kt (versão **mínima** do script que o app exige).
-Estado em 2026-10: app **2.37.0** (code 110; Lua: tipos `li`/`lf` e comando `luatable` no daemon, LuaPanel na Ficha; Groq troca de chave pelos cabeçalhos x-ratelimit, Gemini aprende o limite diário por modelo em `geminiLimit`), script **v15**, app exige v14.
+Estado em 2026-10: app **2.38.0** (code 115; 🎯 Achar sozinho = OCR ML Kit no print + refino por faixa + teste dos finalistas com aiCanTest; Lua: tipos `li`/`lf` e comando `luatable` no daemon, LuaPanel na Ficha; Groq troca de chave pelos cabeçalhos x-ratelimit, Gemini aprende o limite diário por modelo em `geminiLimit`), script **v15**, app exige v14.
 
 ## Armadilhas já resolvidas (não repetir)
 - `Engine.call { d -> }` **não é suspend dentro do bloco**: nada de `delay`/`withContext` lá dentro; divida em várias chamadas.
@@ -67,6 +67,12 @@ Estado em 2026-10: app **2.37.0** (code 110; Lua: tipos `li`/`lf` e comando `lua
 - TValue: valor 8 bytes + tipo em +8 (5.4: 0x03 int, 0x13 float; 5.3 ao contrário). Nó 5.4 = 24 bytes (tipo da chave em +9, chave em +16); 5.3 = 32 (chave em +16, tipo em +24). Table: tt 5 em +8, lsizenode +11, lista +16, nós +24. TString: texto em +24.
 - Abrindo por um campo, o daemon anda pelos nós vizinhos (pode pegar nó de tabela colada; chaves que não são texto/número são puladas). LuaJIT não é suportado.
 - Last Garden: Survival (com.bravo.plants) usa HybridCLR + xLua 5.4, é ONLINE: só leitura/estudo, sem edição.
+
+## Correções de 25/10 à tarde
+- Busca 🔒 descarta pares que são ponteiro (ptr_at/in_chunks no daemon): falsos 🔒 no heap do Lua derrubaram o Last Garden.
+- esperar_mudanca com aumentou/diminuiu não faz o "não mudou" antes; refinar usa faixa para valor rápido.
+- Gemini só aprende o limite diário com geminiCountFull (contagem desde a virada do dia).
+- Detecção de jogo online foi TIRADA a pedido do usuário (jogo offline também tem sinais de conexão): o combinado de não editar jogo online vale pela conversa, não por código.
 
 ## Próximos passos
 - Testar no aparelho: métodos da classe (Ver código / Contar chamadas / Sempre devolver), dump .cs, foto do jogo, backup do save, "O que escreve aqui?", e se algum menu corta em pé/deitado.
