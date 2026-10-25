@@ -226,6 +226,17 @@ class ValuesTest {
     }
 
     @Test
+    fun screenNumbers() {
+        assertEquals(1234L, screenNumber("1.234"))
+        assertEquals(1234L, screenNumber("1,234"))
+        assertEquals(23L, screenNumber("x23"))
+        assertEquals(null, screenNumber("Ouro"))
+        assertEquals("30~37", followRange(23, 30))   // subiu 7: até o refino pode ter subido mais 7
+        assertEquals("19~20", followRange(21, 20))
+        assertEquals("5~6", followRange(5, 5))
+    }
+
+    @Test
     fun groqResetHeader() {
         assertEquals(7.66, groqSecs("7.66s"), 0.001)
         assertEquals(62.5, groqSecs("1m2.5s"), 0.001)

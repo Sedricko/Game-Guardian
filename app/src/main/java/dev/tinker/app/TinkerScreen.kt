@@ -481,6 +481,17 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                     // sem número na tela (barra de vida): começa já aqui, sem abrir "Mais formas de buscar"
                     if (s.count == null) OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { run { engine.startUnknown(s.types) } }, enabled = enabled) { Text("Sem valor") }
                 }
+                // 🎯 lê o número na tela e refina sozinho a cada mudança; com "IA pode testar valores", acha o verdadeiro
+                val finding = s.autoFind
+                if (finding == null) OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { engine.autoFindStart(s.value, s.types) },
+                    enabled = enabled && s.value.isNotBlank()) { Text("🎯 Achar sozinho (o número da tela)") }
+                else Panel {
+                    Text("🎯 $finding", style = MaterialTheme.typography.bodyMedium)
+                    s.autoFindWinner?.let { w ->
+                        FilledTonalButton(shape = MaterialTheme.shapes.medium, onClick = { engine.addSaved(listOf(w)); s.status = "Salvo: 0x${w.addr}"; engine.autoFindStop() }) { Text("Salvar 0x${w.addr}") }
+                    }
+                    TextButton(onClick = { engine.autoFindStop() }) { Text(if (s.autoFindWinner != null || finding.startsWith("Não") || finding.startsWith("Nenhum")) "Fechar" else "⏹ Parar") }
+                }
                 if (s.canUndo) TextButton(onClick = { run { engine.undo() } }, enabled = enabled) { Text("↶ Desfazer último refino") }
                 // com resultados: refinar pelo jeito que mudou, sem precisar do número
                 if ((s.count ?: 0) > 0) CompareButtons(engine, enabled, run)
@@ -2142,6 +2153,10 @@ private val HELP = listOf(
         "Aparece a instrução que muda o valor; \"Ver código\" abre Memória → Código, com as instruções traduzidas (SUB, STR…). Tocar numa " +
         "instrução deixa trocar por NOP (não faz nada) ou por outros bytes: vira um patch em Salvos → Patches de código, com liga/desliga. " +
         "Os bytes de antes ficam guardados; o patch volta sozinho quando o jogo reabre. Se o jogo fechar logo depois, o patch fica suspeito e desligado.",
+    "🎯 Achar sozinho" to "Digite o número que está na tela do jogo (ex.: 25 moedas) e toque em 🎯 Achar sozinho. O painel some, o Tinker lê esse " +
+        "número na tela (no próprio aparelho, sem internet) e, a cada vez que ele muda enquanto você joga, refina sozinho. Com até 3 resultados, " +
+        "se \"IA pode testar valores\" estiver ligado em Ajustes, ele muda cada um por 1 segundo: o que muda o número da tela é o verdadeiro, " +
+        "e aparece o botão Salvar. Número que não fica guardado na memória (calculado na hora) não é achado: ele avisa.",
     "Lua (xLua)" to "Jogos com Lua (o motor mostra \"· Lua\"): na Busca, o tipo 🌙 Lua acha só números do Lua (o Lua guarda o tipo ao lado " +
         "do número), com bem menos resultados. Abra um resultado na Ficha: aparece a tabela do Lua com o nome de cada campo (gold, level…), " +
         "ao vivo. Número dá para mudar, salvar e congelar; campo \"tabela ›\" abre a outra tabela. Edite só em jogo offline.",

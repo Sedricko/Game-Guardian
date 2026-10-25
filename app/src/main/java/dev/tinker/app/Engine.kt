@@ -277,6 +277,16 @@ internal fun retryPlans(types: String, value: String): List<Triple<String, Strin
 }
 
 /** Valor do teste da IA: diferente do atual e plausível (inteiro +1; decimal +1.5), para a tela mostrar a mudança. */
+/** Número de um texto lido na tela: "1.234" e "1,234" (milhar) viram 1234; "x23" vira 23; sem dígito, null. */
+internal fun screenNumber(text: String): Long? =
+    Regex("""\d[\d.,]*""").find(text)?.value?.filter(Char::isDigit)?.take(15)?.toLongOrNull()
+
+/** Refino depois que o número da tela foi de last para cur: faixa do mesmo tamanho para frente, porque até o refino ele anda mais. */
+internal fun followRange(last: Long, cur: Long): String {
+    val d = kotlin.math.abs(cur - last).coerceAtLeast(1)
+    return if (cur >= last) "$cur~${cur + d}" else "${cur - d}~$cur"
+}
+
 internal fun testValue(current: Double, type: String): String =
     if (type.endsWith("f32") || type.endsWith("f64")) java.math.BigDecimal(current + 1.5).setScale(3, java.math.RoundingMode.HALF_UP).stripTrailingZeros().toPlainString()
     else (current.toLong() + 1).toString()
@@ -353,6 +363,8 @@ object Session {
     var groqModels by mutableStateOf(listOf<String>())  // os que a chave do Groq pode usar, o melhor primeiro
     var groqModel by mutableStateOf("")  // vazio: escolhido sozinho na primeira pergunta
     var sheetGroqKeys = setOf<String>()  // chaves do Groq que vieram do painel
+    var autoFind by mutableStateOf<String?>(null)  // 🎯 Achar sozinho rodando: o que está fazendo agora (null = parado)
+    var autoFindWinner by mutableStateOf<Hit?>(null)  // o que mudou o número da tela no teste
     var aiCanTest by mutableStateOf(false)  // a IA pode escrever um valor de teste (e voltar o original) para saber se é o verdadeiro
     var aiAuto by mutableStateOf(false)  // modo autônomo 1: a IA aplica, congela, testa e cria receitas sem esperar o toque
     var aiControl by mutableStateOf(false)  // modo autônomo 2: a IA toca e arrasta na tela do jogo para fazer o valor mudar
@@ -1730,7 +1742,8 @@ class Engine private constructor(private val app: Context) {
         return (px * s.screenW / s.w).toInt() to (py * s.screenH / s.h).toInt()
     }
 
-    private suspend fun screenshotJpeg(): String {
+    /** Print da tela em PNG, com o painel quase invisível por um instante (o "olho"). */
+    private suspend fun screenPng(): ByteArray {
         withContext(Dispatchers.Main) { Session.peek = true }
         val r = try {
             delay(350)
@@ -1738,8 +1751,12 @@ class Engine private constructor(private val app: Context) {
         } finally {
             withContext(Dispatchers.Main) { Session.peek = false }
         }
+        return withContext(Dispatchers.Default) { android.util.Base64.decode(r.lines.joinToString("") { it.removePrefix("| ") }, android.util.Base64.DEFAULT) }
+    }
+
+    private suspend fun screenshotJpeg(): String {
+        val png = screenPng()
         return withContext(Dispatchers.Default) {
-            val png = android.util.Base64.decode(r.lines.joinToString("") { it.removePrefix("| ") }, android.util.Base64.DEFAULT)
             val full = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 .also { android.graphics.BitmapFactory.decodeByteArray(png, 0, png.size, it) }
             val bmp = android.graphics.BitmapFactory.decodeByteArray(png, 0, png.size, android.graphics.BitmapFactory.Options().apply { inSampleSize = 2 })
@@ -1751,6 +1768,101 @@ class Engine private constructor(private val app: Context) {
             val out = java.io.ByteArrayOutputStream()
             small.compress(Bitmap.CompressFormat.JPEG, 75, out)
             android.util.Base64.encodeToString(out.toByteArray(), android.util.Base64.NO_WRAP)
+        }
+    }
+
+    // ---- 🎯 Achar sozinho: lê o número na tela do jogo (reconhecimento de texto do aparelho, sem internet) e refina sozinho ----
+
+    private val ocr by lazy { com.google.mlkit.vision.text.TextRecognition.getClient(com.google.mlkit.vision.text.latin.TextRecognizerOptions.DEFAULT_OPTIONS) }
+
+    /** Números na tela com o lugar de cada um (em pixels da tela de verdade). */
+    private suspend fun screenNumbers(): List<Pair<Long, android.graphics.Rect>> {
+        val png = screenPng()
+        return withContext(Dispatchers.Default) {
+            val bmp = android.graphics.BitmapFactory.decodeByteArray(png, 0, png.size) ?: throw IOException("o print veio vazio")
+            val text = com.google.android.gms.tasks.Tasks.await(ocr.process(com.google.mlkit.vision.common.InputImage.fromBitmap(bmp, 0)))
+            text.textBlocks.flatMap { it.lines }.flatMap { it.elements }
+                .mapNotNull { e -> val n = screenNumber(e.text) ?: return@mapNotNull null; val b = e.boundingBox ?: return@mapNotNull null; n to b }
+        }
+    }
+
+    /** O número que está dentro da área (um pouco maior que onde estava: o número cresce para os lados). */
+    private fun readAt(nums: List<Pair<Long, android.graphics.Rect>>, at: android.graphics.Rect): Long? {
+        val area = android.graphics.Rect(at).apply { inset(-maxOf(at.width(), 40), -at.height() / 2) }
+        return nums.firstOrNull { (_, b) -> area.contains(b.centerX(), b.centerY()) }?.first
+    }
+
+    @Volatile private var autoJob: kotlinx.coroutines.Job? = null
+
+    fun autoFindStop() {
+        autoJob?.cancel()
+        autoJob = null
+        Session.autoFind = null
+    }
+
+    /**
+     * value: o número que a pessoa vê agora. Acha ele na tela, busca, e a cada mudança na tela refina sozinho. Com até 3
+     * resultados (e "IA pode testar valores" ligado), testa cada um: o que faz o número da tela mudar é o verdadeiro.
+     */
+    fun autoFindStart(value: String, types: Set<String>) {
+        autoFindStop()
+        Session.autoFindWinner = null
+        val target = screenNumber(value) ?: run { Session.autoFind = null; Session.status = "Digite o número que aparece na tela."; return }
+        fun say(t: String) { scope.launch(Dispatchers.Main) { if (autoJob != null) Session.autoFind = t } }
+        autoJob = scope.launch {
+            try {
+                withContext(Dispatchers.Main) { Session.autoFind = "Procurando $target na tela…"; Session.aiHidePanel = true }
+                delay(600)
+                withContext(Dispatchers.Main) { Session.aiHidePanel = false }
+                val spots = screenNumbers().filter { it.first == target }.map { it.second }.toMutableList()
+                if (spots.isEmpty()) { say("Não vi $target na tela. Deixe o número visível (painel minimizado) e tente de novo."); return@launch }
+                aiBusy { resultsText(search(types, target.toString())) }
+                Diag.add("Achar sozinho: $target em ${spots.size} lugar(es) da tela, ${Session.count} resultados")
+                var place = spots.first()
+                var last = target
+                val end = System.currentTimeMillis() + 10 * 60_000L
+                while (System.currentTimeMillis() < end) {
+                    val count = Session.count ?: 0L
+                    if (count in 1L..3L) break
+                    say("$count resultados · na tela: $last · jogue para o número mudar")
+                    delay(1200)
+                    val nums = screenNumbers()
+                    // vários lugares com o mesmo número: vale o que mudou
+                    val now = spots.map { it to readAt(nums, it) }.firstOrNull { it.second != null && it.second != last }
+                    if (now != null && spots.size > 1) { place = now.first; spots.retainAll { it == place } }
+                    val cur = readAt(nums, place) ?: continue
+                    if (cur == last) continue
+                    val r = aiBusy { resultsText(refine(followRange(last, cur))) }
+                    Diag.add("Achar sozinho: $last → $cur, ${Session.count} resultados")
+                    if ((Session.count ?: 0L) == 0L) aiBusy { resultsText(undo()) }.also { Diag.add("Achar sozinho: nenhum ficou ($r), desfeito") }
+                    last = cur
+                }
+                val finalists = list().second
+                if (finalists.size > 3) { say("10 minutos e ainda ${Session.count} resultados: o número mudou pouco. Continue pela busca normal."); return@launch }
+                if (finalists.isEmpty()) { say("Nenhum resultado ficou: o número da tela pode não estar guardado como número. Tente outro valor."); return@launch }
+                if (!Session.aiCanTest) { say("Sobraram ${finalists.size}. Ligue \"IA pode testar valores\" em Ajustes para eu descobrir o verdadeiro, ou abra cada um na Ficha."); return@launch }
+                for (h in finalists) {
+                    say("Testando 0x${h.addr}…")
+                    val old = call { d -> runCatching { d.send("read ${h.addr} ${h.type}", quiet = true).status }.getOrNull() } ?: continue
+                    val test = (old.toLongOrNull() ?: continue) + 7
+                    write(h.addr, h.type, test.toString())
+                    delay(1200)
+                    val seen = readAt(screenNumbers(), place)
+                    write(h.addr, h.type, old)  // volta como estava
+                    Diag.add("Achar sozinho: teste 0x${h.addr} = $test, a tela mostrou $seen")
+                    if (seen == test) {
+                        withContext(Dispatchers.Main) { Session.autoFindWinner = h }
+                        say("Achei: 0x${h.addr} muda o número da tela. Toque em Salvar.")
+                        return@launch
+                    }
+                }
+                say("Nenhum dos ${finalists.size} mudou a tela no teste: o número da tela é calculado de outro lugar. Abra cada um na Ficha.")
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                say("Parou: ${e.message}")
+                Diag.add("Achar sozinho parou: ${e.message}")
+            }
         }
     }
 
