@@ -948,7 +948,10 @@ class Engine private constructor(private val app: Context) {
                 (if (notes.isBlank()) "" else "\n\n=== Suas anotações deste jogo (de outras conversas) ===\n$notes") +
                 (if (server.isBlank()) "" else "\n\n=== Sinais de que o servidor ou o antitrapaça confere valores (logcat do jogo) ===\n$server")
         }
-        Assistant.ask(chat, full, question, tools, onStep).let { a ->
+        // Gemini lento demais (o relatório mostrou 40–100 s por rodada): esta pergunta vai no Groq; a medida do Gemini
+        // cai um terço a cada pulo, então ele volta a ser tentado depois de umas perguntas
+        val back = slowGeminiSkip(onStep)
+        Assistant.ask(chat, full, question, tools, onStep).also { if (back) withContext(Dispatchers.Main) { Session.aiProvider = "gemini" } }.let { a ->
             if (!Assistant.lastLimitFail) return@let a
             // a cota acabou em todas: o painel de chaves pode ter chave nova; se tiver, segue de onde parou
             if (Session.keySource.isNotBlank()) {
@@ -975,6 +978,20 @@ class Engine private constructor(private val app: Context) {
             // a IA parou por erro (cota, servidor, chave, conexão): relatório na planilha, no máximo um a cada 10 min
             if (Assistant.lastLimitFail || AI_ERRORS.any { e -> it.startsWith(e) }) sendReport("a IA deu erro: ${it.take(100).replace('\n', ' ')}", auto = true)
         }
+    }
+
+    private suspend fun slowGeminiSkip(onStep: (String) -> Unit): Boolean {
+        if (Session.aiProvider != "gemini" || !Session.aiReserve || Session.groqKeys.isEmpty() || !Session.geminiAutoModel) return false
+        val m = pickGemini(Session.geminiModels, Session.geminiSpeed) ?: return false
+        val ms = Session.geminiSpeed[m] ?: return false
+        if (ms < 60_000) return false
+        withContext(Dispatchers.Main) {
+            Session.geminiSpeed[m] = ms * 2 / 3
+            Session.aiProvider = "groq"
+        }
+        Diag.add("Gemini lento (${m}: ${ms / 1000} s por rodada): esta pergunta vai no Groq")
+        onStep("⚡ Gemini lento: esta pergunta vai no Groq")
+        return true
     }
 
     private val notesFile get() = savedPkg?.let { File(app.filesDir, "notas-$it.txt") }
@@ -1497,6 +1514,9 @@ class Engine private constructor(private val app: Context) {
         AiTool("procurar_classes", "Procura classes do jogo pelo nome da classe E pelo nome dos campos (ex.: gold acha PlayerData que tem o campo Gold). " +
             "Devolve até 80 (as do próprio jogo primeiro), com os campos que bateram.",
             mapOf("palavras" to "palavras separadas por espaço, em inglês como no código do jogo (gold coin gem hp health)"), listOf("palavras")) { a ->
+            // motor próprio (C++): não há classes; no DYSMANTLE a IA gastou 3 rodadas procurando
+            if (Session.engine?.il2cpp != true) return@AiTool "Este jogo não é Unity IL2CPP (${Session.engine ?: "motor ?"}): não há classes nem campos com nome. " +
+                "Use ver_endereco e o_que_muda em volta de um valor achado, buscas por valor e AOB."
             val words = searchWords(a.optString("palavras"))
             val all = listClasses()
             val hit = all.mapNotNull { c -> classMatch(c, words)?.let { c to it } }

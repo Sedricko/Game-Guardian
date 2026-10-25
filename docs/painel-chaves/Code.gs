@@ -15,6 +15,14 @@ function onOpen() {
   abaPedidos_();  // a aba Pedidos já fica pronta para usar
 }
 
+// aba Pedidos: ao escolher o Tipo, a hora entra sozinha em Quando
+function onEdit(e) {
+  const s = e && e.range && e.range.getSheet();
+  if (!s || s.getName() !== PEDIDOS || e.range.getColumn() !== 2 || e.range.getRow() < 2) return;
+  const q = s.getRange(e.range.getRow(), 1);
+  if (!q.getValue()) q.setValue(new Date());
+}
+
 function abrirPainel() {
   const html = HtmlService.createHtmlOutputFromFile('Painel').setWidth(900).setHeight(640);
   SpreadsheetApp.getUi().showModalDialog(html, 'Chaves do Tinker');
@@ -362,10 +370,13 @@ function analisar() {
   if (!s || s.getLastRow() < 2) return;
   const rows = s.getRange(2, 1, s.getLastRow() - 1, 5).getValues();
   const grupos = {};
+  const vistos = new Set();  // o mesmo erro (mesma hora) vem em vários relatórios seguidos: conta uma vez só
   rows.forEach(r => {
     const quando = r[0] instanceof Date ? r[0] : new Date(r[0]);
     linhas2_(r[4]).forEach(l => {
       if (/^=+|^\(|^Nenhum erro/.test(l)) return;
+      if (vistos.has(l)) return;
+      vistos.add(l);
       const msg = l.replace(/^\d\d\/\d\d \S+ /, '');  // tira data e hora
       const chave = msg.replace(/0x[0-9a-f]+/gi, '0x…').replace(/\b[0-9a-f]{8,}\b/gi, '…').replace(/\d+/g, '#').slice(0, 200);
       const g = grupos[chave] || (grupos[chave] = { vezes: 0, jogos: new Set(), versoes: new Set(), primeira: quando, ultima: quando, exemplo: msg });
