@@ -269,9 +269,22 @@ function tabela_(nome, rows) {
   s.clear();
   const cols = rows[0].length;
   if (s.getMaxColumns() < cols) s.insertColumnsAfter(s.getMaxColumns(), cols - s.getMaxColumns());
-  s.getRange(1, 1, rows.length, cols).setNumberFormat('@').setValues(rows);
+  s.getRange(1, 1, rows.length, cols).setNumberFormat('@').setValues(rows.map(r => r.map(texto_)));
   s.getRange(1, 1, 1, cols).setFontWeight('bold');
   s.setFrozenRows(1);
+  linhaFina_(s, 2, rows.length - 1, cols);
+}
+
+// texto que começa com = + - @ vira fórmula (#ERROR!) mesmo em célula de texto: o apóstrofo segura como texto
+function texto_(v) {
+  return typeof v === 'string' && /^[=+\-@]/.test(v) ? "'" + v : v;
+}
+
+// texto grande não estica a linha: fica numa linha só (o conteúdo inteiro aparece ao clicar na célula)
+function linhaFina_(s, linha, n, cols) {
+  if (n < 1) return;
+  s.getRange(linha, 1, n, cols).setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP).setVerticalAlignment('top').setFontWeight('normal');
+  s.setRowHeightsForced(linha, n, 21);
 }
 
 function linhas2_(t) {
@@ -325,8 +338,8 @@ function guardarRelatorio_(r) {
   const row = [new Date(), String(r.jogo || ''), String(r.versao || ''), String(r.motivo || ''), String(r.problemas || '').slice(0, 5000)].concat(partes);
   s.insertRowAfter(1);  // o mais novo em cima
   s.getRange(2, 2, 1, RCOLS.length - 1).setNumberFormat('@');
-  // texto que começa com = + - @ vira fórmula (#ERROR!) mesmo em célula de texto: o apóstrofo segura como texto
-  s.getRange(2, 1, 1, RCOLS.length).setValues([row.map(v => typeof v === 'string' && /^[=+\-@]/.test(v) ? "'" + v : v)]);
+  s.getRange(2, 1, 1, RCOLS.length).setValues([row.map(texto_)]);
+  linhaFina_(s, 2, 1, RCOLS.length);  // a linha nova herdava o negrito e o tamanho do cabeçalho
   if (s.getLastRow() > 201) s.deleteRows(202, s.getLastRow() - 201);  // guarda os 200 últimos
 }
 
