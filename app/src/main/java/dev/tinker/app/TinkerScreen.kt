@@ -1453,59 +1453,69 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                     return clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(clipCtx)?.toString().orEmpty().trim()
                 }
                 val noClip = "Não consegui ler a área de transferência. Copie a chave de novo, ou abra o Tinker pelo ícone e cole na tela principal."
-                // várias chaves por provedor: quando a cota de uma acaba (ou ela é recusada), o Tinker passa para a próxima sozinho
-                val keys = if (gemini) s.geminiKeys else s.groqKeys
-                val current = if (gemini) s.geminiKeyIndex else s.groqKeyIndex
-                Text("Chaves do ${if (gemini) "Gemini" else "Groq"} (quando a cota de uma acaba, o Tinker passa para a próxima):", style = MaterialTheme.typography.bodySmall)
-                keys.forEachIndexed { i, k ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        // a chave numa linha e o resto embaixo, menor: tudo junto em letra de máquina quebrava em 3 linhas
-                        Column(Modifier.weight(1f)) {
-                            Text("${i + 1}. ${k.take(4)}…${k.takeLast(4)}" + if (i == current) "  · em uso" else "",
-                                fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodyMedium,
-                                color = if (i == current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
-                            Text(listOfNotNull(
-                                if (gemini) "${s.geminiUse[i] ?: 0} pedidos hoje" else null,
-                                if (gemini) s.geminiOut[i]?.let { "cota acabou às $it" } else null,
-                                if (k in s.sheetKeys || k in s.sheetGroqKeys) "do painel" else "posta no app",
-                            ).joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Section("Chaves do ${if (gemini) "Gemini" else "Groq"}", "${(if (gemini) s.geminiKeys else s.groqKeys).size} chaves", startOpen = (if (gemini) s.geminiKeys else s.groqKeys).isEmpty()) {
+                    // várias chaves por provedor: quando a cota de uma acaba (ou ela é recusada), o Tinker passa para a próxima sozinho
+                    val keys = if (gemini) s.geminiKeys else s.groqKeys
+                    val current = if (gemini) s.geminiKeyIndex else s.groqKeyIndex
+                    Text("Quando a cota de uma acaba, o Tinker passa para a próxima.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    keys.forEachIndexed { i, k ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            // a chave numa linha e o resto embaixo, menor: tudo junto em letra de máquina quebrava em 3 linhas
+                            Column(Modifier.weight(1f)) {
+                                Text("${i + 1}. ${k.take(4)}…${k.takeLast(4)}" + if (i == current) "  · em uso" else "",
+                                    fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodyMedium,
+                                    color = if (i == current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                                Text(listOfNotNull(
+                                    if (gemini) "${s.geminiUse[i] ?: 0} pedidos hoje" else null,
+                                    if (gemini) s.geminiOut[i]?.let { "cota acabou às $it" } else null,
+                                    if (k in s.sheetKeys || k in s.sheetGroqKeys) "do painel" else "posta no app",
+                                ).joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            if (i != current) TextButton(onClick = { if (gemini) s.geminiKeyIndex = i else s.groqKeyIndex = i; engine.saveSettings() }) { Text("Usar") }
+                            TextButton(onClick = { engine.removeKey(s.aiProvider, i) }) { Text("✕") }
                         }
-                        if (i != current) TextButton(onClick = { if (gemini) s.geminiKeyIndex = i else s.groqKeyIndex = i; engine.saveSettings() }) { Text("Usar") }
-                        TextButton(onClick = { engine.removeKey(s.aiProvider, i) }) { Text("✕") }
                     }
+                    if (keys.isEmpty()) Text(if (gemini) "Nenhuma chave ainda." else "Nenhuma chave ainda. Crie em console.groq.com (API Keys).", style = MaterialTheme.typography.bodySmall)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedTextField(newKey, { newKey = it }, label = { Text("Novas chaves do ${if (gemini) "Gemini" else "Groq"} (pode colar várias)") },
+                            placeholder = { Text(if (gemini) "AIza… ou AQ.…" else "gsk_…") }, maxLines = 3,
+                            visualTransformation = PasswordVisualTransformation(), modifier = Modifier.weight(1f))
+                        // no menu flutuante o Android não mostra "Colar" ao segurar o campo: o botão lê a área de transferência direto
+                        Button(onClick = { val t = clipRaw(); if (t.isEmpty()) keyInfo = noClip else newKey = t }) { Text("Colar") }
+                    }
+                    Button(onClick = { keyInfo = engine.addKeys(s.aiProvider, newKey); newKey = "" }, enabled = newKey.isNotBlank()) { Text("+ Adicionar") }
                 }
-                if (keys.isEmpty()) Text(if (gemini) "Nenhuma chave ainda." else "Nenhuma chave ainda. Crie em console.groq.com (API Keys).", style = MaterialTheme.typography.bodySmall)
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    OutlinedTextField(newKey, { newKey = it }, label = { Text("Novas chaves do ${if (gemini) "Gemini" else "Groq"} (pode colar várias)") },
-                        placeholder = { Text(if (gemini) "AIza… ou AQ.…" else "gsk_…") }, maxLines = 3,
-                        visualTransformation = PasswordVisualTransformation(), modifier = Modifier.weight(1f))
-                    // no menu flutuante o Android não mostra "Colar" ao segurar o campo: o botão lê a área de transferência direto
-                    Button(onClick = { val t = clipRaw(); if (t.isEmpty()) keyInfo = noClip else newKey = t }) { Text("Colar") }
+                Section("Painel de chaves (planilha)", if (s.keySource.isBlank()) "desligado" else "ligado: chaves e aprendizado vêm de lá", startOpen = s.keySource.isBlank()) {
+                    // painel de chaves numa planilha do Google (docs/painel-chaves): o app pega as chaves de lá sozinho
+                    Text("Painel de chaves (Google Planilhas): o Tinker pega as chaves ativas do Gemini e do Groq ao abrir e quando a cota de todas acaba.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedTextField(s.keySource, { s.keySource = it.trim(); engine.saveSettings() }, label = { Text("Link do painel") },
+                            placeholder = { Text("https://script.google.com/…") }, singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(), modifier = Modifier.weight(1f))
+                        Button(onClick = { val t = clipText(); if (t.isEmpty()) keyInfo = noClip else { s.keySource = t; engine.saveSettings(); scope.launch { keyInfo = engine.syncKeys() } } }) { Text("Colar") }
+                    }
+                    if (s.keySource.isNotBlank()) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedButton(onClick = { keyInfo = "Lendo o painel…"; scope.launch { keyInfo = engine.syncKeys() } }) { Text("Atualizar do painel") }
+                        TextButton(onClick = { s.keySource = ""; engine.saveSettings() }) { Text("Desligar painel") }
                 }
-                Button(onClick = { keyInfo = engine.addKeys(s.aiProvider, newKey); newKey = "" }, enabled = newKey.isNotBlank()) { Text("+ Adicionar") }
-                // painel de chaves numa planilha do Google (docs/painel-chaves): o app pega as chaves de lá sozinho
-                Text("Painel de chaves (Google Planilhas): o Tinker pega as chaves ativas do Gemini e do Groq ao abrir e quando a cota de todas acaba.",
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    OutlinedTextField(s.keySource, { s.keySource = it.trim(); engine.saveSettings() }, label = { Text("Link do painel") },
-                        placeholder = { Text("https://script.google.com/…") }, singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(), modifier = Modifier.weight(1f))
-                    Button(onClick = { val t = clipText(); if (t.isEmpty()) keyInfo = noClip else { s.keySource = t; engine.saveSettings(); scope.launch { keyInfo = engine.syncKeys() } } }) { Text("Colar") }
-                }
-                if (s.keySource.isNotBlank()) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    OutlinedButton(onClick = { keyInfo = "Lendo o painel…"; scope.launch { keyInfo = engine.syncKeys() } }) { Text("Atualizar do painel") }
-                    TextButton(onClick = { s.keySource = ""; engine.saveSettings() }) { Text("Desligar painel") }
                 }
                 keyInfo?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
-                if (gemini) GeminiModels(engine) else GroqModels(engine)
-                Toggle("Trocar de provedor sozinho", "Sem cota ou com o servidor cheio, segue no outro provedor (Gemini ↔ Groq), se ele tiver chave.", s.aiReserve) {
-                    s.aiReserve = it; engine.saveSettings()
+                Section("Modelo", if (gemini) s.geminiModel else s.groqModel.ifEmpty { "escolhido sozinho" }) {
+                    if (gemini) GeminiModels(engine) else GroqModels(engine)
+                    Toggle("Trocar de provedor sozinho", "Sem cota ou com o servidor cheio, segue no outro provedor (Gemini ↔ Groq), se ele tiver chave.", s.aiReserve) {
+                        s.aiReserve = it; engine.saveSettings()
                 }
-                Toggle("Modo autônomo: aplicar sozinha", "A IA aplica, congela, testa e cria receitas sem esperar o seu toque. " +
-                    "O ↶ Desfazer continua na tela.", s.aiAuto) { s.aiAuto = it; engine.saveSettings() }
-                Toggle("Modo autônomo: controlar o jogo", "A IA toca e arrasta na tela do jogo para fazer o valor mudar e acha sozinha. " +
-                    "Toque bloqueado se outra coisa (compra na Play Store, anúncio) estiver na frente; mesmo assim, use em jogos sem compras " +
-                    "ou com senha na Play Store. ⏹ Parar a qualquer momento.", s.aiControl) { s.aiControl = it; engine.saveSettings() }
+                }
+                Section("Autonomia", listOfNotNull("testa".takeIf { s.aiCanTest }, "aplica sozinha".takeIf { s.aiAuto }, "controla o jogo".takeIf { s.aiControl }).joinToString(" · ").ifEmpty { "só sugere" }) {
+                    Toggle("IA pode testar valores", "Para saber se um resultado é o verdadeiro, ela escreve um valor de teste por 2 segundos e depois volta o original. " +
+                        "Desligado: ela só olha.", s.aiCanTest) { s.aiCanTest = it; engine.saveSettings() }
+                    Toggle("Modo autônomo: aplicar sozinha", "A IA aplica, congela, testa e cria receitas sem esperar o seu toque. " +
+                        "O ↶ Desfazer continua na tela.", s.aiAuto) { s.aiAuto = it; engine.saveSettings() }
+                    Toggle("Modo autônomo: controlar o jogo", "A IA toca e arrasta na tela do jogo para fazer o valor mudar e acha sozinha. " +
+                        "Toque bloqueado se outra coisa (compra na Play Store, anúncio) estiver na frente; mesmo assim, use em jogos sem compras " +
+                        "ou com senha na Play Store. ⏹ Parar a qualquer momento.", s.aiControl) { s.aiControl = it; engine.saveSettings() }
+                }
                 // o que a IA aprendeu (lições gerais + notas deste jogo): ver e apagar
                 var showLessons by remember { mutableStateOf(false) }
                 // abrir arquivo só na tela principal: o painel flutuante não recebe resultado de outra tela
@@ -1552,8 +1562,6 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                         openMemory?.let { l -> OutlinedButton(onClick = { l.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }) { Text("Abrir arquivo") } }
                     }
                 }
-                Toggle("IA pode testar valores", "Para saber se um resultado é o verdadeiro, ela escreve um valor de teste por 2 segundos e depois volta o original. " +
-                    "Desligado: ela só olha.", s.aiCanTest) { s.aiCanTest = it; engine.saveSettings() }
             }
         }
         item {
@@ -1802,6 +1810,28 @@ private fun KnownFields(engine: Engine) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         values.sortedBy { it.second == "0" }.take(16).forEach { (addr, v) ->
             FilterChip(selected = addr == item.addr, onClick = { msg = engine.retarget(item, addr); open = null }, label = { Text(v, maxLines = 1) })
+        }
+    }
+}
+
+/** Bloco de Ajustes que abre e fecha: título, resumo do que está escolhido e o conteúdo. A lista de Ajustes estava enorme. */
+@Composable
+private fun Section(title: String, summary: String = "", startOpen: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
+    var open by androidx.compose.runtime.saveable.rememberSaveable(title) { mutableStateOf(startOpen) }
+    Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
+        Column {
+            Row(
+                Modifier.fillMaxWidth().sizeIn(minHeight = 48.dp).clickable { open = !open }.padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(title, style = MaterialTheme.typography.titleSmall)
+                    if (summary.isNotEmpty()) Text(summary, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Text(if (open) "▾" else "▸", color = MaterialTheme.colorScheme.primary)
+            }
+            if (open) Column(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
         }
     }
 }

@@ -38,8 +38,14 @@ class MainActivity : ComponentActivity() {
     private var waitingPermission = false
 
     // voltou da tela de permissão já com ela dada: abre o menu flutuante sozinho
+    override fun onPause() {
+        super.onPause()
+        Session.appVisible = false
+    }
+
     override fun onResume() {
         super.onResume()
+        Session.appVisible = true
         if (waitingPermission && Settings.canDrawOverlays(this)) {
             waitingPermission = false
             openOverlay()

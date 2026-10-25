@@ -78,6 +78,8 @@ class OverlayService : Service() {
         // o jogo fechou sozinho: abre o painel com a pergunta "Reabrir o jogo?", como o GameGuardian
         // trocou o lado do painel em Ajustes: muda na hora
         watch.launch { snapshotFlow { Session.panelLeft }.collect { relayout() } }
+        // a tela principal do Tinker aberta: a bolinha some dela e volta quando sai
+        watch.launch { snapshotFlow { Session.appVisible }.collect { v -> bubble?.visibility = if (v) android.view.View.GONE else android.view.View.VISIBLE } }
         watch.launch {
             snapshotFlow { Session.gameGone }.collect { gone ->
                 if (gone != null && panel == null && !Session.gameGoneByUser) {
@@ -134,6 +136,7 @@ class OverlayService : Service() {
             ) { Image(painterResource(R.drawable.ic_launcher_foreground), contentDescription = "Abrir Tinker", modifier = Modifier.size(56.dp)) }
         }
         bubble = view
+        if (Session.appVisible) view.visibility = android.view.View.GONE
         wm.addView(view, bubbleParams)
     }
 

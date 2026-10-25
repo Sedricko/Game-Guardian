@@ -221,6 +221,7 @@ object Session {
     var paused by mutableStateOf(false)
     var alpha by mutableFloatStateOf(0.92f)
     var panelSize by mutableIntStateOf(2)  // índice em PANEL_SIZES; padrão: tela cheia
+    var appVisible by mutableStateOf(false)  // a tela principal do Tinker está na frente: a bolinha some (ficava por cima dos Ajustes)
     var panelLeft by mutableStateOf(false)  // tela deitada: painel à esquerda (padrão: à direita)
     var panelWide by mutableStateOf(false)  // o painel está de lado agora (tela deitada, menor que a tela cheia)
     var peek by mutableStateOf(false)
