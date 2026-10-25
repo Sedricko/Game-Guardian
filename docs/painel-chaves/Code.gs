@@ -265,7 +265,10 @@ function juntarLinhas_(a, b) {
 }
 
 function juntarMemoria_(velha, nova) {
-  const m = { tinker: 'memoria-ia', versao: 2, licoes: juntarLinhas_(velha.licoes, nova.licoes), jogos: {} };
+  // apagado em qualquer instância sai de todas (salvos e receitas, pela id) e não volta
+  const apagados = Array.from(new Set((velha.apagados || []).concat(nova.apagados || []))).slice(-2000);
+  const fora = new Set(apagados);
+  const m = { tinker: 'memoria-ia', versao: 2, licoes: juntarLinhas_(velha.licoes, nova.licoes), jogos: {}, apagados: apagados };
   const pkgs = new Set(Object.keys(velha.jogos || {}).concat(Object.keys(nova.jogos || {})));
   pkgs.forEach(pkg => {
     const a = (velha.jogos || {})[pkg] || {}, b = (nova.jogos || {})[pkg] || {};
@@ -276,7 +279,8 @@ function juntarMemoria_(velha, nova) {
       const igual = salvos.findIndex(x => x.id === v.id || (v.il2 && x.il2 === v.il2) || (v.name && x.name === v.name && x.type === v.type));
       salvos[igual < 0 ? salvos.length : igual] = igual < 0 ? consenso_(null, v) : consenso_(salvos[igual], v);
     });
-    m.jogos[pkg] = { nome: b.nome || a.nome || pkg, notas: juntarLinhas_(a.notas, b.notas), receitas: receitas, salvos: salvos };
+    m.jogos[pkg] = { nome: b.nome || a.nome || pkg, notas: juntarLinhas_(a.notas, b.notas),
+      receitas: receitas.filter(r => !fora.has(r.id)), salvos: salvos.filter(v => !fora.has(v.id)) };
   });
   return m;
 }

@@ -999,7 +999,7 @@ class Engine private constructor(private val app: Context) {
     }.filter { it.notes.isNotBlank() || it.recipes > 0 || it.saved > 0 }
 
     /** Toda a memória (lições + perfil de cada jogo) em JSON, para backup e exportação. */
-    fun memoryJson(): String = JSONObject().put("tinker", "memoria-ia").put("versao", 2)
+    fun memoryJson(): String = JSONObject().put("tinker", "memoria-ia").put("versao", 2).put("apagados", JSONArray(deleted().toList()))
         .put("criado", java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US).format(java.util.Date()))
         .put("licoes", lessons())
         .put("jogos", JSONObject().apply {
@@ -1020,6 +1020,20 @@ class Engine private constructor(private val app: Context) {
         val j = runCatching { JSONObject(text) }.getOrNull()?.takeIf { it.optString("tinker") == "memoria-ia" }
             ?: return "Não é uma memória do Tinker (arquivo tinker-memoria-ia.json)."
         lessonsFile.writeText(mergeLines(lessons(), j.optString("licoes")))
+        // apagado em outra instância: apaga aqui também (e não volta)
+        val gone = j.optJSONArray("apagados")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty().filter { it.isNotEmpty() }
+        if (gone.isNotEmpty()) {
+            prefs.edit().putStringSet("apagados", (deleted() + gone).toList().takeLast(2000).toSet()).apply()
+            val g = gone.toSet()
+            if (Session.saved.any { it.id in g }) { Session.saved.removeAll { it.id in g }; storeSaved() }
+            if (Session.recipes.any { it.id in g }) { Session.recipes.removeAll { it.id in g }; storeRecipes() }
+            libraryPkgs().filter { it != savedPkg }.forEach { pkg ->
+                val sf = File(app.filesDir, "saved-$pkg.json")
+                val a = jsonFile("saved-$pkg.json")
+                val keep = JSONArray().apply { for (i in 0 until a.length()) a.optJSONObject(i)?.takeIf { it.optString("id") !in g }?.let { put(it) } }
+                if (keep.length() != a.length()) sf.writeText(keep.toString())
+            }
+        }
         // versão 1 tinha só "notas" (texto por jogo); a 2 tem "jogos" com notas, receitas e salvos
         val games = j.optJSONObject("jogos") ?: JSONObject().apply { j.optJSONObject("notas")?.let { n -> n.keys().forEach { put(it, JSONObject().put("notas", n.optString(it))) } } }
         var count = 0; var recipes = 0; var saved = 0
@@ -1043,7 +1057,9 @@ class Engine private constructor(private val app: Context) {
     private fun mergeRecipes(pkg: String, a: JSONArray): Int {
         val current = pkg == savedPkg
         val have = if (current) Session.recipes.toList() else jsonFile("recipes-$pkg.json").let { x -> (0 until x.length()).mapNotNull { runCatching { x.getJSONObject(it).toRecipe() }.getOrNull() } }
+        val gone = deleted()
         val new = (0 until a.length()).mapNotNull { runCatching { a.getJSONObject(it).toRecipe() }.getOrNull() }
+            .filter { it.id !in gone }
             .filter { r -> have.none { it.id == r.id || it.name == r.name } }.distinctBy { it.name }
         if (new.isEmpty()) return 0
         if (current) { Session.recipes.addAll(new); storeRecipes() }
@@ -1055,7 +1071,9 @@ class Engine private constructor(private val app: Context) {
     private fun mergeSaved(pkg: String, a: JSONArray): Int {
         val current = pkg == savedPkg
         val have = if (current) Session.saved.toList() else jsonFile("saved-$pkg.json").let { x -> (0 until x.length()).mapNotNull { runCatching { x.getJSONObject(it).toSaved() }.getOrNull() } }
+        val gone = deleted()
         val new = (0 until a.length()).mapNotNull { runCatching { a.getJSONObject(it).toSaved().copy(pid = -1, frozen = false) }.getOrNull() }
+            .filter { it.id !in gone }
             .filter { s -> have.none { it.id == s.id || (s.il2.isNotEmpty() && it.il2 == s.il2) || (s.name.isNotEmpty() && it.name == s.name && it.type == s.type) } }
         if (new.isEmpty()) return 0
         if (current) { Session.saved.addAll(new); storeSaved() }
@@ -1758,7 +1776,7 @@ class Engine private constructor(private val app: Context) {
     suspend fun undoAi(u: AiUndo): String {
         Session.aiUndo.remove(u)
         if (u.pid != currentPid) return "O jogo reabriu depois dessa edição: não dá para desfazer no endereço antigo."
-        u.savedId?.let { id -> Session.saved.removeAll { it.id == id } }
+        u.savedId?.let { id -> markDeleted(listOf(id)); Session.saved.removeAll { it.id == id } }
         // salvo que já existia volta como estava (congelado ou não, com o valor dele)
         if (u.before != null) Session.saved.replaceAll { if (it.id == u.before.id) it.copy(frozen = u.before.frozen, value = u.before.value) else it }
         write(u.addr, u.type, u.old)
@@ -1882,6 +1900,7 @@ class Engine private constructor(private val app: Context) {
     }
 
     fun deleteRecipe(r: Recipe) {
+        markDeleted(listOf(r.id))
         Session.recipes.removeAll { it.id == r.id }
         storeRecipes()
     }
@@ -2525,8 +2544,21 @@ class Engine private constructor(private val app: Context) {
         storeSaved()
     }
 
+    /**
+     * Apagados (salvos e receitas, pela id): vão junto no banco para a planilha e as outras instâncias apagarem também.
+     * Sem isso, o que você apagava voltava na próxima vez que o app juntava com a planilha.
+     */
+    private fun deleted(): Set<String> = prefs.getStringSet("apagados", emptySet()).orEmpty()
+
+    private fun markDeleted(ids: Collection<String>) {
+        if (ids.isEmpty()) return
+        prefs.edit().putStringSet("apagados", (deleted() + ids).toList().takeLast(2000).toSet()).apply()
+        backupMemorySoon()
+    }
+
     fun removeSaved(items: List<SavedItem>) {
         val gone = items.map { it.id }.toSet()
+        markDeleted(gone)
         Session.saved.removeAll { it.id in gone }
         // quem seguia um removido fica solto, no endereço atual
         Session.saved.replaceAll { if (it.anchor in gone) it.copy(anchor = "", offset = 0) else it }
