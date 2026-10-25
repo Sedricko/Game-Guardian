@@ -24,7 +24,7 @@ Responder sempre em **português do Brasil**, curto e direto. O usuário testa n
 | Planilha | `docs/painel-chaves/Code.gs`, `Painel.html`, `LEIAME.md` | App da Web: chaves, Pedidos, Aparelhos, Buscas, Relatórios, Problemas, Salvos, Receitas, Patches |
 
 Versões: `app/build.gradle.kts` (`versionCode`/`versionName`), `VERSAO` no Code.gs, `SCRIPT_VERSION` no Engine.kt (versão **mínima** do script que o app exige).
-Estado em 2026-10: app **2.36.0** (code 107), script **v15**, app exige v14.
+Estado em 2026-10: app **2.36.2** (code 109; Groq troca de chave pelos cabeçalhos x-ratelimit, Gemini aprende o limite diário por modelo em `geminiLimit`), script **v15**, app exige v14.
 
 ## Armadilhas já resolvidas (não repetir)
 - `Engine.call { d -> }` **não é suspend dentro do bloco**: nada de `delay`/`withContext` lá dentro; divida em várias chamadas.
