@@ -122,6 +122,22 @@ function Send-Shots($v) {
     } catch { Say "nao tirei os prints: $($_.Exception.Message)" }
 }
 
+# o link da planilha (salvo so neste PC) vai para o Tinker do emulador pelo adb root, com o app fechado
+function Set-PanelLink {
+    $link = (Get-Content $cfg -ErrorAction SilentlyContinue | Select-Object -First 1)
+    if (-not $link) { return }
+    $f = "/data/data/$app/shared_prefs/tinker.xml"
+    $xml = (& $adb shell cat $f 2>$null) -join "`n"
+    if (-not $xml.Contains("</map>") -or $xml.Contains($link.Trim())) { return }
+    $xml = $xml -replace '\s*<string name="keySource"\s*/>', '' -replace '\s*<string name="keySource">[^<]*</string>', ''
+    $xml = $xml.Replace("</map>", "    <string name=`"keySource`">$([Security.SecurityElement]::Escape($link.Trim()))</string>`n</map>")
+    $tmp = "$env:TEMP\tinker-prefs.xml"
+    [IO.File]::WriteAllText($tmp, $xml, (New-Object Text.UTF8Encoding $false))
+    & $adb push $tmp /data/local/tmp/tinker-prefs.xml | Out-Null
+    & $adb shell "cat /data/local/tmp/tinker-prefs.xml > $f; rm /data/local/tmp/tinker-prefs.xml"
+    Say "link da planilha colocado no Tinker do emulador"
+}
+
 function Test-Version {
     $rel = Invoke-RestMethod "https://api.github.com/repos/Sedricko/Game-Guardian/releases/latest" -Headers (Hdr)
     $v = $rel.tag_name.TrimStart("v")
@@ -141,6 +157,7 @@ function Test-Version {
     & $adb logcat -b crash -c
     & $adb shell rm -f /data/data/$app/files/autoteste.txt
     & $adb shell am force-stop $app
+    Set-PanelLink
     & $adb shell am start -n "$app/.MainActivity" --ez autoteste true | Out-Null
     Say "testando (ate 4 min)..."
     $out = $null
