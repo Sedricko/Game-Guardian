@@ -125,7 +125,10 @@ function Send-Shots($v) {
 function Test-Version {
     $rel = Invoke-RestMethod "https://api.github.com/repos/Sedricko/Game-Guardian/releases/latest" -Headers (Hdr)
     $v = $rel.tag_name.TrimStart("v")
-    if ((Get-Content $done -ErrorAction SilentlyContinue) -eq $v) { return }
+    if ((Get-Content $done -ErrorAction SilentlyContinue) -eq $v) {
+        if ((Get-Date).Minute % 10 -lt 2) { Say "sem versao nova (ultima testada: $v)" }  # sinal de vida a cada ~10 min
+        return
+    }
     Say "=== Tinker $v ==="
     Get-Apk ($rel.assets | Where-Object name -like "*.apk" | Select-Object -First 1) "$env:TEMP\Tinker.apk"
     $inst = (& $adb install -r "$env:TEMP\Tinker.apk") -join " "

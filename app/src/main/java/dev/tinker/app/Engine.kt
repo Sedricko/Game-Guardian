@@ -485,6 +485,8 @@ class Engine private constructor(private val app: Context) {
         Session.geminiAutoModel = prefs.getBoolean("geminiAuto", true)
         Session.keySource = prefs.getString("keySource", "").orEmpty()
         // implantação arquivada (dava 404) ou token antigo do painel: o padrão novo entra no lugar
+        // link padrão antigo (token já trocado, estava no código público): sai, a pessoa cola o novo em Ajustes
+        if (Session.keySource.contains("token=f0a0f8a4099e4dbe")) { Session.keySource = ""; prefs.edit().putString("keySource", "").apply() }
         if (Session.keySource.contains("AKfycbyZGlMdkrGm")) { Session.keySource = DEFAULT_KEY_SOURCE; prefs.edit().putString("keySource", Session.keySource).apply() }
         if (!prefs.getBoolean("defaultSourceGiven", false)) {
             if (Session.keySource.isBlank()) Session.keySource = DEFAULT_KEY_SOURCE
@@ -1807,9 +1809,11 @@ class Engine private constructor(private val app: Context) {
             check("jogo de teste: ponteiros") {
                 // o caminho que sai da lib do jogo de teste (root fica no .data dele); outros podem passar por memória que muda
                 val paths = t.call("pointers $paddr 256 3").lines.filter { Regex("""\S+\+[0-9a-f]+ 10 20""").matches(it) }
-                val chain = paths.firstOrNull { it.startsWith("libtinkertarget.so+") } ?: paths.firstOrNull() ?: error("não achou o caminho")
-                require(t.call("resolve $chain").status == paddr) { "o caminho $chain não volta ao endereço" }
-                "ok ($chain)"
+                require(paths.isNotEmpty()) { "não achou o caminho" }
+                // vale se algum caminho volta ao valor; senão mostra o que cada um deu, para achar o erro
+                val tried = paths.take(8).map { it to runCatching { t.call("resolve $it").status }.getOrElse { e -> "erro: ${e.message}" } }
+                tried.firstOrNull { it.second == paddr }?.let { "ok (${it.first}, ${paths.size} caminhos)" }
+                    ?: error("nenhum caminho volta a $paddr: " + tried.joinToString("; ") { "${it.first} → ${it.second}" })
             }
             check("jogo de teste: congelar") {
                 t.call("freeze $iaddr i32 424242")

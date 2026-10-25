@@ -2,6 +2,8 @@ name: build
 
 on:
   push:
+    # o agente do PC muda sozinho: mudança só nele não gera APK novo (e não cancela um build que está rodando)
+    paths-ignore: ['tools/pc/**']
   pull_request:
   workflow_dispatch:
 
