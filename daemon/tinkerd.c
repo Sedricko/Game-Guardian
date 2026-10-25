@@ -831,10 +831,44 @@ static void photo_chunk(size_t ci, unsigned char *buf, void *ctx) {
     posix_fadvise(photofd, (off_t)c->off, c->len, POSIX_FADV_DONTNEED);
 }
 
+// pilha das threads (pelo SP que /proc/pid/task/N/syscall mostra): sem nome no Linux, e voltar ela derruba o processo
+static uint64_t stack_sp[256];
+static int nstack_sp;
+
+static void read_thread_sps(void) {
+    nstack_sp = 0;
+    char path[64];
+    snprintf(path, sizeof path, "/proc/%d/task", target);
+    DIR *d = opendir(path);
+    if (!d) return;
+    struct dirent *e;
+    while ((e = readdir(d)) && nstack_sp < 256) {
+        if (e->d_name[0] < '0' || e->d_name[0] > '9') continue;
+        char p2[320], buf[256];
+        snprintf(p2, sizeof p2, "/proc/%d/task/%s/syscall", target, e->d_name);
+        FILE *f = fopen(p2, "r");
+        if (!f) continue;
+        if (fgets(buf, sizeof buf, f)) {
+            // "nr a1 a2 a3 a4 a5 a6 sp pc": o penúltimo é o SP (thread rodando mostra só "running")
+            char *t[9]; int n = 0;
+            for (char *q = strtok(buf, " \n"); q && n < 9; q = strtok(NULL, " \n")) t[n++] = q;
+            if (n == 9) stack_sp[nstack_sp++] = strtoull(t[7], NULL, 16);
+        }
+        fclose(f);
+    }
+    closedir(d);
+}
+
+static void add_photo_chunks(uint64_t s, uint64_t e, int region, void *ctx) {
+    for (int k = 0; k < nstack_sp; k++) if (stack_sp[k] >= s && stack_sp[k] < e) return;
+    add_chunks(s, e, region, ctx);
+}
+
 static void cmd_photo(void) {
     drop_photo();
+    read_thread_sps();
     photo.want = ranges & ~((1u << 1) | (1u << 7));  // sem J (código e cache do Java) e sem pilha: mudam sozinhos e não guardam o jogo
-    if (each_region(add_chunks, &photo)) { puts("err não leu o mapa de memória"); return; }
+    if (each_region(add_photo_chunks, &photo)) { puts("err não leu o mapa de memória"); return; }
     if (!photo.total) { puts("err nenhuma região marcada"); drop_photo(); return; }
     if (photo.total > (3ULL << 30)) {
         printf("err foto grande demais (%" PRIu64 " MB): em Ajustes deixe só Ca e A nas regiões e tente de novo\n", photo.total >> 20);
