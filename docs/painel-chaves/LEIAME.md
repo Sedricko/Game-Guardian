@@ -35,6 +35,13 @@ Quando o jogo fecha sozinho, ou quando você toca em **Compartilhar relatório**
 **Relatórios** (os 200 últimos, o mais novo em cima). O **Link de leitura** do painel devolve só os relatórios e o
 aprendizado, nunca as chaves: é o que você passa para quem for analisar os problemas.
 
+## Consenso e problemas
+
+- Salvo mandado por várias instâncias: cada caminho de ponteiro ganha um voto por aparelho (confirmado ao reabrir vale 3);
+  o mais votado vira o ponteiro sugerido. A assinatura AOB se junta byte a byte (o que muda entre aparelhos vira ??).
+- Aba **Problemas**: os erros dos relatórios agrupados, com quantas vezes, jogos, versões e quando. Refeita a cada
+  relatório; para ficar em dia de hora em hora use **Tinker → Ligar análise automática dos relatórios** (uma vez).
+
 ## Segurança
 
 - A planilha continua privada. O link só devolve as chaves para quem tem o token que vai nele.

@@ -7,6 +7,7 @@ const COLS = ['Chave', 'Nome', 'Ativa', 'Situação', 'Atualizado', 'Provedor'];
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('Tinker')
     .addItem('Abrir painel', 'abrirPainel')
+    .addItem('Ligar análise automática dos relatórios', 'ligarAnalise')
     .addItem('Gerar novo token (invalida o link antigo)', 'novoToken')
     .addToUi();
 }
@@ -256,7 +257,7 @@ function juntarMemoria_(velha, nova) {
     const salvos = (a.salvos || []).slice();
     (b.salvos || []).forEach(v => {
       const igual = salvos.findIndex(x => x.id === v.id || (v.il2 && x.il2 === v.il2) || (v.name && x.name === v.name && x.type === v.type));
-      if (igual < 0) salvos.push(v); else salvos[igual] = v;  // o mais novo vale (ponteiros e assinatura melhores)
+      salvos[igual < 0 ? salvos.length : igual] = igual < 0 ? consenso_(null, v) : consenso_(salvos[igual], v);
     });
     m.jogos[pkg] = { nome: b.nome || a.nome || pkg, notas: juntarLinhas_(a.notas, b.notas), receitas: receitas, salvos: salvos };
   });
@@ -295,6 +296,68 @@ function relatorios_(n) {
   }));
 }
 
+// Consenso entre instâncias: cada caminho de ponteiro ganha um voto por aparelho que o mandou; o mais votado vira o
+// sugerido. A assinatura AOB se junta byte a byte: o byte que muda de um aparelho para outro vira ?? (fica mais robusta).
+function consenso_(velho, novo) {
+  const votos = Object.assign({}, (velho && velho.votos) || {});
+  (novo.chains || []).forEach(c => { votos[c] = (votos[c] || 0) + 1; });
+  if (novo.pointer && novo.verified) votos[novo.pointer] = (votos[novo.pointer] || 0) + 3;  // confirmado ao reabrir vale mais
+  const m = Object.assign({}, velho || {}, novo);
+  m.votos = votos;
+  m.chains = Object.keys(votos).sort((x, y) => votos[y] - votos[x]).slice(0, 20);
+  if (m.chains.length && !(novo.pointer && novo.verified)) m.pointer = m.chains[0];
+  if (velho && velho.sig && novo.sig && velho.sig.length === novo.sig.length && velho.sigOff === novo.sigOff) {
+    let s = '';
+    for (let i = 0; i < novo.sig.length; i += 2) { const x = velho.sig.substr(i, 2), y = novo.sig.substr(i, 2); s += x === y ? x : '??'; }
+    if (sigUtil_(s)) m.sig = s;  // só se ainda identifica (bytes fixos suficientes)
+  }
+  return m;
+}
+
+function sigUtil_(sig) {
+  const fixos = (sig.match(/.{2}/g) || []).filter(b => b !== '??');
+  return fixos.length >= 12 && fixos.filter(b => b !== '00').length >= 4;
+}
+
+// ---- problemas: os erros dos relatórios agrupados (números e endereços tirados), para ver o que mais acontece ----
+
+function analisar() {
+  const s = SpreadsheetApp.getActive().getSheetByName(RELS);
+  if (!s || s.getLastRow() < 2) return;
+  const rows = s.getRange(2, 1, s.getLastRow() - 1, 5).getValues();
+  const grupos = {};
+  rows.forEach(r => {
+    const quando = r[0] instanceof Date ? r[0] : new Date(r[0]);
+    linhas2_(r[4]).forEach(l => {
+      if (/^=+|^\(|^Nenhum erro/.test(l)) return;
+      const msg = l.replace(/^\d\d\/\d\d \S+ /, '');  // tira data e hora
+      const chave = msg.replace(/0x[0-9a-f]+/gi, '0x…').replace(/\b[0-9a-f]{8,}\b/gi, '…').replace(/\d+/g, '#').slice(0, 200);
+      const g = grupos[chave] || (grupos[chave] = { vezes: 0, jogos: new Set(), versoes: new Set(), primeira: quando, ultima: quando, exemplo: msg });
+      g.vezes++;
+      g.jogos.add(String(r[1]));
+      g.versoes.add(String(r[2]));
+      if (quando < g.primeira) g.primeira = quando;
+      if (quando > g.ultima) { g.ultima = quando; g.exemplo = msg; }
+    });
+  });
+  const tz = Session.getScriptTimeZone();
+  const fmt = d => (d instanceof Date && !isNaN(d)) ? Utilities.formatDate(d, tz, 'dd/MM HH:mm') : '';
+  const out = [['Vezes', 'Problema', 'Jogos', 'Versões do Tinker', 'Primeira', 'Última']];
+  Object.keys(grupos).sort((x, y) => grupos[y].vezes - grupos[x].vezes).slice(0, 300).forEach(k => {
+    const g = grupos[k];
+    out.push([String(g.vezes), g.exemplo.slice(0, 500), Array.from(g.jogos).join(', '), Array.from(g.versoes).join(', '), fmt(g.primeira), fmt(g.ultima)]);
+  });
+  tabela_('Problemas', out);
+}
+
+// gatilho de hora em hora (menu Tinker): a aba Problemas fica em dia mesmo sem relatório novo
+function ligarAnalise() {
+  ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'analisar').forEach(t => ScriptApp.deleteTrigger(t));
+  ScriptApp.newTrigger('analisar').timeBased().everyHours(1).create();
+  analisar();
+  SpreadsheetApp.getUi().alert('Análise automática ligada: a aba Problemas é refeita a cada hora e a cada relatório novo.');
+}
+
 function doPost(e) {
   const p = (e && e.parameter) || {};
   if (p.token !== token_()) return json_({ erro: 'token' });
@@ -303,7 +366,7 @@ function doPost(e) {
     try { r = JSON.parse(e.postData.contents); } catch (err) { return json_({ erro: 'json' }); }
     const lock = LockService.getScriptLock();
     lock.waitLock(20000);
-    try { guardarRelatorio_(r); } finally { lock.releaseLock(); }
+    try { guardarRelatorio_(r); analisar(); } finally { lock.releaseLock(); }
     return json_({ ok: true });
   }
   let nova;

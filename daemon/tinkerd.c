@@ -16,6 +16,7 @@
 #include <sys/statvfs.h>
 #include <sys/uio.h>
 #include <sys/utsname.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 static const struct { const char *name; int size, isfloat; } TYPES[] = {
@@ -718,6 +719,78 @@ static void cmd_write(const char *addr, const char *name, const char *value) {
     else puts("ok");
 }
 
+// Congelar dentro do daemon: uma thread reescreve a cada 100 ms, e só o que mudou. Antes o app mandava um "write"
+// por salvo a cada 200 ms pelo pipe; com muitos salvos isso dava lag e atrasava os outros comandos.
+#define FREEZE_MAX 512
+#define FREEZE_FAILS 25  // 2,5 s sem conseguir escrever: o objeto foi liberado; sai da lista (escrever ali derruba o jogo)
+typedef struct { uint64_t addr; int type, fails; unsigned char val[8]; } frz_t;
+static frz_t frz[FREEZE_MAX];
+static int nfrz;
+static pthread_mutex_t frz_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void *freeze_thread(void *arg) {
+    (void)arg;
+    for (;;) {
+        usleep(100000);
+        pthread_mutex_lock(&frz_lock);
+        int k = 0;
+        for (int i = 0; i < nfrz; i++) {
+            frz_t *f = &frz[i];
+            unsigned char cur[8];
+            int len = TYPES[B(f->type)].size;
+            // igual ao congelado: não escreve (menos mexida na memória do jogo); cifrado sempre reescreve (a chave muda)
+            if (!(f->type & XOR) && !read_mem(f->addr, cur, len) && !memcmp(cur, f->val, len)) f->fails = 0;
+            else if (store(f->addr, f->type, f->val)) f->fails++;
+            else f->fails = 0;
+            if (f->fails < FREEZE_FAILS) frz[k++] = *f;
+        }
+        nfrz = k;
+        pthread_mutex_unlock(&frz_lock);
+    }
+    return NULL;
+}
+
+static void cmd_freeze(const char *addr, const char *name, const char *value) {
+    int t = find_type(name);
+    value_t v;
+    unsigned char b[8] = {0};
+    if (t < 0) { printf("err tipo inválido: %s\n", name); return; }
+    if (!parse_value(B(t), value, &v) || v.range) { bad_value(B(t), value); return; }
+    encode(B(t), &v, b);
+    uint64_t a = strtoull(addr, NULL, 16);
+    // escreve uma vez já: endereço que não grava é recusado aqui, não fica na lista
+    if (store(a, t, b)) { printf("err falhou ao escrever: %s\n", strerror(errno)); return; }
+    pthread_mutex_lock(&frz_lock);
+    int i = 0;
+    while (i < nfrz && !(frz[i].addr == a && frz[i].type == t)) i++;
+    if (i == FREEZE_MAX) { pthread_mutex_unlock(&frz_lock); puts("err congelados demais"); return; }
+    if (i == nfrz) nfrz++;
+    frz[i] = (frz_t){a, t, 0, {0}};
+    memcpy(frz[i].val, b, sizeof b);
+    pthread_mutex_unlock(&frz_lock);
+    puts("ok");
+}
+
+// "unfreeze all" ou "unfreeze ADDR TIPO"
+static void cmd_unfreeze(const char *addr, const char *name) {
+    int all = !strcmp(addr, "all"), t = all ? 0 : find_type(name);
+    uint64_t a = all ? 0 : strtoull(addr, NULL, 16);
+    pthread_mutex_lock(&frz_lock);
+    int k = 0;
+    for (int i = 0; i < nfrz; i++) if (!all && !(frz[i].addr == a && frz[i].type == t)) frz[k++] = frz[i];
+    nfrz = k;
+    pthread_mutex_unlock(&frz_lock);
+    puts("ok");
+}
+
+// lista o que está congelado agora (o que saiu por falha não aparece: o app avisa)
+static void cmd_frozen(void) {
+    pthread_mutex_lock(&frz_lock);
+    for (int i = 0; i < nfrz; i++) printf("%" PRIx64 " %s %d\n", frz[i].addr, tname(frz[i].type), frz[i].fails);
+    printf("ok %d\n", nfrz);
+    pthread_mutex_unlock(&frz_lock);
+}
+
 static void cmd_writeall(const char *value) {
     if (snapfd >= 0) { puts("err refine mais antes de editar todos"); return; }
     size_t fail = 0, skip = 0;
@@ -1048,15 +1121,27 @@ static void aob_chunk(size_t ci, unsigned char *buf, void *ctx) {
     const chunk_t *c = &p->cs.c[ci];
     if (read_mem(c->addr, buf, c->len)) return;
     // shortcut: padrão que cruza a borda de um pedaço de 1 MB não é achado; raro com até 192 bytes
-    size_t tail = (size_t)(p->n - p->first);
-    for (size_t i = p->first; i + tail <= c->len; i++) {
-        unsigned char *q = memchr(buf + i, p->b[p->first], c->len - tail - i + 1);
+    size_t n = (size_t)p->n;
+    if (c->len < n) return;
+    // âncora: a maior sequência de bytes fixos do padrão, achada com memmem (bem mais rápido que testar byte a byte);
+    // o padrão inteiro, com os ??, só é conferido onde a âncora bate
+    size_t anc = (size_t)p->first, alen = 1;
+    for (size_t i = 0; i < n;) {
+        if (!p->m[i]) { i++; continue; }
+        size_t j = i;
+        while (j < n && p->m[j]) j++;
+        if (j - i > alen) { anc = i; alen = j - i; }
+        i = j;
+    }
+    size_t last = c->len - (n - anc);  // última posição em que a âncora ainda deixa o padrão caber
+    for (size_t i = anc; i <= last;) {
+        unsigned char *q = memmem(buf + i, last + alen - i, p->b + anc, alen);
         if (!q) break;
-        i = (size_t)(q - buf);
-        size_t start = i - p->first;
+        size_t pos = (size_t)(q - buf), start = pos - anc;
         int ok = 1;
-        for (int k = 0; k < p->n && ok; k++) ok = (buf[start + k] & p->m[k]) == p->b[k];
+        for (size_t k = 0; k < n && ok; k++) ok = (buf[start + k] & p->m[k]) == p->b[k];
         if (ok) hpush(&p->out[ci], (hit_t){c->addr + start, bits(buf + start, p->n < 4 ? p->n : 4), T_I32, c->region});
+        i = pos + 1;
     }
 }
 
@@ -1290,22 +1375,36 @@ static void cmd_screencap(void) {
 static void cmd_input(const char *kind, char *const args[], int n) {
     int need = !strcmp(kind, "tap") ? 2 : !strcmp(kind, "swipe") ? 5 : !strcmp(kind, "keyevent") ? 1 : -1;
     if (need < 0 || n < need) { puts("err uso: input tap X Y | input swipe X1 Y1 X2 Y2 MS | input keyevent N"); return; }
-    char cmd[160];
-    int len = snprintf(cmd, sizeof cmd, "input %s", kind);
+    char nums[5][24];
+    char *argv[8] = {"input", (char *)kind};
     for (int i = 0; i < need; i++) {
         char *end;
         long v = strtol(args[i], &end, 10);
         if (*end || end == args[i] || v < 0 || v > 100000) { printf("err número inválido: %s\n", args[i]); return; }
-        len += snprintf(cmd + len, sizeof cmd - len, " %ld", v);
+        snprintf(nums[i], sizeof nums[i], "%ld", v);
+        argv[2 + i] = nums[i];
     }
-    snprintf(cmd + len, sizeof cmd - len, " 2>&1");
-    FILE *p = popen(cmd, "r");
-    if (!p) { printf("err input indisponível: %s\n", strerror(errno)); return; }
+    argv[2 + need] = NULL;
+    // direto, sem shell no meio: um processo a menos por toque (a IA toca muito quando controla o jogo)
+    int fds[2];
+    if (pipe(fds)) { printf("err input indisponível: %s\n", strerror(errno)); return; }
+    fflush(stdout);
+    pid_t pid = fork();
+    if (pid < 0) { close(fds[0]); close(fds[1]); printf("err input indisponível: %s\n", strerror(errno)); return; }
+    if (pid == 0) {
+        dup2(fds[1], 1); dup2(fds[1], 2); close(fds[0]); close(fds[1]);
+        execvp("input", argv);
+        _exit(127);
+    }
+    close(fds[1]);
+    FILE *p = fdopen(fds[0], "r");
     char line[256];
     int said = 0;
-    while (fgets(line, sizeof line, p)) { printf("| %s", line); said = 1; }
-    int st = pclose(p);
-    if (st != 0) { printf("err o comando input falhou%s\n", said ? " (veja acima)" : ""); return; }
+    while (p && fgets(line, sizeof line, p)) { printf("| %s", line); said = 1; }
+    if (p) fclose(p); else close(fds[0]);
+    int st = 0;
+    while (waitpid(pid, &st, 0) < 0 && errno == EINTR) {}
+    if (!WIFEXITED(st) || WEXITSTATUS(st) != 0) { printf("err o comando input falhou%s\n", said ? " (veja acima)" : ""); return; }
     puts("ok");
 }
 
@@ -1357,7 +1456,9 @@ int main(void) {
     signal(SIGHUP, on_exit_signal);
     signal(SIGINT, on_exit_signal);
     char line[1024], cmd[32], a1[400], a2[128], a3[128], a4[128];
-    puts("ok tinkerd 3");
+    pthread_t ft;
+    if (!pthread_create(&ft, NULL, freeze_thread, NULL)) pthread_detach(ft);
+    puts("ok tinkerd 4");
     while (fgets(line, sizeof line, stdin)) {
         a1[0] = a2[0] = a3[0] = a4[0] = 0;
         if (sscanf(line, "%31s %399s %127s %127s %127s", cmd, a1, a2, a3, a4) < 1) continue;
@@ -1394,11 +1495,14 @@ int main(void) {
         }
         if (!strcmp(cmd, "attach")) {
             resume_target();  // trocou de jogo: o anterior não fica parado
+            pthread_mutex_lock(&frz_lock);  // a thread do congelamento usa target e memfd
+            nfrz = 0;
             target = atoi(a1);
             char path[64];
             snprintf(path, sizeof path, "/proc/%d/mem", target);
             if (memfd >= 0) close(memfd);
             memfd = open(path, O_RDWR);
+            pthread_mutex_unlock(&frz_lock);
             nres = nprev = 0;
             drop_snap();
             if (!alive()) printf("err processo %d não existe\n", target);
@@ -1426,6 +1530,9 @@ int main(void) {
         else if (!strcmp(cmd, "dump")) cmd_dump(a1, a2, a3);
         else if (!strcmp(cmd, "write")) cmd_write(a1, a2, a3);
         else if (!strcmp(cmd, "writeall")) cmd_writeall(a1);
+        else if (!strcmp(cmd, "freeze")) cmd_freeze(a1, a2, a3);
+        else if (!strcmp(cmd, "unfreeze")) cmd_unfreeze(a1, a2);
+        else if (!strcmp(cmd, "frozen")) cmd_frozen();
         else if (!strcmp(cmd, "pause")) puts(kill(target, SIGSTOP) ? "err não pausou" : "ok");
         else if (!strcmp(cmd, "resume")) puts(kill(target, SIGCONT) ? "err não continuou" : "ok");
         else if (!strcmp(cmd, "kill")) puts(kill(target, SIGKILL) ? "err não fechou" : "ok");

@@ -2560,24 +2560,50 @@ class Engine private constructor(private val app: Context) {
     }
 
     // Congelar = reescrever o valor a cada 200 ms, como o GameGuardian.
+    // o que está congelado no daemon agora ("endereço tipo" → valor): só vai pelo pipe o que mudou
+    private val sentFreeze = HashMap<String, String>()
+    private var freezeOwner: Pair<Daemon, Int>? = null
+    private var freezeTick = 0
+
+    /**
+     * Congelar = o daemon reescreve a cada 100 ms (só o que o jogo mudou). Aqui só se mantém a lista dele em dia:
+     * antes ia um "write" por salvo a cada 200 ms pelo pipe, o que dava lag com muitos salvos e atrasava os outros comandos.
+     */
     private suspend fun freezeLoop() {
         while (true) {
             delay(200)
             // cópia: a tela adiciona e remove salvos enquanto isto roda; qualquer erro fica no registro, nunca derruba o app
             val frozen = runCatching { Session.saved.toList().filter { it.frozen } }.getOrDefault(emptyList())
             val d = daemon
-            if (frozen.isEmpty() || d == null || !d.isAttached) continue
-            for (old in frozen) try {
-                val item = d.resolve(old)
-                if (stale(item)) continue  // escrever no endereço velho pode derrubar o jogo
-                val key = item.addr + item.type
-                try {
-                    d.send("write ${item.addr} ${item.type} ${item.value}", quiet = true)
-                    if (freezeFailing.remove(key)) Diag.add("Congelamento voltou a funcionar em 0x${item.addr}")
-                } catch (e: IOException) {
-                    if (e.message == "o jogo fechou") { gameClosed(d); break }
-                    if (freezeFailing.add(key)) Diag.add("AVISO: congelamento falhou em 0x${item.addr} (${TYPE_NAMES[item.type]} = ${item.value}): ${e.message}")
+            if (d == null || !d.isAttached) { sentFreeze.clear(); continue }
+            // daemon novo ou outro processo do jogo: a lista do daemon começou vazia
+            if (freezeOwner != d to currentPid) { sentFreeze.clear(); freezeOwner = d to currentPid }
+            if (frozen.isEmpty() && sentFreeze.isEmpty()) continue
+            try {
+                val want = HashMap<String, SavedItem>()
+                for (old in frozen) {
+                    val item = runCatching { d.resolve(old) }.getOrNull() ?: continue
+                    if (!stale(item)) want["${item.addr} ${item.type}"] = item  // escrever no endereço velho pode derrubar o jogo
                 }
+                for (k in sentFreeze.keys.toList()) if (want[k]?.value != sentFreeze[k]) { d.send("unfreeze $k", quiet = true); sentFreeze.remove(k) }
+                for ((k, item) in want) if (sentFreeze[k] != item.value) try {
+                    d.send("freeze $k ${item.value}", quiet = true)
+                    sentFreeze[k] = item.value
+                    if (freezeFailing.remove(k)) Diag.add("Congelamento voltou a funcionar em 0x${item.addr}")
+                } catch (e: IOException) {
+                    if (e.message == "o jogo fechou") throw e
+                    if (freezeFailing.add(k)) Diag.add("AVISO: congelamento falhou em 0x${item.addr} (${TYPE_NAMES[item.type]} = ${item.value}): ${e.message}")
+                }
+                // a cada 2 s: o que o daemon tirou da lista porque o endereço parou de aceitar escrita
+                if (++freezeTick % 10 == 0 && sentFreeze.isNotEmpty()) {
+                    val live = d.send("frozen", quiet = true).lines.map { it.substringBeforeLast(' ') }.toSet()
+                    for (k in sentFreeze.keys.toList()) if (k !in live) {
+                        sentFreeze.remove(k)
+                        if (freezeFailing.add(k)) Diag.add("AVISO: congelamento parou em 0x${k.substringBefore(' ')}: o endereço não aceita mais escrita (o objeto pode ter sido liberado)")
+                    }
+                }
+            } catch (e: IOException) {
+                if (e.message == "o jogo fechou") { sentFreeze.clear(); gameClosed(d) }
             } catch (e: Exception) {
                 Diag.add("AVISO: erro no congelamento: ${e.message}")
             }

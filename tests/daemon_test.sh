@@ -184,6 +184,15 @@ mapfile -t w < <(sed 1,2d <<<"$big2")
 [[ "${w[0]}" =~ ^err\ valor\ fora\ do\ tipo:\ 10000000000\ não\ cabe\ em\ Dword ]] && [ "${w[1]}" = "ok" ] && [[ "${w[2]}" =~ ^err\ valor\ fora\ do\ tipo ]] \
     && [ "${w[3]}" = "ok -1" ] || { echo "FALHOU: valor fora do tipo"; exit 1; }
 
+# Congelar dentro do daemon: o jogo (aqui, um write por fora) muda o valor e a thread põe de volta em até 100 ms
+frz=$( { printf '%s\n' "attach $pid" "freeze $iaddr i32 424242" "frozen" "write $iaddr i32 1"; sleep 0.4
+         printf '%s\n' "read $iaddr i32" "unfreeze all" "write $iaddr i32 5"; sleep 0.4
+         printf '%s\n' "read $iaddr i32" "frozen" "freeze $iaddr i32 1.5" "write $iaddr i32 987654000"; } | "$out/tinkerd")
+echo "$frz"
+mapfile -t fz < <(grep -E '^(ok|err)' <<<"$frz")
+[ "${fz[2]}" = "ok" ] && [ "${fz[3]}" = "ok 1" ] && grep -qE "^$iaddr i32 0$" <<<"$frz" && [ "${fz[5]}" = "ok 424242" ] \
+    && [ "${fz[8]}" = "ok 5" ] && [ "${fz[9]}" = "ok 0" ] && [ "${fz[10]}" = "err valor inválido: 1.5" ] || { echo "FALHOU: congelar no daemon"; exit 1; }
+
 # Daemon saindo com o jogo pausado (app caiu no meio da busca): o jogo tem que voltar a rodar
 printf '%s\n' "attach $pid" "pause" | "$out/tinkerd" >/dev/null
 grep -q '^State:.*S (sleeping)' /proc/$pid/status || { echo "FALHOU: jogo ficou pausado após EOF"; grep State /proc/$pid/status; exit 1; }
