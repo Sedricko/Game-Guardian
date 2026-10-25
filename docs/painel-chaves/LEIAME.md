@@ -29,6 +29,18 @@ O Tinker também manda o que a IA aprendeu (lições e a biblioteca de cada jogo
 o que vem de todas as instâncias. A aba **Aprendizado** mostra tudo para ler; a aba escondida **MemoriaBruta** é a que o
 Tinker usa. Uma instância nova (ou reinstalada) pega o aprendizado de lá ao abrir.
 
+## Pedidos e Aparelhos
+
+Na aba **Pedidos** você escolhe o **Tipo** e escreve o **Texto**:
+- `nota`: anota no jogo (coluna **Jogo** com o pacote, ex.: `com.sega.sprint`, ou vazia para o jogo aberto);
+- `licao`: guarda uma lição para a IA;
+- `autoteste`: roda o autoteste;
+- `relatorio`: manda o relatório.
+
+O Tinker lê a aba a cada 3 minutos e mostra o pedido no painel. Ele **só acontece quando você toca em Aplicar** no celular. **Ignorar** descarta o pedido. A **Situação** e a **Resposta** voltam para a planilha. Outros tipos são recusados.
+
+A aba **Aparelhos** mostra, para cada aparelho, a versão do Tinker, o último contato e o último autoteste.
+
 ## Relatórios
 
 Quando o jogo fecha sozinho, ou quando você toca em **Compartilhar relatório**, o Tinker manda o relatório para a aba

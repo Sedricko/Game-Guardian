@@ -147,6 +147,12 @@ data class GameEngine(val name: String, val bits: Int) {
     val header get() = if (bits == 32) 0x8L else 0x10L  // onde começam os campos de um objeto IL2CPP
     override fun toString() = "$name · $bits bits"
 }
+/** Pedido escrito na aba Pedidos da planilha: só vira ação depois que a pessoa toca em Aplicar no aparelho. */
+data class SheetRequest(val id: String, val tipo: String, val jogo: String, val texto: String)
+
+// tipos fixos que a aba Pedidos aceita: anotações e conferências, nada de comando livre nem escrita no jogo
+val REQUEST_TYPES = mapOf("nota" to "Anotar no jogo", "licao" to "Guardar lição da IA", "autoteste" to "Rodar o autoteste", "relatorio" to "Mandar o relatório")
+
 data class Recipe(val id: String = java.util.UUID.randomUUID().toString(), val name: String, val steps: List<Step>, val auto: Boolean = false)
 
 /** Uma linha da ficha: um campo (ou 4 bytes) em volta do valor, com o tipo provável e o valor lido do jeito certo. */
@@ -240,6 +246,7 @@ object Session {
     val saved = mutableStateListOf<SavedItem>()
     val recipes = mutableStateListOf<Recipe>()
     val aiProposals = mutableStateListOf<AiProposal>()
+    val sheetRequests = mutableStateListOf<SheetRequest>()
     val aiUndo = mutableStateListOf<AiUndo>()
     val aiClasses = mutableStateListOf<GameClass>()  // classes que a IA recomendou: aparecem no topo da lista de classes
     var aiAsk by mutableStateOf<Pair<String, String>?>(null)  // pedido automático: (onde, pergunta) — a caixa ✨ daquela tela pergunta sozinha
@@ -358,6 +365,8 @@ class Engine private constructor(private val app: Context) {
             Diag.add(syncKeys()); Diag.add(cloudPull())
             // o Tinker fechou com erro da última vez: o relatório (com a falha no registro) vai para a planilha
             if (Diag.takeCrashFlag()) sendReport("o Tinker fechou com erro na última vez")
+            // a aba Pedidos é lida a cada 3 min; o que chega só aparece no painel, esperando o toque da pessoa
+            while (true) { fetchRequests().takeIf { it.isNotEmpty() }?.let(Diag::add); delay(180_000) }
         }
         Session.watchFields = prefs.getBoolean("watchFields", true)
         prefs.getString("geminiUse", "").orEmpty().split(';').takeIf { it.size == 3 && it[0] == quotaDay() }?.let { (_, use, out) ->
@@ -589,6 +598,7 @@ class Engine private constructor(private val app: Context) {
         Session.canUndo = false
         switchSaved(p.pkg)
         Session.aiProposals.clear()  // endereços da vez anterior do jogo
+        scope.launch { if (Session.keySource.isNotBlank()) Diag.add(cloudPull()) }  // o que outro aparelho achou deste jogo já chega
         Session.aiUndo.clear()
         AiConversations.clear()
         Session.engine = detectEngine(p.pkg)?.also { Diag.add("Motor do jogo: $it") }
@@ -1152,20 +1162,68 @@ class Engine private constructor(private val app: Context) {
         }
     }
 
+    /** POST de JSON no painel; se a rede falhar (timeout), tenta mais uma vez 5 s depois. 302 também é certo: o Google redireciona depois de guardar. */
+    private fun panelPost(url: String, body: String): Int {
+        fun once() = (java.net.URL(url).openConnection() as java.net.HttpURLConnection).run {
+            try {
+                connectTimeout = 15_000; readTimeout = 60_000; requestMethod = "POST"; doOutput = true
+                setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                outputStream.use { it.write(body.toByteArray()) }
+                responseCode
+            } finally { disconnect() }
+        }
+        return runCatching { once() }.getOrElse { Thread.sleep(5000); once() }
+    }
+
     /** Manda a memória para a planilha (lá ela é juntada, não substituída: nada que outra instância aprendeu se perde). */
     private fun cloudPush() {
         val url = panelUrl() ?: return
         // "Fazer backup" chama da tela: rede nunca na linha principal
         scope.launch(Dispatchers.IO) { runCatching {
-            (java.net.URL(url).openConnection() as java.net.HttpURLConnection).run {
-                connectTimeout = 15_000; readTimeout = 60_000; requestMethod = "POST"; doOutput = true
-                setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                outputStream.use { it.write(memoryJson().toByteArray()) }
-                val code = responseCode  // 302 também é certo: o Google responde redirecionando, depois de guardar
-                if (code >= 400) Diag.add("Aprendizado não foi para a planilha: código $code")
-                disconnect()
-            }
+            val code = panelPost(url, memoryJson())
+            if (code >= 400) Diag.add("Aprendizado não foi para a planilha: código $code")
         }.onFailure { Diag.add("Aprendizado não foi para a planilha: ${it.message}") } }
+    }
+
+    private fun enc(v: String) = java.net.URLEncoder.encode(v, "UTF-8")
+    private fun appVersion() = runCatching { app.packageManager.getPackageInfo(app.packageName, 0).versionName }.getOrNull().orEmpty()
+
+    /** Lê os pedidos pendentes da aba Pedidos (e a planilha marca este aparelho na aba Aparelhos). Nada roda aqui. */
+    suspend fun fetchRequests(): String = withContext(Dispatchers.IO) {
+        val url = panelUrl("pedidos=1&aparelho=${enc(android.os.Build.MODEL)}&versao=${enc(appVersion())}") ?: return@withContext ""
+        val text = panelGet(url).getOrElse { return@withContext "" }  // sem rede: tenta de novo na próxima volta
+        val arr = runCatching { JSONObject(text).optJSONArray("pedidos") }.getOrNull() ?: return@withContext ""
+        val list = (0 until arr.length()).map { arr.getJSONObject(it) }
+            .map { SheetRequest(it.optString("id"), it.optString("tipo").lowercase().replace("ç", "c").replace("õ", "o"), it.optString("jogo").trim(), it.optString("texto").trim().take(2000)) }
+            .filter { it.id.isNotEmpty() && it.tipo in REQUEST_TYPES }
+        withContext(Dispatchers.Main) {
+            val fresh = list.any { r -> Session.sheetRequests.none { it.id == r.id } }
+            Session.sheetRequests.clear(); Session.sheetRequests.addAll(list)
+            if (fresh) "Planilha: ${list.size} pedido(s) esperando você no painel" else ""
+        }
+    }
+
+    /** A pessoa tocou em Aplicar (ou Ignorar) num pedido da planilha: faz e devolve a resposta para a aba Pedidos. */
+    suspend fun answerRequest(r: SheetRequest, apply: Boolean): String {
+        withContext(Dispatchers.Main) { Session.sheetRequests.remove(r) }
+        val result = if (!apply) "ignorado" else runCatching {
+            when (r.tipo) {
+                "nota" -> {
+                    val pkg = r.jogo.takeIf { Regex("[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)+").matches(it) } ?: savedPkg ?: error("escreva o pacote do jogo na coluna Jogo ou escolha o jogo antes")
+                    require(r.texto.isNotEmpty()) { "nota vazia" }
+                    appendNote(File(app.filesDir, "notas-$pkg.txt"), r.texto, 8000); "anotado em $pkg"
+                }
+                "licao" -> { require(r.texto.length >= 10) { "lição curta demais" }; appendNote(lessonsFile, r.texto, 6000); "lição guardada" }
+                "autoteste" -> selfTest().lineSequence().first()
+                "relatorio" -> { sendReport("pedido da planilha"); "relatório enviado" }
+                else -> error("tipo desconhecido")
+            }
+        }.getOrElse { "não deu: ${it.message}" }
+        Diag.add("Pedido da planilha (${REQUEST_TYPES[r.tipo]}): $result")
+        withContext(Dispatchers.IO) {
+            panelUrl("feito=${enc(r.id)}&situacao=${if (apply) "aplicado" else "ignorado"}&resposta=${enc(result.take(300))}")?.let { panelGet(it) }
+        }
+        return result
     }
 
     /**
@@ -1244,16 +1302,10 @@ class Engine private constructor(private val app: Context) {
                 val text = ready ?: report().readText()  // quem acabou de gerar o relatório manda ele (antes saíam dois iguais)
                 val problems = text.substringAfter("=== Resumo de problemas", "").substringAfter("===").substringBefore("=== Registro do Tinker").trim().take(5000)
                 val body = JSONObject().put("jogo", p?.let { "${it.label} (${it.pkg})" } ?: "nenhum")
-                    .put("versao", runCatching { app.packageManager.getPackageInfo(app.packageName, 0).versionName }.getOrNull().orEmpty())
+                    .put("versao", appVersion()).put("aparelho", android.os.Build.MODEL)
                     .put("motivo", reason).put("problemas", problems).put("texto", text.take(400_000)).toString()  // a planilha guarda até 405 mil letras
-                (java.net.URL(url).openConnection() as java.net.HttpURLConnection).run {
-                    connectTimeout = 15_000; readTimeout = 60_000; requestMethod = "POST"; doOutput = true
-                    setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                    outputStream.use { it.write(body.toByteArray()) }
-                    val code = responseCode
-                    disconnect()
-                    Diag.add(if (code < 400) "Relatório enviado para a planilha ($reason)" else "Relatório não foi para a planilha: código $code")
-                }
+                val code = panelPost(url, body)
+                Diag.add(if (code < 400) "Relatório enviado para a planilha ($reason)" else "Relatório não foi para a planilha: código $code")
             }.onFailure { Diag.add("Relatório não foi para a planilha: ${it.message}") }
         }
     }

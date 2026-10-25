@@ -148,6 +148,27 @@ fun TinkerPanel(
                 if (!picking) TabBar(Modifier.weight(0.5f))
             } else Header(overlay, onPick = { picking = true }, onMinimize = onMinimize, onOpenOverlay = onOpenOverlay, onExit = onExit, run = run, onQuickBar = onQuickBar)
             error?.let { Banner(it) { error = null } }
+            // pedido da aba Pedidos da planilha: aparece aqui e só acontece com o toque em Aplicar
+            val reqScope = rememberCoroutineScope()  // fora do cartão: ele some ao tocar e o pedido precisa terminar
+            s.sheetRequests.firstOrNull()?.let { r ->
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                ) {
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                        val more = if (s.sheetRequests.size > 1) " (+${s.sheetRequests.size - 1})" else ""
+                        Text("Pedido da planilha$more: ${REQUEST_TYPES[r.tipo]}", color = MaterialTheme.colorScheme.onSecondaryContainer, style = MaterialTheme.typography.titleSmall)
+                        listOf(r.jogo, r.texto).filter { it.isNotEmpty() }.joinToString(" · ").takeIf { it.isNotEmpty() }?.let {
+                            Text(it.take(300), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(shape = MaterialTheme.shapes.medium, onClick = { reqScope.launch { s.status = engine.answerRequest(r, true) } }) { Text("Aplicar") }
+                            TextButton(onClick = { reqScope.launch { engine.answerRequest(r, false) } }) { Text("Ignorar") }
+                        }
+                    }
+                }
+            }
             s.gameGone?.let { gone ->
                 // como o GameGuardian: o jogo fechou, pergunta se reabre
                 Card(

@@ -11,6 +11,7 @@ function onOpen() {
     .addItem('Definir o link da implantação', 'definirLink')
     .addItem('Gerar novo token (invalida o link antigo)', 'novoToken')
     .addToUi();
+  abaPedidos_();  // a aba Pedidos já fica pronta para usar
 }
 
 function abrirPainel() {
@@ -183,6 +184,18 @@ function doGet(e) {
       lock.releaseLock();
     }
     return json_({ ok: true });
+  }
+  // pedidos da aba Pedidos: o Tinker só mostra; acontece quando a pessoa toca em Aplicar no celular
+  if (p.pedidos || p.feito) {
+    const lock = LockService.getScriptLock();
+    lock.waitLock(10000);
+    try {
+      if (p.feito) return json_({ ok: marcarPedido_(p.feito, p.situacao, p.resposta) });
+      marcarAparelho_(p.aparelho, p.versao);
+      return json_({ pedidos: pedidos_() });
+    } finally {
+      lock.releaseLock();
+    }
   }
   // aprendizado guardado (o de todas as instâncias juntas)
   if (p.memoria) return json_(memoriaGuardada_() || {});
@@ -448,7 +461,12 @@ function doPost(e) {
     try { r = JSON.parse(e.postData.contents); } catch (err) { return json_({ erro: 'json' }); }
     const lock = LockService.getScriptLock();
     lock.waitLock(20000);
-    try { guardarRelatorio_(r); analisar(); } finally { lock.releaseLock(); }
+    try {
+      guardarRelatorio_(r);
+      const m = String(r.motivo || '');
+      marcarAparelho_(r.aparelho, r.versao, m.indexOf('autoteste') === 0 ? m : '');
+      analisar();
+    } finally { lock.releaseLock(); }
     return json_({ ok: true });
   }
   let nova;
@@ -468,4 +486,71 @@ function doPost(e) {
 
 function json_(o) {
   return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);
+}
+
+// ---- pedidos para o Tinker (aba Pedidos) e aparelhos (aba Aparelhos) ----
+// Tipos fixos: anotar, guardar lição, rodar o autoteste, mandar o relatório. Nada roda sem o toque em Aplicar no celular.
+
+const PEDIDOS = 'Pedidos';
+const PCOLS = ['Quando', 'Tipo', 'Jogo', 'Texto', 'Situação', 'Resposta'];
+const TIPOS = ['nota', 'licao', 'autoteste', 'relatorio'];
+
+function abaPedidos_() {
+  const ss = SpreadsheetApp.getActive();
+  let s = ss.getSheetByName(PEDIDOS);
+  if (s) return s;
+  s = ss.insertSheet(PEDIDOS);
+  s.getRange(1, 1, 1, PCOLS.length).setValues([PCOLS]).setFontWeight('bold');
+  s.setFrozenRows(1);
+  s.getRange(2, 2, 998, 1).setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(TIPOS, true).build());
+  s.getRange(2, 3, 998, 2).setNumberFormat('@');
+  s.getRange(1, 8).setValue('Escolha o Tipo e escreva o Texto. Jogo: o pacote (ex.: com.sega.sprint) ou vazio para o jogo aberto. ' +
+    'O pedido aparece no Tinker e só acontece quando você toca em Aplicar no celular. Situação vazia = esperando.');
+  return s;
+}
+
+function idPedido_(linha, tipo, texto) {
+  const d = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, tipo + '|' + texto, Utilities.Charset.UTF_8);
+  return linha + ':' + d.slice(0, 4).map(b => ((b + 256) % 256).toString(16).padStart(2, '0')).join('');
+}
+
+function pedidos_() {
+  const s = abaPedidos_();
+  const n = s.getLastRow() - 1;
+  if (n < 1) return [];
+  return s.getRange(2, 1, n, 5).getValues()
+    .map((r, i) => ({ linha: i + 2, tipo: String(r[1]).trim().toLowerCase(), jogo: String(r[2]).trim(), texto: String(r[3]).trim(), sit: String(r[4]).trim() }))
+    .filter(x => TIPOS.indexOf(x.tipo) >= 0 && !x.sit)
+    .slice(0, 20)
+    .map(x => ({ id: idPedido_(x.linha, x.tipo, x.texto), tipo: x.tipo, jogo: x.jogo, texto: x.texto.slice(0, 2000) }));
+}
+
+// a linha só é marcada se ainda for o mesmo pedido (alguém pode ter mudado a linha nesse meio-tempo)
+function marcarPedido_(id, situacao, resposta) {
+  const s = abaPedidos_();
+  const linha = Number(String(id).split(':')[0]);
+  if (!(linha >= 2) || linha > s.getLastRow()) return false;
+  const r = s.getRange(linha, 1, 1, 4).getValues()[0];
+  if (idPedido_(linha, String(r[1]).trim().toLowerCase(), String(r[3]).trim()) !== id) return false;
+  if (!r[0]) s.getRange(linha, 1).setValue(new Date());
+  s.getRange(linha, 5, 1, 2).setNumberFormat('@').setValues([[String(situacao || '').slice(0, 20), String(resposta || '').slice(0, 300)]]);
+  return true;
+}
+
+function marcarAparelho_(nome, versao, autoteste) {
+  nome = String(nome || '').slice(0, 60);
+  if (!nome) return;
+  const ss = SpreadsheetApp.getActive();
+  let s = ss.getSheetByName('Aparelhos');
+  if (!s) {
+    s = ss.insertSheet('Aparelhos');
+    s.getRange(1, 1, 1, 4).setValues([['Aparelho', 'Versão', 'Último contato', 'Último autoteste']]).setFontWeight('bold');
+    s.setFrozenRows(1);
+  }
+  const nomes = s.getLastRow() > 1 ? s.getRange(2, 1, s.getLastRow() - 1, 1).getValues().map(r => String(r[0])) : [];
+  const i = nomes.indexOf(nome);
+  const linha = i >= 0 ? i + 2 : s.getLastRow() + 1;
+  s.getRange(linha, 1, 1, 2).setNumberFormat('@');
+  s.getRange(linha, 1, 1, 3).setValues([[nome, String(versao || ''), new Date()]]);
+  if (autoteste) s.getRange(linha, 4).setValue(Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd/MM HH:mm') + ' ' + autoteste);
 }
