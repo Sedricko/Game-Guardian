@@ -1867,7 +1867,7 @@ class Engine private constructor(private val app: Context) {
         // sem internet, os testes de rede diziam OK com a mensagem de erro dentro (visto no relatório de 25/10 05:03)
         check("internet") { java.net.InetAddress.getByName("script.google.com").hostAddress?.let { "ok" } ?: error("sem resposta do DNS") }
         check("painel de chaves") { if (Session.keySource.isBlank()) "sem link (cole em Ajustes → Assistente)" else syncKeys().also { require(it.startsWith("Painel de chaves")) { it } } }
-        check("planilha (aprendizado)") { cloudPull().also { require(it.startsWith("Planilha")) { it } } }
+        check("planilha (aprendizado)") { if (Session.keySource.isBlank()) "sem link (cole em Ajustes → Assistente)" else cloudPull().also { require(it.startsWith("Planilha")) { it } } }
         // uma pergunta curtinha de verdade em cada IA (1 pedido da cota de cada): responde e quanto demora
         check("Gemini") { if (Session.geminiKeys.isEmpty()) "sem chave" else Assistant.pingGemini() }
         check("Groq") { if (Session.groqKeys.isEmpty()) "sem chave" else Assistant.pingGroq() }
