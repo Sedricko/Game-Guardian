@@ -10,8 +10,8 @@ android {
         applicationId = "dev.tinker.app"
         minSdk = 26
         targetSdk = 37
-        versionCode = 77
-        versionName = "2.19.0"
+        versionCode = 78
+        versionName = "2.20.0"
         ndk { abiFilters += "arm64-v8a" }
     }
     // chave fixa: sem ela cada build do CI assina diferente e o Android não deixa atualizar por cima
@@ -40,8 +40,6 @@ android {
     // o daemon vai como lib*.so para ser extraído em nativeLibraryDir, onde o Android permite executar
     packaging {
         jniLibs { useLegacyPackaging = true }
-        // licenças repetidas nas bibliotecas do SDK do Claude (Jackson, OkHttp) quebram a montagem do APK
-        resources { excludes += setOf("META-INF/DEPENDENCIES", "META-INF/LICENSE*", "META-INF/NOTICE*", "META-INF/INDEX.LIST", "META-INF/*.md") }
     }
     buildFeatures { compose = true }
 }
@@ -50,6 +48,5 @@ dependencies {
     implementation(platform("androidx.compose:compose-bom:2026.09.00"))
     implementation("androidx.compose.material3:material3")
     implementation("androidx.activity:activity-compose:1.13.0")
-    implementation("com.anthropic:anthropic-java:2.34.0")  // assistente de IA (Claude)
     testImplementation("junit:junit:4.13.2")
 }

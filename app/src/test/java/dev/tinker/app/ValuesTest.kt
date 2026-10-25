@@ -255,4 +255,18 @@ class ValuesTest {
         assertEquals("gemini-3.5-flash", pickGemini(listOf("gemini-3.8-flash-lite", "gemini-3.5-flash"), emptyMap()))  // Lite fica de fora
         assertEquals("gemini-3.5-flash", pickGemini(ranked, emptyMap(), setOf("gemini-3.8-flash")))  // cota do dia acabou nele
     }
+
+    @Test
+    fun groqModelsAndWaits() {
+        assertEquals(listOf("openai/gpt-oss-120b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"),
+            rankGroq(listOf("whisper-large-v3", "llama-3.1-8b-instant", "llama-3.3-70b-versatile", "openai/gpt-oss-120b", "meta-llama/llama-guard-4-12b")))
+        assertEquals(true, groqVision("meta-llama/llama-4-scout-17b-16e-instruct"))
+        assertEquals(false, groqVision("llama-3.3-70b-versatile"))
+        assertEquals(8, groqWait(429, """{"error":{"message":"Rate limit reached ... tokens per minute (TPM) ... Please try again in 7.5s."}}"""))
+        assertEquals(63, groqWait(429, "Please try again in 1m2.1s"))
+        assertEquals(null, groqWait(429, "Rate limit reached on tokens per day (TPD): Limit 100000. Please try again in 12m3s"))
+        assertEquals(20, groqWait(429, "rate limited"))
+        assertEquals(10, groqWait(503, ""))
+        assertEquals(null, groqWait(401, ""))
+    }
 }

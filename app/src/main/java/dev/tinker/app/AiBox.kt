@@ -107,7 +107,7 @@ fun AiBox(
     TextButton(onClick = { open = !open }) { Text((if (open) "▾ " else "▸ ") + "✨ $title") }
     if (!open) return
     if (!Assistant.ready()) {
-        Text("Para usar, coloque uma chave do Gemini (grátis) ou do Claude.", style = MaterialTheme.typography.bodySmall,
+        Text("Para usar, coloque uma chave do Gemini ou do Groq (as duas são grátis).", style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         Button(onClick = { s.tab = TABS.indexOf("Ajustes") }) { Text("Configurar IA") }
         return

@@ -1,20 +1,5 @@
 package dev.tinker.app
 
-import com.anthropic.client.okhttp.AnthropicOkHttpClient
-import com.anthropic.core.JsonValue
-import com.anthropic.errors.AnthropicIoException
-import com.anthropic.errors.AnthropicServiceException
-import com.anthropic.errors.RateLimitException
-import com.anthropic.errors.UnauthorizedException
-import com.anthropic.models.beta.messages.BetaBase64ImageSource
-import com.anthropic.models.beta.messages.BetaCacheControlEphemeral
-import com.anthropic.models.beta.messages.BetaImageBlockParam
-import com.anthropic.models.beta.messages.BetaContentBlockParam
-import com.anthropic.models.beta.messages.BetaMessageParam
-import com.anthropic.models.beta.messages.BetaStopReason
-import com.anthropic.models.beta.messages.BetaTool
-import com.anthropic.models.beta.messages.BetaToolResultBlockParam
-import com.anthropic.models.beta.messages.MessageCreateParams
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -24,13 +9,13 @@ import kotlinx.coroutines.ensureActive
 /** Conversa com a IA: guarda as mensagens para "Continuar" seguir de onde parou (respostas antigas de ferramentas encolhem). */
 class AiChat {
     internal var provider = ""
-    internal val claude = mutableListOf<BetaMessageParam>()
     internal var gemini = JSONArray()
-    val started get() = claude.isNotEmpty() || gemini.length() > 0
+    internal var groq = JSONArray()  // mensagens no formato da OpenAI (o Groq usa o mesmo)
+    val started get() = gemini.length() > 0 || groq.length() > 0
 
     fun reset() {
-        claude.clear()
         gemini = JSONArray()
+        groq = JSONArray()
     }
 }
 
@@ -38,7 +23,7 @@ class AiChat {
 class AiTool(val name: String, val description: String, val params: Map<String, String>, val required: List<String>, val run: suspend (JSONObject) -> String)
 
 /**
- * Assistente de IA (Claude ou Gemini, escolhido em Ajustes): uma pergunta por vez, com o contexto que a tela mandar
+ * Assistente de IA (Gemini ou Groq, escolhido em Ajustes): uma pergunta por vez, com o contexto que a tela mandar
  * (classes, ficha ou relatório) e ferramentas para olhar a memória do jogo (procurar classes, abrir objetos, buscar valores).
  * Só roda com a chave da API que você colocou em Ajustes; nada sai do aparelho sem você tocar no botão.
  */
@@ -123,12 +108,18 @@ jogo abrir, use propor_receita com os salvos."""
     private fun rounds() = if (Session.aiControl) 40 else MAX_ROUNDS
 
     /** O provedor escolhido tem chave? */
-    fun ready() = if (Session.aiProvider == "gemini") Session.geminiKey.isNotBlank() else Session.aiKey.isNotBlank()
+    fun ready() = if (Session.aiProvider == "groq") Session.groqKeys.isNotEmpty() else Session.geminiKey.isNotBlank()
+
+    /** A última pergunta parou por cota ou servidor cheio (não por chave errada): o outro provedor pode seguir. */
+    @Volatile var lastLimitFail = false
+        private set
 
     /** Na primeira mensagem vai o contexto da tela; nas seguintes (Continuar), só o que a pessoa disse. */
     suspend fun ask(chat: AiChat, context: suspend () -> String, question: String, tools: List<AiTool>, onStep: (String) -> Unit): String {
-        // Claude sem chave e Gemini com chave: vai pelo Gemini em vez de só responder "chave inválida"
-        if (Session.aiProvider == "claude" && Session.aiKey.isBlank() && Session.geminiKeys.isNotEmpty()) Session.aiProvider = "gemini"
+        // um provedor sem chave e o outro com: vai pelo que tem
+        if (Session.aiProvider == "groq" && Session.groqKeys.isEmpty() && Session.geminiKeys.isNotEmpty()) Session.aiProvider = "gemini"
+        if (Session.aiProvider == "gemini" && Session.geminiKeys.isEmpty() && Session.groqKeys.isNotEmpty()) Session.aiProvider = "groq"
+        lastLimitFail = false
         if (chat.provider != Session.aiProvider) { chat.reset(); chat.provider = Session.aiProvider }
         // a cada pergunta (começo de um turno): o modelo mais rápido entre os bons. Só no começo da conversa nunca trocava:
         // a pessoa segue "continuando" por horas. No meio de um turno não troca (o Gemini confere o pensamento do turno atual).
@@ -140,16 +131,12 @@ jogo abrir, use propor_receita com os salvos."""
             }
         }
         val prompt = if (chat.started) question else "${context()}\n\n=== Pergunta ===\n$question"
-        Diag.ai("==== PERGUNTA (${Session.aiProvider}, ${if (Session.aiProvider == "gemini") Session.geminiModel else "claude-opus-5-5"}${if (chat.started) ", continuando" else ""}): $question")
+        Diag.ai("==== PERGUNTA (${Session.aiProvider}, ${if (Session.aiProvider == "groq") Session.groqModel.ifEmpty { "groq" } else Session.geminiModel}${if (chat.started) ", continuando" else ""}): $question")
         if (!chat.started) Diag.ai("contexto (${prompt.length} letras):\n${prompt.take(6000)}${if (prompt.length > 6000) "\n…(cortado)" else ""}")
         val t0 = System.currentTimeMillis()
         statRounds = 0; statIn = 0; statOut = 0
-        val answer = if (Session.aiProvider == "gemini") askGemini(Session.geminiKey, chat, prompt, tools, onStep)
-        else askClaude(Session.aiKey, chat, prompt, tools, onStep).let { a ->
-            // chave do Claude recusada e há Gemini: troca sozinho e pergunta de novo
-            if (a != CLAUDE_BAD_KEY || Session.geminiKeys.isEmpty()) a
-            else { Diag.add("Chave do Claude recusada: usando o Gemini"); onStep("🔁 Chave do Claude recusada: usando o Gemini"); Session.aiProvider = "gemini"; return ask(chat, context, question, tools, onStep) }
-        }
+        val answer = if (Session.aiProvider == "groq") askGroq(chat, prompt, tools, onStep)
+        else askGemini(Session.geminiKey, chat, prompt, tools, onStep)
         lastStats = "$statRounds consultas · ${(System.currentTimeMillis() - t0) / 1000} s · ${(statIn + statOut + 500) / 1000} mil tokens"
         Diag.ai("==== RESPOSTA ($lastStats):\n$answer")
         return answer
@@ -169,78 +156,165 @@ jogo abrir, use propor_receita com os salvos."""
         return out
     }
 
-    /** Claude pelo SDK oficial, com as ferramentas; erros viram texto para a tela (chave errada, sem internet, limite). */
-    private suspend fun askClaude(key: String, chat: AiChat, prompt: String, tools: List<AiTool>, onStep: (String) -> Unit): String {
-        if (key.isBlank()) return "Coloque a chave da API do Claude em Ajustes → Assistente (IA)."
-        val client = AnthropicOkHttpClient.builder().apiKey(key.trim()).build()
-        val defs = tools.map { t ->
-            BetaTool.builder().name(t.name).description(t.description).inputSchema(
-                BetaTool.InputSchema.builder().properties(BetaTool.InputSchema.Properties.builder().apply {
-                    t.params.forEach { (k, d) -> putAdditionalProperty(k, JsonValue.from(mapOf("type" to "string", "description" to d))) }
-                }.build()).required(t.required).build(),
-            ).build()
+    // Groq: API no formato da OpenAI, modelos abertos e bem rápidos; no grátis há limite de tokens por minuto
+    private const val GROQ = "https://api.groq.com/openai/v1/"
+    private const val GROQ_PROMPT = 14_000  // letras do contexto da primeira mensagem (o limite por minuto do grátis é pequeno)
+    private const val GROQ_TOOL_OUT = 6_000  // letras de cada resposta de ferramenta
+
+    private suspend fun askGroq(chat: AiChat, prompt: String, tools: List<AiTool>, onStep: (String) -> Unit): String {
+        if (Session.groqKeys.isEmpty()) return "Coloque uma chave do Groq em Ajustes → Assistente (IA) ou no painel de chaves."
+        if (Session.groqModels.isEmpty()) Session.groqModels = groqModels(Session.groqKey)
+        if (Session.groqModel !in Session.groqModels) Session.groqModels.firstOrNull()?.let { Session.groqModel = it }
+        if (Session.groqModel.isBlank()) return "O Groq não mostrou os modelos da chave. Confira a chave e a internet."
+        val fns = JSONArray().apply {
+            tools.forEach { t ->
+                val props = JSONObject().apply { t.params.forEach { (k, d) -> put(k, JSONObject().put("type", "string").put("description", d)) } }
+                put(JSONObject().put("type", "function").put("function", JSONObject().put("name", t.name).put("description", t.description)
+                    .put("parameters", JSONObject().put("type", "object").put("properties", props).put("required", JSONArray(t.required)))))
+            }
         }
-        // só cresce (mensagens novas no fim): o pensamento do modelo e o cache continuam valendo entre as rodadas
-        val messages = chat.claude
-        val before = messages.size
-        messages += BetaMessageParam.builder().role(BetaMessageParam.Role.USER).content(prompt).build()
+        val msgs = chat.groq
+        val before = msgs.length()
+        msgs.put(JSONObject().put("role", "user").put("content", if (prompt.length > GROQ_PROMPT) prompt.take(GROQ_PROMPT) + "\n…(contexto cortado)" else prompt))
+        fun fail(msg: String): String {
+            if (msgs.length() <= before + 1) { while (msgs.length() > before) msgs.remove(msgs.length() - 1); return msg }
+            // a conversa não pode terminar numa resposta de ferramenta sem a vez da IA
+            msgs.put(JSONObject().put("role", "assistant").put("content", "(fui interrompido por um erro do servidor; continuo daqui)"))
+            return "$msg\n\nO que já fiz ficou guardado: toque em Continuar para seguir de onde parei."
+        }
         return try {
-            repeat(rounds()) {
+            repeat(rounds()) { round ->
                 kotlin.coroutines.coroutineContext.ensureActive()
-                val params = MessageCreateParams.builder()
-                    .model("claude-opus-5-5")
-                    .maxTokens(16000L)
-                    .system(SYSTEM)
-                    // o contexto (lista de classes, relatório) repete entre rodadas e perguntas: fica em cache e sai mais barato
-                    .cacheControl(BetaCacheControlEphemeral.builder().build())
-                    .apply { defs.forEach { addTool(it) } }
-                    .messages(messages)
-                    // recusa do filtro de segurança: o servidor tenta de novo noutro modelo em vez de parar
-                    .addBeta("server-side-fallback-2026-07-01")
-                    .putAdditionalBodyProperty("fallbacks", JsonValue.from("default"))
-                    .build()
-                val c0 = System.currentTimeMillis()
-                val r = client.beta().messages().create(params)
-                statRounds++; statIn += r.usage().inputTokens(); statOut += r.usage().outputTokens()
-                Diag.ai("API Claude rodada ${it + 1}: ${System.currentTimeMillis() - c0} ms, parada ${r.stopReason().orElse(null)}, tokens entrada ${r.usage().inputTokens()} " +
-                    "(cache ${r.usage().cacheReadInputTokens().orElse(0L)}), saída ${r.usage().outputTokens()}")
-                if (r.stopReason().orElse(null) == BetaStopReason.REFUSAL) {
-                    while (messages.size > before) messages.removeAt(messages.lastIndex)  // a pergunta recusada não fica na conversa
-                    return "O assistente não respondeu essa pergunta."
+                shrinkGroq(msgs, hard = false)
+                // print na conversa e modelo que não lê imagem: esta rodada vai num que lê, se a chave tiver
+                val withImage = (0 until msgs.length()).any { msgs.getJSONObject(it).opt("content") is JSONArray }
+                val model = if (withImage && !groqVision(Session.groqModel)) Session.groqModels.firstOrNull(::groqVision) ?: Session.groqModel else Session.groqModel
+                fun body() = JSONObject().put("model", model)
+                    .put("messages", JSONArray().put(JSONObject().put("role", "system").put("content", SYSTEM)).apply { for (k in 0 until msgs.length()) put(msgs.get(k)) })
+                    .apply { if (fns.length() > 0) put("tools", fns).put("tool_choice", "auto") }
+                    .put("max_completion_tokens", 2048).toString()
+                val sent = System.currentTimeMillis()
+                var (code, reply) = groqHttp("chat/completions", Session.groqKey, body())
+                // pedido maior que o limite por minuto da conta: encolhe a conversa e tenta de novo
+                if (code == 413 || (code == 400 && "too large" in reply.lowercase())) {
+                    shrinkGroq(msgs, hard = true)
+                    groqHttp("chat/completions", Session.groqKey, body()).let { code = it.first; reply = it.second }
                 }
-                messages += r.toParam()
-                val uses = r.content().mapNotNull { it.toolUse().orElse(null) }
-                if (uses.isEmpty() || r.stopReason().orElse(null) != BetaStopReason.TOOL_USE) {
-                    return r.content().mapNotNull { it.text().orElse(null)?.text() }.joinToString("\n").trim().ifEmpty { "Sem resposta." }
+                // chave recusada ou cota do dia acabou: próxima chave da lista
+                var spare = Session.groqKeys.size - 1
+                while (spare-- > 0 && (code == 401 || code == 403 || (code == 429 && groqWait(code, reply) == null)) && nextGroqKey("código $code")) {
+                    groqHttp("chat/completions", Session.groqKey, body()).let { code = it.first; reply = it.second }
                 }
-                // todas as respostas das ferramentas numa mensagem só
-                val results = uses.map { u ->
-                    val args = runCatching { JSONObject(u._input().convert(Map::class.java) as Map<*, *>) }.getOrDefault(JSONObject())
-                    BetaContentBlockParam.ofToolResult(BetaToolResultBlockParam.builder().toolUseId(u.id()).content(runTool(tools, u.name(), args, onStep)).build())
+                // limite por minuto ou servidor cheio: espera o que o Groq pede e segue sozinho
+                var waits = 0
+                while (waits++ < 4) {
+                    val secs = groqWait(code, reply) ?: break
+                    onStep("⏳ Groq no limite por minuto: espero $secs s e continuo sozinho")
+                    Diag.ai("Groq: código $code, esperando $secs s (vez $waits de 4)")
+                    kotlinx.coroutines.delay(secs * 1000L)
+                    groqHttp("chat/completions", Session.groqKey, body()).let { code = it.first; reply = it.second }
                 }
-                // print da tela (ver_tela): vai na mesma mensagem, depois das respostas das ferramentas
-                val image = pendingImage?.also { pendingImage = null }?.let {
-                    BetaContentBlockParam.ofImage(BetaImageBlockParam.builder().source(
-                        BetaBase64ImageSource.builder().data(it).mediaType(BetaBase64ImageSource.MediaType.IMAGE_JPEG).build(),
-                    ).build())
+                val j = runCatching { JSONObject(reply) }.getOrNull() ?: return fail("Groq respondeu $code sem conteúdo.").also { Diag.ai("API Groq: código $code sem JSON: ${reply.take(500)}") }
+                statRounds++
+                j.optJSONObject("usage")?.let { u -> statIn += u.optInt("prompt_tokens"); statOut += u.optInt("completion_tokens") }
+                Diag.ai("API Groq rodada ${round + 1} ($model): código $code, ${System.currentTimeMillis() - sent} ms, tokens " +
+                    (j.optJSONObject("usage")?.let { u -> "entrada ${u.optInt("prompt_tokens")}, saída ${u.optInt("completion_tokens")}" } ?: "?") +
+                    (j.optJSONObject("error")?.let { e -> ", erro: ${e.optString("message").take(300)}" } ?: ""))
+                j.optJSONObject("error")?.let { e ->
+                    lastLimitFail = code == 429 || code == 413 || code >= 500
+                    return fail(when (code) {
+                        401, 403 -> "O Groq recusou a chave: ${e.optString("message")}"
+                        429 -> "O limite grátis do Groq acabou em ${if (Session.groqKeys.size > 1) "todas as ${Session.groqKeys.size} chaves" else "a chave"} (por dia ou por minuto). " +
+                            "Espere ou adicione outra chave."
+                        else -> "Groq respondeu com erro $code: ${e.optString("message")}"
+                    })
                 }
-                messages += BetaMessageParam.builder().role(BetaMessageParam.Role.USER).contentOfBetaContentBlockParams(results + listOfNotNull(image)).build()
+                val m = j.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message") ?: return fail("Sem resposta.")
+                val calls = m.optJSONArray("tool_calls")?.takeIf { it.length() > 0 }
+                val text = m.opt("content")?.takeIf { it != JSONObject.NULL }?.toString().orEmpty()
+                msgs.put(JSONObject().put("role", "assistant").put("content", text).apply { if (calls != null) put("tool_calls", calls) })
+                if (calls == null) return text.trim().ifEmpty { "Sem resposta." }
+                for (k in 0 until calls.length()) {
+                    val c = calls.getJSONObject(k)
+                    val f = c.optJSONObject("function") ?: JSONObject()
+                    val args = runCatching { JSONObject(f.optString("arguments").ifBlank { "{}" }) }.getOrDefault(JSONObject())
+                    val out = runTool(tools, f.optString("name"), args, onStep)
+                    msgs.put(JSONObject().put("role", "tool").put("tool_call_id", c.optString("id")).put("content", out.take(GROQ_TOOL_OUT)))
+                }
+                pendingImage?.also { pendingImage = null }?.let { img ->
+                    msgs.put(JSONObject().put("role", "user").put("content", if (Session.groqModels.any(::groqVision)) JSONArray()
+                        .put(JSONObject().put("type", "text").put("text", "Print da tela do jogo (de ver_tela)."))
+                        .put(JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", "data:image/jpeg;base64,$img")))
+                    else "(O print não foi enviado: nenhum modelo desta chave do Groq lê imagem. Peça os números à pessoa ou use as buscas.)"))
+                }
             }
             "Parei depois de ${rounds()} consultas sem chegar a uma resposta. Tente uma pergunta mais específica."
-        } catch (e: UnauthorizedException) {
-            while (messages.size > before) messages.removeAt(messages.lastIndex)  // a pergunta que falhou não fica na conversa
-            CLAUDE_BAD_KEY
-        } catch (e: RateLimitException) {
-            while (messages.size > before) messages.removeAt(messages.lastIndex)
-            "Limite de uso da API atingido. Espere um pouco e tente de novo."
-        } catch (e: AnthropicServiceException) {
-            while (messages.size > before) messages.removeAt(messages.lastIndex)
-            "A API respondeu com erro ${e.statusCode()}: ${e.message}"
-        } catch (e: AnthropicIoException) {
-            while (messages.size > before) messages.removeAt(messages.lastIndex)
-            "Sem conexão com a API: ${e.message}"
+        } catch (e: java.io.IOException) {
+            fail("Sem conexão com o Groq: ${e.message}")
+        }
+    }
+
+    /**
+     * Cada rodada manda a conversa inteira e o grátis do Groq conta tokens por minuto: respostas de ferramentas antigas
+     * ficam curtas e prints antigos saem. hard (o Groq disse que o pedido é grande demais): só a última fica inteira.
+     */
+    private fun shrinkGroq(msgs: JSONArray, hard: Boolean) {
+        val keep = if (hard) 1 else 3
+        val cut = if (hard) 200 else 500
+        var seen = 0
+        for (i in msgs.length() - 1 downTo 0) {
+            val m = msgs.getJSONObject(i)
+            val role = m.optString("role")
+            if (role != "tool" && role != "user") continue
+            if (++seen <= keep) continue
+            val c = m.opt("content")
+            when {
+                c is JSONArray -> m.put("content", "(print antigo da tela)")
+                role == "tool" && c is String && c.length > cut -> m.put("content", c.take(cut) + "\n…(resposta antiga encurtada)")
+                hard && role == "user" && c is String && c.length > 4000 -> m.put("content", c.take(4000) + "\n…(contexto cortado)")
+            }
+        }
+    }
+
+    /** Troca para a próxima chave do Groq; false se só há uma. */
+    private fun nextGroqKey(why: String): Boolean {
+        val n = Session.groqKeys.size
+        if (n < 2) return false
+        val old = Session.groqKeyIndex
+        Session.groqKeyIndex = (old + 1) % n
+        val msg = "Groq: chave ${old + 1} sem uso agora ($why); passando para a chave ${Session.groqKeyIndex + 1} de $n"
+        Diag.add(msg)
+        Diag.ai(msg)
+        return true
+    }
+
+    /** Modelos do Groq que a chave pode usar para conversa com ferramentas, o melhor primeiro (vazio: chave errada ou sem internet). */
+    fun groqModels(key: String): List<String> {
+        if (key.isBlank()) return emptyList()
+        val (code, reply) = runCatching { groqHttp("models", key, null) }.getOrNull() ?: return emptyList()
+        if (code != 200) return emptyList()
+        val data = runCatching { JSONObject(reply).optJSONArray("data") }.getOrNull() ?: return emptyList()
+        return rankGroq((0 until data.length()).mapNotNull { data.optJSONObject(it)?.optString("id")?.takeIf { id -> id.isNotEmpty() } })
+    }
+
+    private fun groqHttp(path: String, key: String, body: String?): Pair<Int, String> {
+        val c = URL(GROQ + path).openConnection() as HttpURLConnection
+        try {
+            c.connectTimeout = 15_000
+            c.readTimeout = 120_000
+            c.setRequestProperty("Authorization", "Bearer ${key.trim()}")
+            if (body != null) {
+                c.requestMethod = "POST"
+                c.doOutput = true
+                c.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                c.outputStream.use { it.write(body.toByteArray()) }
+            }
+            val code = c.responseCode
+            val text = (if (code < 400) c.inputStream else c.errorStream)?.bufferedReader()?.use { it.readText() }.orEmpty()
+            if (code == 429 && groqWait(code, text) == null) reportOut(key, java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date()))
+            return code to text
         } finally {
-            client.close()
+            c.disconnect()
         }
     }
 
@@ -343,6 +417,7 @@ jogo abrir, use propor_receita com os salvos."""
                     (j.optJSONObject("error")?.let { e -> ", erro ${e.optString("status")}: ${e.optString("message").take(300)}" } ?: "") +
                     (j.optJSONArray("candidates")?.optJSONObject(0)?.optString("finishReason")?.let { f -> ", fim $f" } ?: ""))
                 j.optJSONObject("error")?.let { e ->
+                    lastLimitFail = code == 429 || code >= 500
                     return fail(when (code) {
                         400, 401, 403 -> "Gemini recusou a chave ou o pedido: ${e.optString("message")}"
                         429 -> if ("quota" in e.optString("message").lowercase() || e.optString("status") == "RESOURCE_EXHAUSTED")
@@ -417,9 +492,12 @@ jogo abrir, use propor_receita com os salvos."""
     }
 
     /** Avisa o painel de chaves que esta chave ficou sem cota hoje (manda só os 6 últimos caracteres, nunca a chave). */
+    private val reported = java.util.Collections.synchronizedSet(HashSet<String>())
+
     private fun reportOut(key: String, at: String) {
         val src = Session.keySource.trim().takeIf { it.startsWith("https://script.google.com/") } ?: return
-        if (key !in Session.sheetKeys) return
+        if (key !in Session.sheetKeys && key !in Session.sheetGroqKeys) return
+        if (!reported.add(quotaDay() + key)) return  // uma vez por dia por chave
         val url = src + (if ('?' in src) "&" else "?") + "fim=" + java.net.URLEncoder.encode(key.trim().takeLast(6), "UTF-8") +
             "&situacao=" + java.net.URLEncoder.encode("sem cota hoje desde $at", "UTF-8")
         Thread { runCatching { (URL(url).openConnection() as HttpURLConnection).run { connectTimeout = 15_000; readTimeout = 30_000; inputStream.close(); disconnect() } } }.start()
@@ -501,7 +579,30 @@ internal fun geminiWait(code: Int, reply: String): Int? = when {
 internal fun pickGemini(ranked: List<String>, speed: Map<String, Long>, skip: Set<String> = emptySet()): String? =
     ranked.filter { "-lite" !in it && it !in skip }.take(3).minByOrNull { speed[it] ?: 30_000L }
 
-private const val CLAUDE_BAD_KEY = "Chave da API inválida. Confira em Ajustes → Assistente (IA)."
 
 /** Dia da cota do Gemini: vira à meia-noite do horário do Pacífico. */
 internal fun quotaDay(): String = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).apply { timeZone = java.util.TimeZone.getTimeZone("America/Los_Angeles") }.format(java.util.Date())
+
+/** Ordem dos modelos do Groq: os que lidam bem com ferramentas primeiro; fora áudio, moderação e sistemas prontos. */
+internal fun rankGroq(ids: List<String>): List<String> {
+    val skip = listOf("whisper", "tts", "guard", "playai", "distil", "compound", "orpheus", "allam", "saba")
+    val best = listOf("gpt-oss-120b", "kimi-k2", "llama-4-maverick", "qwen3", "llama-3.3-70b", "llama-4-scout", "gpt-oss-20b", "llama-3.1-8b")
+    return ids.filter { id -> skip.none { it in id.lowercase() } }.distinct()
+        .sortedBy { id -> best.indexOfFirst { it in id.lowercase() }.let { if (it < 0) best.size else it } }
+}
+
+/** Modelo do Groq que lê imagem (print da tela). */
+internal fun groqVision(model: String) = model.lowercase().let { "llama-4" in it || "vision" in it }
+
+/**
+ * Quantos segundos esperar antes de refazer um pedido ao Groq sozinho; null: não adianta esperar (limite do dia).
+ * O Groq diz quanto esperar ("try again in 7.5s" ou "in 1m2s").
+ */
+internal fun groqWait(code: Int, reply: String): Int? = when {
+    code == 500 || code == 502 || code == 503 -> 10
+    code != 429 -> null
+    Regex("""per day|\((?:tpd|rpd)\)""", RegexOption.IGNORE_CASE).containsMatchIn(reply) -> null
+    else -> (Regex("""try again in (?:(\d+)m)?([\d.]+)s""").find(reply)?.let { m ->
+        (m.groupValues[1].toIntOrNull() ?: 0) * 60 + (m.groupValues[2].toDoubleOrNull() ?: 0.0).toInt() + 1
+    } ?: 20).coerceIn(2, 90)
+}

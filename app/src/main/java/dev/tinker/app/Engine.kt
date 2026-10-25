@@ -34,7 +34,10 @@ val TYPE_SIZES = mapOf("i8" to 1, "i16" to 2, "i32" to 4, "i64" to 8, "f32" to 4
 /** Tipo base: Dword 🔒 → Dword (a aba Memória mostra os bytes como estão). */
 fun plain(type: String) = type.removePrefix("x")
 /** Chave do Gemini que já vem no app (repositório privado, só para uso próprio). */
-private const val DEFAULT_GEMINI_KEY = "AQ.Ab8RN6Lp5RV67fXUwyvpsSE88Wn1ccPWgRbNnFuX-dAdYg8CFA"
+// a chave que vinha fixa no app (versões até 2.19): sai da lista de quem ainda tem; só o hash fica, para reconhecer
+private const val OLD_FIXED_KEY_SHA256 = "55c7b7cfa2a2f58d5da503db4b2d1188f423212cc586a53e75172c9720fc2e31"
+
+private fun sha256(text: String) = java.security.MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
 
 val TABS = listOf("Busca", "Salvos", "Memória", "Registro", "Ajustes")
 const val TAB_MEMORY = 2
@@ -233,8 +236,14 @@ object Session {
     val aiClasses = mutableStateListOf<GameClass>()  // classes que a IA recomendou: aparecem no topo da lista de classes
     var aiAsk by mutableStateOf<Pair<String, String>?>(null)  // pedido automático: (onde, pergunta) — a caixa ✨ daquela tela pergunta sozinha
     var engine by mutableStateOf<GameEngine?>(null)
-    var aiKey by mutableStateOf("")  // chave da API do Claude para o assistente; vazia = assistente desligado
-    var aiProvider by mutableStateOf("claude")  // "claude" ou "gemini"
+    var aiProvider by mutableStateOf("gemini")  // "gemini" ou "groq"
+    var aiReserve by mutableStateOf(true)  // sem cota ou servidor cheio: segue no outro provedor, se ele tiver chave
+    var groqKeys by mutableStateOf(listOf<String>())
+    var groqKeyIndex by mutableIntStateOf(0)
+    val groqKey get() = groqKeys.getOrNull(groqKeyIndex) ?: groqKeys.firstOrNull().orEmpty()
+    var groqModels by mutableStateOf(listOf<String>())  // os que a chave do Groq pode usar, o melhor primeiro
+    var groqModel by mutableStateOf("")  // vazio: escolhido sozinho na primeira pergunta
+    var sheetGroqKeys = setOf<String>()  // chaves do Groq que vieram do painel
     var aiCanTest by mutableStateOf(false)  // a IA pode escrever um valor de teste (e voltar o original) para saber se é o verdadeiro
     var aiAuto by mutableStateOf(false)  // modo autônomo 1: a IA aplica, congela, testa e cria receitas sem esperar o toque
     var aiControl by mutableStateOf(false)  // modo autônomo 2: a IA toca e arrasta na tela do jogo para fazer o valor mudar
@@ -287,7 +296,9 @@ class Engine private constructor(private val app: Context) {
         prefs.edit().putBoolean("autoPause", Session.autoPause).putBoolean("findEncrypted", Session.findEncrypted)
             .putBoolean("autoPointers", Session.autoPointers).putBoolean("gameLibsOnly", Session.gameLibsOnly)
             .putBoolean("autoOverlay", Session.autoOverlay).putBoolean("ownKeypad", Session.ownKeypad).putFloat("alpha", Session.alpha).putInt("panelSize2", Session.panelSize).putBoolean("panelLeft", Session.panelLeft)
-            .putString("aiKey", Session.aiKey).putString("aiProvider", Session.aiProvider).putBoolean("aiCanTest", Session.aiCanTest).putBoolean("aiAuto", Session.aiAuto).putBoolean("aiControl", Session.aiControl)
+            .remove("aiKey").putString("aiProvider", Session.aiProvider).putBoolean("aiReserve", Session.aiReserve)
+            .putString("groqKeys", Session.groqKeys.joinToString("\n")).putInt("groqKeyIndex", Session.groqKeyIndex).putString("groqModel", Session.groqModel)
+            .putString("sheetGroqKeys", Session.sheetGroqKeys.joinToString("\n")).putBoolean("aiCanTest", Session.aiCanTest).putBoolean("aiAuto", Session.aiAuto).putBoolean("aiControl", Session.aiControl)
             .putString("geminiKeys", Session.geminiKeys.joinToString("\n")).putInt("geminiKeyIndex", Session.geminiKeyIndex)
             .putString("keySource", Session.keySource).putString("sheetKeys", Session.sheetKeys.joinToString("\n"))
             .putString("geminiModel", Session.geminiModel).putBoolean("geminiAuto", Session.geminiAutoModel).putBoolean("watchFields", Session.watchFields)
@@ -305,18 +316,24 @@ class Engine private constructor(private val app: Context) {
         Session.gameLibsOnly = prefs.getBoolean("gameLibsOnly", true)
         Session.autoOverlay = prefs.getBoolean("autoOverlay", true)
         Session.ownKeypad = prefs.getBoolean("ownKeypad", true)
-        Session.aiKey = prefs.getString("aiKey", "").orEmpty()
-        Session.aiProvider = prefs.getString("aiProvider", "claude").orEmpty()
+        // o Claude saiu do app (chave paga): quem usava passa para o Gemini
+        Session.aiProvider = prefs.getString("aiProvider", "gemini").orEmpty().takeIf { it == "gemini" || it == "groq" } ?: "gemini"
+        Session.aiReserve = prefs.getBoolean("aiReserve", true)
+        Session.groqKeys = prefs.getString("groqKeys", "").orEmpty().split('\n').filter { it.isNotBlank() }
+        Session.groqKeyIndex = prefs.getInt("groqKeyIndex", 0).coerceIn(0, (Session.groqKeys.size - 1).coerceAtLeast(0))
+        Session.groqModel = prefs.getString("groqModel", "").orEmpty()
+        Session.sheetGroqKeys = prefs.getString("sheetGroqKeys", "").orEmpty().split('\n').filter { it.isNotBlank() }.toSet()
         Session.aiCanTest = prefs.getBoolean("aiCanTest", false)
         Session.aiAuto = prefs.getBoolean("aiAuto", false)
         Session.aiControl = prefs.getBoolean("aiControl", false)
         // antes era uma chave só ("geminiKey"): vira a primeira da lista
         Session.geminiKeys = (prefs.getString("geminiKeys", null) ?: prefs.getString("geminiKey", "")).orEmpty().split('\n').filter { it.isNotBlank() }
         Session.geminiKeyIndex = prefs.getInt("geminiKeyIndex", 0).coerceIn(0, (Session.geminiKeys.size - 1).coerceAtLeast(0))
-        // chave pré-definida (repositório privado, uso pessoal): entra uma vez só; apagou ou trocou, não volta
-        if (!prefs.getBoolean("defaultKeyGiven", false)) {
-            if (Session.geminiKeys.isEmpty()) { Session.geminiKeys = listOf(DEFAULT_GEMINI_KEY); Session.aiProvider = "gemini" }
-            prefs.edit().putBoolean("defaultKeyGiven", true).putString("geminiKeys", Session.geminiKeys.joinToString("\n")).putString("aiProvider", Session.aiProvider).apply()
+        // a chave que vinha fixa no app sai: as chaves agora vêm do painel (planilha) ou de Ajustes
+        Session.geminiKeys.filter { sha256(it) == OLD_FIXED_KEY_SHA256 }.takeIf { it.isNotEmpty() }?.let { old ->
+            Session.geminiKeys = Session.geminiKeys - old.toSet()
+            Session.geminiKeyIndex = 0
+            prefs.edit().putString("geminiKeys", Session.geminiKeys.joinToString("\n")).putInt("geminiKeyIndex", 0).apply()
         }
         Session.geminiModel = prefs.getString("geminiModel", Session.geminiModel).orEmpty().ifBlank { "gemini-2.5-flash" }
         Session.geminiAutoModel = prefs.getBoolean("geminiAuto", true)
@@ -877,14 +894,26 @@ class Engine private constructor(private val app: Context) {
                 (if (server.isBlank()) "" else "\n\n=== Sinais de que o servidor ou o antitrapaça confere valores (logcat do jogo) ===\n$server")
         }
         Assistant.ask(chat, full, question, tools, onStep).let { a ->
+            if (!Assistant.lastLimitFail) return@let a
             // a cota acabou em todas: o painel de chaves pode ter chave nova; se tiver, segue de onde parou
-            if (Session.aiProvider != "gemini" || Session.keySource.isBlank() || !a.startsWith("A cota grátis do Gemini acabou")) return@let a
-            val before = Session.geminiKeys.toSet()
-            val sync = syncKeys()
-            Diag.add(sync)
-            if (Session.geminiKeys.none { it !in before }) return@let a
-            onStep("🔑 Chave nova do painel: continuando")
-            Assistant.ask(chat, full, "Continue de onde parou.", tools, onStep)
+            if (Session.keySource.isNotBlank()) {
+                val before = (Session.geminiKeys + Session.groqKeys).toSet()
+                Diag.add(syncKeys())
+                val mine = if (Session.aiProvider == "groq") Session.groqKeys else Session.geminiKeys
+                if (mine.any { it !in before }) {
+                    onStep("🔑 Chave nova do painel: continuando")
+                    return@let Assistant.ask(chat, full, "Continue de onde parou.", tools, onStep)
+                }
+            }
+            // sem cota ou servidor cheio: o outro provedor (com chave) faz a mesma pergunta
+            val other = if (Session.aiProvider == "groq") "gemini" else "groq"
+            val otherKeys = if (other == "groq") Session.groqKeys else Session.geminiKeys
+            if (!Session.aiReserve || otherKeys.isEmpty()) return@let a
+            val name = if (other == "groq") "Groq" else "Gemini"
+            Diag.add("${if (other == "groq") "Gemini" else "Groq"} sem cota ou cheio: seguindo com o $name")
+            onStep("🔁 Seguindo com o $name")
+            withContext(Dispatchers.Main) { Session.aiProvider = other }
+            Assistant.ask(chat, full, question, tools, onStep)
         }.also {
             saveSettings()  // o Gemini pode ter trocado de modelo sozinho
             Diag.add("Assistente respondeu: ${it.take(600).replace('\n', ' ')}")
@@ -1439,23 +1468,42 @@ class Engine private constructor(private val app: Context) {
     )
 
     /** Mais uma chave do Gemini no fim da lista (a de agora continua sendo usada até a cota acabar). */
-    fun addGeminiKey(raw: String): String {
-        val k = raw.filterNot { it.isWhitespace() }
-        if (k.isEmpty()) return "Chave vazia."
-        if (k in Session.geminiKeys) return "Essa chave já está na lista."
-        Session.geminiKeys = Session.geminiKeys + k
+    /** Uma ou várias chaves (uma por linha, ou separadas por espaço/vírgula) para o provedor escolhido. */
+    fun addKeys(provider: String, raw: String): String {
+        val groq = provider == "groq"
+        val list = raw.split(Regex("""[\s,;]+""")).map { it.trim() }.filter { it.isNotEmpty() }
+        if (list.isEmpty()) return "Chave vazia."
+        val have = if (groq) Session.groqKeys else Session.geminiKeys
+        val bad = list.filterNot { GEMINI_KEY.matches(it) }
+        val new = list.filter { GEMINI_KEY.matches(it) && it !in have }.distinct()
+        if (groq) Session.groqKeys = have + new else Session.geminiKeys = have + new
         saveSettings()
-        val ok = k.startsWith("AIza") || k.startsWith("AQ.")
-        return "Chave ${Session.geminiKeys.size} adicionada." + if (ok) "" else " Não parece uma chave do Gemini (começa com AIza ou AQ.)."
+        val other = new.count { it.startsWith("gsk_") != groq }
+        return "${new.size} chave(s) adicionada(s)" + (if (list.size - bad.size - new.size > 0) ", ${list.size - bad.size - new.size} já estavam" else "") +
+            (if (bad.isNotEmpty()) ", ${bad.size} inválida(s)" else "") +
+            (if (other > 0) ". Atenção: $other não parece(m) do ${if (groq) "Groq (gsk_…)" else "Gemini (AIza… ou AQ.…)"}" else "") + "."
     }
 
-    fun removeGeminiKey(i: Int) {
-        Session.geminiKeys = Session.geminiKeys.filterIndexed { j, _ -> j != i }
-        Session.geminiKeyIndex = when {
-            Session.geminiKeyIndex > i -> Session.geminiKeyIndex - 1
-            else -> Session.geminiKeyIndex.coerceAtMost((Session.geminiKeys.size - 1).coerceAtLeast(0))
+    fun removeKey(provider: String, i: Int) {
+        fun fix(index: Int, size: Int) = if (index > i) index - 1 else index.coerceAtMost((size - 1).coerceAtLeast(0))
+        if (provider == "groq") {
+            Session.groqKeys = Session.groqKeys.filterIndexed { j, _ -> j != i }
+            Session.groqKeyIndex = fix(Session.groqKeyIndex, Session.groqKeys.size)
+        } else {
+            Session.geminiKeys = Session.geminiKeys.filterIndexed { j, _ -> j != i }
+            Session.geminiKeyIndex = fix(Session.geminiKeyIndex, Session.geminiKeys.size)
         }
         saveSettings()
+    }
+
+    /** Pergunta ao Groq quais modelos a chave pode usar; se o escolhido não está entre eles, troca pelo melhor. */
+    suspend fun detectGroqModels(): String = withContext(Dispatchers.IO) {
+        val ms = Assistant.groqModels(Session.groqKey)
+        if (ms.isEmpty()) return@withContext "Não consegui ver os modelos: confira a chave do Groq e a internet."
+        Session.groqModels = ms
+        if (Session.groqModel !in ms) Session.groqModel = ms.first()
+        saveSettings()
+        "Chave ok: ${ms.size} modelos. Usando ${Session.groqModel}."
     }
 
     /**
@@ -1475,19 +1523,24 @@ class Engine private constructor(private val app: Context) {
         val j = runCatching { JSONObject(text) }.getOrNull()
             ?: return@withContext "O painel não respondeu a lista. Confira a implantação: App da Web, Executar como Eu, Qualquer pessoa."
         if (j.has("erro")) return@withContext "O painel recusou o link (token antigo?). Copie o link de novo no painel."
-        val got = j.optJSONArray("chaves")?.let { a -> (0 until a.length()).map { a.optString(it).trim() } }.orEmpty()
+        fun list(name: String) = j.optJSONArray(name)?.let { a -> (0 until a.length()).map { a.optString(it).trim() } }.orEmpty()
             .filter { GEMINI_KEY.matches(it) }.distinct()
-        val (before, total) = withContext(Dispatchers.Main) {
+        val got = list("chaves")
+        val gotGroq = list("groq")
+        val added = withContext(Dispatchers.Main) {
+            val old = Session.geminiKeys + Session.groqKeys
             val current = Session.geminiKey
-            val old = Session.geminiKeys
-            Session.geminiKeys = (old.filter { it !in Session.sheetKeys } + got).distinct()
+            Session.geminiKeys = (Session.geminiKeys.filter { it !in Session.sheetKeys } + got).distinct()
             Session.sheetKeys = got.toSet()
             Session.geminiKeyIndex = Session.geminiKeys.indexOf(current).coerceAtLeast(0)
+            val currentGroq = Session.groqKey
+            Session.groqKeys = (Session.groqKeys.filter { it !in Session.sheetGroqKeys } + gotGroq).distinct()
+            Session.sheetGroqKeys = gotGroq.toSet()
+            Session.groqKeyIndex = Session.groqKeys.indexOf(currentGroq).coerceAtLeast(0)
             saveSettings()
-            old to Session.geminiKeys.size
+            (got + gotGroq).count { it !in old }
         }
-        val added = got.count { it !in before }
-        "Painel de chaves: ${got.size} chaves ativas lá" + (if (added > 0) ", $added novas" else "") + " · $total no app."
+        "Painel de chaves: ${got.size} do Gemini e ${gotGroq.size} do Groq" + (if (added > 0) ", $added novas" else "") + "."
     }
 
     /** Pergunta ao Google quais modelos a chave pode usar; se o escolhido não está entre eles, troca pelo melhor. */
