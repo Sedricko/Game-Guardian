@@ -219,16 +219,29 @@ class OverlayService : Service() {
      * Onde o painel fica: em pé, em cima, com a altura do tamanho escolhido; deitado, de lado (direita ou esquerda),
      * com a largura do tamanho escolhido e a altura toda: o jogo continua à vista do outro lado.
      */
+    /** Barras do sistema (navegação de lado, deitado; recorte da câmera): o painel não entra embaixo delas. */
+    private fun bars(): android.graphics.Insets? = if (Build.VERSION.SDK_INT >= 30) runCatching {
+        wm.currentWindowMetrics.windowInsets.getInsetsIgnoringVisibility(
+            android.view.WindowInsets.Type.navigationBars() or android.view.WindowInsets.Type.displayCutout())
+    }.getOrNull() else null
+
     private fun place(p: LayoutParams) {
         val (w, h) = screen()
         val f = PANEL_SIZES[Session.panelSize].first
+        val b = bars()
+        val left = b?.left ?: 0
+        val right = b?.right ?: 0
         Session.panelWide = w > h && f < 1f
+        // deitado, a barra de navegação fica de lado: antes o painel ia até a borda e a barra cobria a aba Ajustes e os botões
+        val usable = w - left - right
         if (w > h) {
-            p.width = (w * f).toInt(); p.height = LayoutParams.MATCH_PARENT
+            p.width = (usable * f).toInt(); p.height = LayoutParams.MATCH_PARENT
             p.gravity = Gravity.TOP or if (Session.panelLeft) Gravity.START else Gravity.END
+            p.x = if (Session.panelLeft) left else right
         } else {
-            p.width = LayoutParams.MATCH_PARENT; p.height = (h * f).toInt()
-            p.gravity = Gravity.TOP
+            p.width = usable; p.height = ((h - (b?.bottom ?: 0)) * f).toInt()
+            p.gravity = Gravity.TOP or Gravity.START
+            p.x = left
         }
     }
 
