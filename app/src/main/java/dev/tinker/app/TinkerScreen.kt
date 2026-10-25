@@ -45,6 +45,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
@@ -325,7 +326,11 @@ private fun Header(
         if (onQuickBar != null) HeaderButton("⚡", "Barra rápida", onClick = onQuickBar)
         if (!overlay) HeaderButton("⧉", "Menu flutuante", onClick = onOpenOverlay)
         if (overlay) HeaderButton("—", "Minimizar", onClick = onMinimize)
-        HeaderButton("✕", "Sair", color = MaterialTheme.colorScheme.error, onClick = onExit)
+        // dois toques: o ✕ fica ao lado do — e fechava o Tinker por engano; o segundo toque tem 3 s para vir
+        var confirmExit by remember { mutableStateOf(false) }
+        LaunchedEffect(confirmExit) { if (confirmExit) { delay(3000); confirmExit = false } }
+        if (confirmExit) TextButton(onClick = onExit, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text("Sair?") }
+        else HeaderButton("✕", "Sair", color = MaterialTheme.colorScheme.error, onClick = { confirmExit = true })
     }
 }
 
