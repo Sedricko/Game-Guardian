@@ -559,6 +559,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
         // normal colado num 🔒 com o mesmo número (até 32 bytes, a mesma estrutura do antitrapaça): é cópia ou isca; editar o 🔒
         val cipher = s.results.filter { it.type.startsWith("x") }.map { it.addr.toLong(16) to readable(it.value, it.type) }
         items(s.results, key = { it.addr + it.type }) { hit ->
+            val ctx = LocalContext.current
             val key = hit.addr + hit.type
             // sobrou um só: o editor já vem aberto, com Congelar (antes eram 4 toques e ir até os Salvos)
             val open = editing == key || (count == 1L && editing == null)
@@ -575,6 +576,8 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                         TextButton(onClick = { engine.addSaved(listOf(hit), frozen = true); editing = "-" }) { Text("❄ Congelar") }
                         TextButton(onClick = { engine.addSaved(listOf(hit)); editing = "-" }) { Text("Salvar na lista") }
                         TextButton(onClick = { s.view = hit.addr to plain(hit.type); s.fichaMode = false; s.tab = TAB_MEMORY; editing = null }) { Text("Ver próximos") }
+                        TextButton(onClick = { s.view = hit.addr to plain(hit.type); s.fichaMode = true; s.tab = TAB_MEMORY; editing = null }) { Text("Ver ficha") }
+                        TextButton(onClick = { s.status = copyAddress(ctx, hit.addr) }) { Text("Copiar endereço") }
                     }
                 }
             }
@@ -1080,6 +1083,9 @@ private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
         }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             items(rows, key = { it.addr }) { row ->
+                val ctx = LocalContext.current
+                // Qword que parece endereço: dá para seguir, como o "Follow pointer" do Cheat Engine
+                val ptr = if (type == "i64") readable(row.value, type)?.toLongOrNull()?.takeIf { it in 0x10000L..0x7fffffffffffL } else null
                 val here = row.addr.toLong(16) == center.toLong(16) / TYPE_SIZES.getValue(type) * TYPE_SIZES.getValue(type)
                 val hot = (changed[row.addr] ?: 0L) > System.currentTimeMillis() - 3000
                 Column(
@@ -1104,6 +1110,12 @@ private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
                     if (editing == row.addr) {
                         InlineEditor(readable(row.value, type) ?: "", "Novo valor (${TYPE_NAMES[type]})", onSave = { v -> editing = null; run { engine.write(row.addr, type, v) } }, onCancel = { editing = null }) {
                             TextButton(onClick = { engine.addSaved(listOf(row.copy(region = "?"))); editing = null }) { Text("Salvar na lista") }
+                            TextButton(onClick = { s.status = copyAddress(ctx, row.addr) }) { Text("Copiar endereço") }
+                            TextButton(onClick = { s.view = row.addr to type; s.fichaMode = true; editing = null }) { Text("Ver ficha") }
+                            if (ptr != null) {
+                                TextButton(onClick = { s.view = ptr.toString(16) to type; editing = null }) { Text("Ir para 0x${ptr.toString(16)}") }
+                                TextButton(onClick = { s.status = copyAddress(ctx, ptr.toString(16)) }) { Text("Copiar o valor") }
+                            }
                         }
                     }
                 }
@@ -1362,6 +1374,7 @@ private fun FichaBody(engine: Engine, center: String, run: (suspend () -> String
     }
     LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         items(rows.filter { filter.isBlank() || it.label.contains(filter.trim(), ignoreCase = true) }, key = { it.addr + it.label }) { r ->
+            val ctx = LocalContext.current
             val a = r.addr.toLong(16)
             val here = center.toLong(16) in a until a + (if (r.type.isEmpty() || r.type == "xi32" || r.type == "i64" || r.type == "f64") 8 else 4)
             val hot = (changed[r.addr] ?: 0L) > System.currentTimeMillis() - 3000
@@ -1382,6 +1395,9 @@ private fun FichaBody(engine: Engine, center: String, run: (suspend () -> String
                 if (open == r.addr) {
                     Text("0x${r.addr}", fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        TextButton(onClick = { s.status = copyAddress(ctx, r.addr) }) { Text("Copiar endereço") }
+                        TextButton(onClick = { s.view = r.addr to (r.type.ifEmpty { "i32" }).let(::plain); s.fichaMode = false }) { Text("Ver na lista") }
+                        if (r.value.startsWith("0x")) TextButton(onClick = { s.status = copyAddress(ctx, r.value.removePrefix("0x")) }) { Text("Copiar o valor") }
                         if (r.type.isNotEmpty()) {
                             // entra nos Salvos já ligado pelo offset aos outros da mesma ficha, com nome do campo quando é IL2CPP
                             FilledTonalButton(shape = MaterialTheme.shapes.medium, onClick = { engine.addSaved(listOf(Hit(r.addr, r.type, "?", r.value))); s.status = "Salvo: ${r.label}"; open = null }) { Text("Salvar") }
@@ -1400,6 +1416,12 @@ private fun FichaBody(engine: Engine, center: String, run: (suspend () -> String
             }
         }
     }
+}
+
+/** Copia o endereço (como no Cheat Engine) e devolve o aviso para a linha de status. */
+private fun copyAddress(context: android.content.Context, addr: String): String {
+    context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Endereço", addr))
+    return "Copiado: $addr"
 }
 
 /**
