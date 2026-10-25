@@ -2197,6 +2197,93 @@ static void cmd_backup(const char *pkg) {
     printf("ok %s %lld\n", name, (long long)st.st_size);
 }
 
+// ---- editor de save: lista os arquivos de progresso do jogo, copia um para o app ler e copia de volta o editado ----
+// Só dentro da pasta de dados do jogo; o caminho não sai dela (sem "..") e o destino/origem é a pasta do próprio Tinker.
+static int valid_rel(const char *r) {
+    if (!*r || *r == '/' || strstr(r, "..") || strlen(r) > 120) return 0;
+    for (; *r; r++) if (!(isalnum((unsigned char)*r) || strchr("._-/+@", *r))) return 0;
+    return 1;
+}
+
+static int tinker_path(const char *p) {
+    const char *t = getenv("TINKER_APP_DIR");
+    if (t) return !strncmp(p, t, strlen(t)) && !strstr(p, "..");
+    return (!strncmp(p, "/data/data/dev.tinker.app/", 26) || !strncmp(p, "/data/user/0/dev.tinker.app/", 28)) && !strstr(p, "..");
+}
+
+static void list_saves(const char *root, const char *rel, int depth, int *n) {
+    char path[700];
+    snprintf(path, sizeof path, "%s/%s", root, rel);
+    DIR *d = opendir(path);
+    for (struct dirent *e; d && (e = readdir(d)) && *n < 300;) {
+        if (e->d_name[0] == '.') continue;
+        char r[400], f[1100];
+        snprintf(r, sizeof r, "%s%s%s", rel, *rel ? "/" : "", e->d_name);
+        snprintf(f, sizeof f, "%s/%s", root, r);
+        struct stat st;
+        if (lstat(f, &st)) continue;
+        if (S_ISDIR(st.st_mode)) {
+            // cache, código e bibliotecas não são save
+            if (depth < 3 && strcmp(e->d_name, "cache") && strcmp(e->d_name, "code_cache") && strcmp(e->d_name, "lib") && strcmp(e->d_name, "app_webview"))
+                list_saves(root, r, depth + 1, n);
+        } else if (S_ISREG(st.st_mode) && st.st_size > 0 && st.st_size <= (4 << 20) && valid_rel(r)) {
+            printf("file %s %lld\n", r, (long long)st.st_size);
+            (*n)++;
+        }
+    }
+    if (d) closedir(d);
+}
+
+static void cmd_savefiles(const char *pkg) {
+    if (!valid_pkg(pkg)) { puts("err pacote inválido"); return; }
+    char root[512];
+    snprintf(root, sizeof root, "%s/%s", data_dir(), pkg);
+    int n = 0;
+    list_saves(root, "", 0, &n);
+    printf("ok %d\n", n);
+}
+
+static int copy_file(const char *from, const char *to) {
+    FILE *a = fopen(from, "rb");
+    if (!a) return -1;
+    char tmp[700];
+    snprintf(tmp, sizeof tmp, "%s.tinker-tmp", to);
+    FILE *b = fopen(tmp, "wb");
+    if (!b) { fclose(a); return -1; }
+    char buf[65536];
+    size_t n;
+    int bad = 0;
+    while ((n = fread(buf, 1, sizeof buf, a)) > 0) if (fwrite(buf, 1, n, b) != n) bad = 1;
+    fclose(a);
+    if (fclose(b) || bad) { unlink(tmp); return -1; }
+    return rename(tmp, to);
+}
+
+// readsave PKG REL DEST: o arquivo do jogo vai para DEST (na pasta do Tinker), legível pelo app
+static void cmd_readsave(const char *pkg, const char *rel, const char *dest) {
+    if (!valid_pkg(pkg) || !valid_rel(rel) || !tinker_path(dest)) { puts("err caminho inválido"); return; }
+    char src[700];
+    snprintf(src, sizeof src, "%s/%s/%s", data_dir(), pkg, rel);
+    if (copy_file(src, dest)) { printf("err não copiou: %s\n", strerror(errno)); return; }
+    chmod(dest, 0644);
+    puts("ok");
+}
+
+// writesave PKG REL SRC: o editado (SRC, na pasta do Tinker) volta para o jogo com o mesmo dono, permissão e contexto
+static void cmd_writesave(const char *pkg, const char *rel, const char *srcp) {
+    if (!valid_pkg(pkg) || !valid_rel(rel) || !tinker_path(srcp)) { puts("err caminho inválido"); return; }
+    char dst[700];
+    snprintf(dst, sizeof dst, "%s/%s/%s", data_dir(), pkg, rel);
+    struct stat st;
+    if (stat(dst, &st)) { printf("err o arquivo do jogo não existe: %s\n", rel); return; }
+    if (copy_file(srcp, dst)) { printf("err não gravou: %s\n", strerror(errno)); return; }
+    if (chown(dst, st.st_uid, st.st_gid)) { /* teste sem root: segue */ }
+    chmod(dst, st.st_mode & 07777);
+    char *rc[] = {"restorecon", dst, NULL};
+    run_quiet(rc);
+    puts("ok");
+}
+
 static void cmd_backups(const char *pkg) {
     if (!valid_pkg(pkg)) { puts("err pacote inválido"); return; }
     char dir[512];
@@ -2381,6 +2468,9 @@ int main(void) {
         // backup do save não precisa do jogo aberto (até melhor fechado)
         if (!strcmp(cmd, "backup")) { cmd_backup(a1); continue; }
         if (!strcmp(cmd, "backups")) { cmd_backups(a1); continue; }
+        if (!strcmp(cmd, "savefiles")) { cmd_savefiles(a1); continue; }
+        if (!strcmp(cmd, "readsave")) { cmd_readsave(a1, a2, a3); continue; }
+        if (!strcmp(cmd, "writesave")) { cmd_writesave(a1, a2, a3); continue; }
         if (!strcmp(cmd, "restoresave")) { cmd_restoresave(a1, a2); continue; }
         if (!target) { puts("err nenhum jogo escolhido"); continue; }
         if (!alive()) { puts("err o jogo fechou"); continue; }

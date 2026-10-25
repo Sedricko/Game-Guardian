@@ -525,6 +525,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                     AobSearch(engine, enabled, run)
                     PhotoPanel(engine, enabled, s.results.filter { it.addr + it.type in selected }.map { it.addr }, run)
                     ActivityPanel(engine, enabled)
+                    SaveEditorPanel(engine, run)
                     TextButton(onClick = { s.view = null; s.tab = TAB_MEMORY }, enabled = s.process != null) { Text("Ir para endereço…") }
                 }
                 if (s.process != null) AiBox(
@@ -876,6 +877,14 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
                     if (overlay) onMinimize()  // o seletor de apps abre atrás do painel
                     shareFile(context, file, "application/json")
                 }, enabled = s.saved.isNotEmpty()) { Text("Exportar") }
+                // tabela do Cheat Engine (.CT): os salvos com ponteiro abrem no CE e listas do CE abrem aqui (Colar ou Abrir arquivo)
+                OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = {
+                    val file = File(context.cacheDir, "reports").apply { mkdirs() }
+                        .let { File(it, "tinker-salvos-${System.currentTimeMillis() / 1000}.CT") }.apply { writeText(engine.exportCt()) }
+                    info = saveToDownloads(context, file, "application/xml")?.let { "Salvo em Download/Tinker/${file.name}" } ?: "Tabela pronta: ${file.name}"
+                    if (overlay) onMinimize()
+                    shareFile(context, file, "application/xml")
+                }, enabled = s.saved.isNotEmpty()) { Text("Exportar .CT (Cheat Engine)") }
                 OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = {
                     context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Lista do Tinker", engine.exportSaved()))
                     info = "Lista copiada. Cole onde quiser."
@@ -1831,6 +1840,68 @@ private fun LuaPanel(engine: Engine, center: String, run: (suspend () -> String)
 }
 
 /**
+ * 💾 Editor de save: os arquivos de progresso do jogo (preferências e PlayerPrefs do Unity em XML, JSON) com cada número
+ * pelo nome. Gravar faz backup do save, fecha o jogo e devolve o arquivo; ao abrir de novo, o jogo lê o valor novo.
+ */
+@Composable
+private fun SaveEditorPanel(engine: Engine, run: (suspend () -> String) -> Unit) {
+    val s = Session
+    val scope = rememberCoroutineScope()
+    var open by remember { mutableStateOf(false) }
+    var files by remember(s.process) { mutableStateOf<List<Pair<String, Long>>?>(null) }
+    var file by remember { mutableStateOf<String?>(null) }
+    var text by remember { mutableStateOf<String?>(null) }
+    var info by remember { mutableStateOf<String?>(null) }
+    var filter by remember { mutableStateOf("") }
+    val edits = remember(file) { mutableStateMapOf<SaveField, String>() }
+    TextButton(onClick = {
+        open = !open
+        if (open && files == null) scope.launch { runCatching { engine.saveFiles() }.onSuccess { files = it }.onFailure { info = it.message } }
+    }, enabled = s.process != null) { Text((if (open) "▾ " else "▸ ") + "💾 Editor de save (jogo offline)") }
+    if (!open) return
+    Panel {
+        Text("Os arquivos onde o jogo guarda o progresso. Gravar faz backup do save, fecha o jogo e devolve o arquivo editado.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        info?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
+        val t = text
+        if (file == null || t == null) {
+            val list = files ?: return@Panel LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (list.isEmpty()) Text("Nenhum arquivo de save achado.", style = MaterialTheme.typography.bodySmall)
+            Column(Modifier.fillMaxWidth().heightIn(max = 260.dp).verticalScroll(rememberScrollState())) {
+                list.take(80).forEach { (f, size) ->
+                    TextButton(onClick = {
+                        scope.launch {
+                            runCatching { engine.readSave(f) }.onSuccess { file = f; text = it; info = null }.onFailure { info = it.message }
+                        }
+                    }) { Text("$f · ${if (size >= 1024) "${size / 1024} KB" else "$size B"}", fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                }
+            }
+        } else {
+            val fields = remember(t) { saveFields(t) }
+            Text("$file · ${fields.size} números", style = MaterialTheme.typography.labelLarge)
+            if (fields.isEmpty()) Text("Sem números legíveis neste arquivo.", style = MaterialTheme.typography.bodySmall)
+            if (fields.size > 8) OutlinedTextField(filter, { filter = it }, label = { Text("Filtrar (ex.: gold)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            Column(Modifier.fillMaxWidth().heightIn(max = 300.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                fields.filter { filter.isBlank() || it.key.contains(filter.trim(), ignoreCase = true) }.take(200).forEach { f ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(f.key, Modifier.weight(1f), fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        ValueField(edits[f] ?: f.value, "", { v -> if (v == f.value) edits.remove(f) else edits[f] = v }, Modifier.width(120.dp))
+                    }
+                }
+            }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(shape = MaterialTheme.shapes.medium, enabled = edits.isNotEmpty(), onClick = {
+                    val rel = file!!
+                    val changes = edits.toMap()
+                    run { engine.writeSave(rel, t, changes).also { file = null; text = null } }
+                }) { Text("Gravar (${edits.size}) e fechar o jogo") }
+                TextButton(onClick = { file = null; text = null }) { Text("Voltar à lista") }
+            }
+        }
+    }
+}
+
+/**
  * 📍 Onde o jogo escreve: marca a memória, a pessoa carrega o jogo ou uma fase, e o Tinker mostra por região quanto foi
  * escrito. As regiões com mais escrita viram as "deste jogo": a próxima busca começa só nelas (menos resultados).
  */
@@ -2276,6 +2347,9 @@ private val HELP = listOf(
     "📍 Onde o jogo escreve" to "Em Busca → Mais formas: Começar, carregue o jogo ou uma fase, Ver. Mostra em que regiões da memória o jogo " +
         "escreveu. Usar nas buscas deste jogo faz a busca começar só nelas (bem menos resultados); se não achar, ela procura em tudo sozinha. " +
         "Os salvos também ensinam: a região de cada salvo entra junto.",
+    "💾 Editor de save" to "Busca → Mais formas → Editor de save: lista os arquivos onde o jogo guarda o progresso. Os de texto (XML das " +
+        "preferências, PlayerPrefs do Unity, JSON) mostram cada número pelo nome; mude e toque em Gravar: o Tinker faz backup do save, fecha o " +
+        "jogo e devolve o arquivo. Ao abrir de novo, o jogo lê o valor novo. Save binário ou cifrado não dá: use a busca na memória. Só jogo offline.",
     "Editar em sequência" to "Como no GameGuardian: em Busca → Editar, \"Em sequência\" escreve 100, 101, 102… um em cada resultado (ou nos " +
         "marcados). O número que aparecer no jogo mostra qual endereço é o certo. 🎯 Descobrir pela tela faz isso sozinho: escreve, lê a " +
         "tela, diz qual foi e volta tudo como estava. Voltar como estava desfaz a sequência. Só em jogo offline.",

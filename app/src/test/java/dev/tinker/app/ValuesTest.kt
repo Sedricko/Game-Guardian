@@ -226,6 +226,23 @@ class ValuesTest {
     }
 
     @Test
+    fun cheatEngineTable() {
+        val ct = ctFromSaved(listOf(
+            SavedItem("7a00001000", "i32", "Ca", "20", name = "Madeira", pointer = "libgame.so+e49148 28 0 8"),
+            SavedItem("7a00002000", "f32", "Ca", "1.5", name = "Vida"),
+        ))
+        assertTrue("<Address>libgame.so+e49148</Address>" in ct && "<VariableType>4 Bytes</VariableType>" in ct)
+        assertTrue(Regex("<Offset>8</Offset>\\s*<Offset>0</Offset>\\s*<Offset>28</Offset>").containsMatchIn(ct))  // do último para o primeiro
+        val back = savedFromCt(ct)
+        assertEquals(2, back.size)
+        assertEquals("libgame.so+e49148 28 0 8", back[0].pointer)
+        assertEquals("Madeira", back[0].name)
+        assertEquals("i32", back[0].type)
+        assertEquals("7a00002000", back[1].addr)
+        assertEquals("f32", back[1].type)
+    }
+
+    @Test
     fun engineExtraTypes() {
         assertEquals(listOf("i32x2", "i64x2"), engineTypes("Flutter"))
         assertEquals(emptyList<String>(), engineTypes("Unity IL2CPP"))
@@ -353,5 +370,17 @@ class ValuesTest {
         assertEquals(20, groqWait(429, "rate limited"))
         assertEquals(10, groqWait(503, ""))
         assertEquals(null, groqWait(401, ""))
+    }
+    @Test
+    fun saveEditor() {
+        val xml = """<map><int name="gold%20coins" value="150" /><string name="gems">7</string><string name="nome">Ana</string></map>"""
+        val f = saveFields(xml)
+        assertEquals(listOf("gold coins", "gems"), f.map { it.key })
+        assertEquals("<map><int name=\"gold%20coins\" value=\"999\" /><string name=\"gems\">7</string><string name=\"nome\">Ana</string></map>",
+            applySaveEdits(xml, mapOf(f[0] to "999")))
+        val js = """{"hp": 10, "xp":2.5}"""
+        val g = saveFields(js)
+        assertEquals(listOf("10", "2.5"), g.map { it.value })
+        assertEquals("""{"hp": 77, "xp":3}""", applySaveEdits(js, mapOf(g[0] to "77", g[1] to "3")))
     }
 }

@@ -171,6 +171,18 @@ echo "$rs"
     && [ "$(cat "$out/data/com.teste.jogo/files/save.dat")" = v1 ] && ! tar -tf "$out/saves/com.teste.jogo/$name" | grep -q cache/x \
     || { echo "FALHOU: backup do save"; exit 1; }
 
+# Editor de save: lista os arquivos (sem o cache), copia um para a pasta do Tinker, volta o editado e recusa caminho para fora
+mkdir -p "$out/data/com.teste.jogo/shared_prefs" "$out/app"
+echo '<map><int name="gold" value="250" /></map>' > "$out/data/com.teste.jogo/shared_prefs/com.teste.jogo.v2.playerprefs.xml"
+sv=$( { printf '%s\n' "savefiles com.teste.jogo" "readsave com.teste.jogo shared_prefs/com.teste.jogo.v2.playerprefs.xml $out/app/p.xml"; sleep 0.2
+        sed -i 's/250/9999/' "$out/app/p.xml" 2>/dev/null
+        printf '%s\n' "writesave com.teste.jogo shared_prefs/com.teste.jogo.v2.playerprefs.xml $out/app/p.xml" "readsave com.teste.jogo ../../etc/passwd $out/app/x" "readsave com.teste.jogo files/save.dat /tmp/fora"; } \
+    | TINKER_DATA_DIR="$out/data" TINKER_APP_DIR="$out/app" "$out/tinkerd")
+echo "$sv"
+grep -q "^file shared_prefs/com.teste.jogo.v2.playerprefs.xml " <<<"$sv" && ! grep -q "^file cache/" <<<"$sv" \
+    && grep -q 'value="9999"' "$out/data/com.teste.jogo/shared_prefs/com.teste.jogo.v2.playerprefs.xml" \
+    && [ "$(grep -c '^err caminho inválido' <<<"$sv")" = 2 ] || { echo "FALHOU: editor de save"; exit 1; }
+
 # Ponteiros: acha root → +10 → +20 e o caminho volta a dar no mesmo endereço
 ptr=$(printf '%s\n' "attach $pid" "pointers $paddr 256 3" | "$out/tinkerd")
 echo "$ptr" | head -20

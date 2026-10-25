@@ -3190,6 +3190,37 @@ class Engine private constructor(private val app: Context) {
         "Backup do save guardado: ${r[0]} ($kb KB). Se algo der errado, volte ele aqui."
     }
 
+    // ---- editor de save: os arquivos de progresso do jogo (preferências XML, JSON), campos numéricos com nome ----
+
+    suspend fun saveFiles(): List<Pair<String, Long>> = call { d ->
+        d.send("savefiles ${gamePkg()}", quiet = true).lines.filter { it.startsWith("file ") }.map { it.split(' ') }.filter { it.size == 3 }
+            .map { it[1] to (it[2].toLongOrNull() ?: 0) }
+            // os que dá para editar primeiro: preferências (PlayerPrefs do Unity) e JSON
+            .sortedBy { (f, _) -> if (f.endsWith(".xml") || f.endsWith(".json")) 0 else 1 }
+    }
+
+    /** O texto do arquivo, ou erro se for binário/cifrado (aí o editor não ajuda). */
+    suspend fun readSave(rel: String): String {
+        val tmp = File(app.cacheDir, "save-edit.tmp").apply { delete() }
+        call { d -> d.send("readsave ${gamePkg()} $rel ${tmp.absolutePath}") }
+        val bytes = tmp.readBytes()
+        val odd = bytes.count { b -> b == 0.toByte() || (b in 1..8) }
+        require(odd * 50 < bytes.size.coerceAtLeast(1)) { "É binário ou cifrado: o editor só lê texto (XML, JSON). Use a busca na memória." }
+        return String(bytes, Charsets.UTF_8)
+    }
+
+    /** Grava as edições: backup do save antes, fecha o jogo (aberto, ele salvaria por cima) e devolve o arquivo. */
+    suspend fun writeSave(rel: String, original: String, edits: Map<SaveField, String>): String {
+        val text = applySaveEdits(original, edits)
+        require(text != original) { "Nada mudou." }
+        val backup = backupSave()
+        if (Session.process != null) runCatching { killGame() }
+        val tmp = File(app.cacheDir, "save-edit.tmp").apply { writeText(text) }
+        call { d -> d.send("writesave ${gamePkg()} $rel ${tmp.absolutePath}") }
+        Diag.add("Editor de save: $rel com ${edits.size} campo(s) mudado(s)")
+        return "Save gravado (${edits.size} campo(s)). $backup Abra o jogo de novo."
+    }
+
     suspend fun listBackups(): List<String> = call { d ->
         d.send("backups ${gamePkg()}", quiet = true).lines.filter { it.startsWith("save ") }.map { it.split(' ')[1] }.sortedDescending()
     }
@@ -3809,8 +3840,21 @@ class Engine private constructor(private val app: Context) {
         .put("itens", JSONArray().apply { Session.saved.forEach { put(it.toJson()) } })
         .toString(2)
 
-    /** Aceita o formato do exportSaved ou só a lista. Devolve uma mensagem para a tela. */
+    /** Tabela do Cheat Engine (.CT) com os salvos: endereço, tipo, nome e o ponteiro quando tem. */
+    fun exportCt(): String = ctFromSaved(Session.saved.toList())
+
+    /** Aceita o formato do exportSaved, só a lista, ou uma tabela .CT do Cheat Engine. Devolve uma mensagem para a tela. */
     fun importSaved(text: String): String {
+        if ("<CheatTable" in text) {
+            val items = savedFromCt(text)
+            require(items.isNotEmpty()) { "A tabela não tem endereços que o Tinker entenda (tipos numéricos com endereço)." }
+            val new = items.filter { n -> Session.saved.none { it.pointer.isNotEmpty() && it.pointer == n.pointer || it.addr == n.addr && it.type == n.type } }
+            Session.saved.addAll(new)
+            storeSaved()
+            Diag.add("Tabela do Cheat Engine: ${new.size} de ${items.size} importados")
+            return "${new.size} de ${items.size} importados da tabela do Cheat Engine. Os com ponteiro (lib+deslocamento) voltam sozinhos; " +
+                "os de endereço fixo só valem se o jogo não reiniciou."
+        }
         val root = runCatching { JSONObject(text) }.getOrNull()
         root?.optJSONObject("receita")?.let { j ->
             val r = j.toRecipe().copy(id = java.util.UUID.randomUUID().toString(), auto = false)
@@ -4214,6 +4258,93 @@ private fun JSONObject.toSaved(): SavedItem {
         folder = optString("folder", "").take(40),
         freezeRule = optString("freezeRule", "").takeIf { it == "up" || it == "down" }.orEmpty(),
     )
+}
+
+// ---- tabela do Cheat Engine (.CT, XML) ----
+private val CT_TYPES = mapOf("Byte" to "i8", "2 Bytes" to "i16", "4 Bytes" to "i32", "8 Bytes" to "i64", "Float" to "f32", "Double" to "f64")
+
+private fun xml(t: String) = t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
+
+/** Nosso ponteiro "lib+base o1 o2" vira Address lib+base com os Offsets do CE (lá a lista vem do último para o primeiro). */
+internal fun ctFromSaved(items: List<SavedItem>): String = buildString {
+    appendLine("""<?xml version="1.0" encoding="utf-8"?>""")
+    appendLine("""<CheatTable CheatEngineTableVersion="45">""")
+    appendLine("  <CheatEntries>")
+    items.forEachIndexed { i, it ->
+        val ce = CT_TYPES.entries.firstOrNull { e -> e.value == plain(it.type) }?.key ?: return@forEachIndexed
+        val parts = it.pointer.split(' ').filter { p -> p.isNotEmpty() }
+        appendLine("    <CheatEntry>")
+        appendLine("      <ID>$i</ID>")
+        appendLine("      <Description>\"${xml(it.name.ifEmpty { "0x" + it.addr })}\"</Description>")
+        appendLine("      <VariableType>$ce</VariableType>")
+        appendLine("      <Address>${xml(parts.firstOrNull() ?: it.addr.uppercase())}</Address>")
+        if (parts.size > 1) {
+            appendLine("      <Offsets>")
+            parts.drop(1).reversed().forEach { o -> appendLine("        <Offset>${o.uppercase()}</Offset>") }
+            appendLine("      </Offsets>")
+        }
+        appendLine("    </CheatEntry>")
+    }
+    appendLine("  </CheatEntries>")
+    appendLine("</CheatTable>")
+}
+
+/** Cada CheatEntry com endereço e tipo numérico vira um salvo; grupos (sem endereço) e scripts ficam de fora. */
+internal fun savedFromCt(text: String): List<SavedItem> {
+    fun tag(block: String, name: String) = Regex("<$name>(.*?)</$name>", RegexOption.DOT_MATCHES_ALL).find(block)?.groupValues?.get(1)?.trim()
+    val out = mutableListOf<SavedItem>()
+    var i = text.indexOf("<CheatEntry>")
+    while (i >= 0) {
+        val next = text.indexOf("<CheatEntry>", i + 1)
+        val end = text.indexOf("</CheatEntry>", i).let { if (it < 0) text.length else it }
+        val block = text.substring(i, if (next in 0 until end) next else end)
+        i = next
+        val type = CT_TYPES[tag(block, "VariableType") ?: continue] ?: continue
+        val address = tag(block, "Address")?.replace("\"", "")?.trim() ?: continue
+        val name = tag(block, "Description")?.trim('"')?.replace("&quot;", "\"")?.replace("&lt;", "<")?.replace("&gt;", ">")?.replace("&amp;", "&").orEmpty().take(40)
+        val offsets = Regex("<Offset>(.*?)</Offset>").findAll(block).map { it.groupValues[1].trim().lowercase() }.toList().reversed()
+        val m = Regex("""(.+)\+([0-9a-fA-F]{1,16})""").matchEntire(address)
+        if (m != null) {
+            val pointer = (listOf(m.groupValues[1] + "+" + m.groupValues[2].lowercase()) + offsets).joinToString(" ")
+            if (!POINTER.matches(pointer) || offsets.any { it.toLongOrNull(16) == null }) continue
+            out += SavedItem("0", type, "?", "?", name = name, pointer = pointer, pid = 0, verified = false)
+        } else if (address.toLongOrNull(16) != null && offsets.isEmpty()) {
+            out += SavedItem(address.lowercase(), type, "?", "?", name = name, pid = 0)
+        }
+    }
+    return out
+}
+
+// ---- campos de um save em texto ----
+
+/** Um número num save: o nome (como o jogo chama), o valor e onde ele está no texto (para trocar só ele). */
+data class SaveField(val key: String, val value: String, val start: Int, val end: Int)
+
+private val PREF_NUM = Regex("""<(?:int|long|float) name="([^"]{1,120})" value="(-?[0-9.]+)"""")
+private val PREF_STR = Regex("""<string name="([^"]{1,120})">(-?\d+(?:\.\d+)?)</string>""")
+private val JSON_NUM = Regex(""""([^"\\]{1,80})"\s*:\s*(-?\d+(?:\.\d+)?)""")
+
+/** Campos numéricos: preferências do Android e PlayerPrefs do Unity (XML) e JSON. Nome das PlayerPrefs vem com %xx. */
+internal fun saveFields(text: String): List<SaveField> {
+    val regs = if (text.trimStart().startsWith("<")) listOf(PREF_NUM, PREF_STR) else listOf(JSON_NUM)
+    return regs.flatMap { r ->
+        r.findAll(text).map { m ->
+            val g = m.groups[2]!!
+            val key = runCatching { java.net.URLDecoder.decode(m.groupValues[1], "UTF-8") }.getOrDefault(m.groupValues[1])
+            SaveField(key, g.value, g.range.first, g.range.last + 1)
+        }
+    }.sortedBy { it.start }.take(500)
+}
+
+internal fun applySaveEdits(text: String, edits: Map<SaveField, String>): String {
+    var out = text
+    // de trás para frente: trocar um valor não mexe na posição dos anteriores
+    edits.entries.sortedByDescending { it.key.start }.forEach { (f, v) ->
+        val n = normalizeNumbers(v).trim()
+        require(Regex("""-?\d+(\.\d+)?""").matches(n)) { "Valor inválido para ${f.key}: $v" }
+        if (out.substring(f.start, f.end) == f.value) out = out.substring(0, f.start) + n + out.substring(f.end)
+    }
+    return out
 }
 
 /** "50;75" ou "100~200" ou misturado ("50;100~200"); cada item vira uma faixa (um número é a faixa dele mesmo). */
