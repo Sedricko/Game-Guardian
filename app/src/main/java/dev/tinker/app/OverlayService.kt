@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.res.Configuration
 import android.content.pm.ServiceInfo
 import android.graphics.PixelFormat
 import android.graphics.drawable.Icon
@@ -75,6 +76,8 @@ class OverlayService : Service() {
         showBubble()
         Diag.add("Menu flutuante aberto")
         // o jogo fechou sozinho: abre o painel com a pergunta "Reabrir o jogo?", como o GameGuardian
+        // trocou o lado do painel em Ajustes: muda na hora
+        watch.launch { snapshotFlow { Session.panelLeft }.collect { relayout() } }
         watch.launch {
             snapshotFlow { Session.gameGone }.collect { gone ->
                 if (gone != null && panel == null && !Session.gameGoneByUser) {
@@ -176,14 +179,19 @@ class OverlayService : Service() {
         bubble = null
         // focável para o teclado funcionar; NOT_TOUCH_MODAL deixa o toque fora do painel ir para o jogo
         val params = LayoutParams(
-            LayoutParams.MATCH_PARENT, panelHeight(),
+            LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT,
             LayoutParams.TYPE_APPLICATION_OVERLAY, LayoutParams.FLAG_NOT_TOUCH_MODAL, PixelFormat.TRANSLUCENT,
-        ).apply {
-            gravity = Gravity.TOP
-            softInputMode = LayoutParams.SOFT_INPUT_ADJUST_RESIZE
-        }
+        ).apply { softInputMode = LayoutParams.SOFT_INPUT_ADJUST_RESIZE }
+        place(params)
         val view = compose {
-            Box(Modifier.fillMaxSize().graphicsLayer { alpha = if (Session.peek) 0.06f else Session.alpha }.clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp))) {
+            // cantos arredondados do lado que fica sobre o jogo
+            val side = Session.panelWide
+            val shape = when {
+                !side -> RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)
+                Session.panelLeft -> RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp)
+                else -> RoundedCornerShape(topStart = 24.dp, bottomStart = 24.dp)
+            }
+            Box(Modifier.fillMaxSize().graphicsLayer { alpha = if (Session.peek) 0.06f else Session.alpha }.clip(shape)) {
                 TinkerPanel(Engine.get(this@OverlayService), overlay = true, onMinimize = ::closePanel, onResize = ::resizePanel, onExit = {
                     Engine.get(this@OverlayService).shutdown()
                     stopSelf()
@@ -199,15 +207,51 @@ class OverlayService : Service() {
         wm.addView(view, params)
     }
 
-    private fun panelHeight() = (resources.displayMetrics.heightPixels * PANEL_SIZES[Session.panelSize].first).toInt()
+    /** Tamanho da tela agora (gira com o jogo, muda em tela dividida). */
+    private fun screen(): Pair<Int, Int> =
+        if (Build.VERSION.SDK_INT >= 30) wm.currentWindowMetrics.bounds.let { it.width() to it.height() }
+        else resources.displayMetrics.let { it.widthPixels to it.heightPixels }
+
+    /**
+     * Onde o painel fica: em pé, em cima, com a altura do tamanho escolhido; deitado, de lado (direita ou esquerda),
+     * com a largura do tamanho escolhido e a altura toda: o jogo continua à vista do outro lado.
+     */
+    private fun place(p: LayoutParams) {
+        val (w, h) = screen()
+        val f = PANEL_SIZES[Session.panelSize].first
+        Session.panelWide = w > h && f < 1f
+        if (w > h) {
+            p.width = (w * f).toInt(); p.height = LayoutParams.MATCH_PARENT
+            p.gravity = Gravity.TOP or if (Session.panelLeft) Gravity.START else Gravity.END
+        } else {
+            p.width = LayoutParams.MATCH_PARENT; p.height = (h * f).toInt()
+            p.gravity = Gravity.TOP
+        }
+    }
+
+    private fun relayout() {
+        val view = panel ?: return
+        val params = panelParams ?: return
+        place(params)
+        wm.updateViewLayout(view, params)
+    }
 
     private fun resizePanel() {
         Session.panelSize = (Session.panelSize + 1) % PANEL_SIZES.size
         Engine.get(this).saveSettings()
-        val view = panel ?: return
-        val params = panelParams ?: return
-        params.height = panelHeight()
-        wm.updateViewLayout(view, params)
+        relayout()
+    }
+
+    // o jogo girou (ou a tela foi dividida): o painel se refaz e a bolinha e a barra voltam para dentro da tela
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        relayout()
+        val (w, h) = screen()
+        listOf(bubble to bubbleParams, bar to barParams).forEach { (v, p) ->
+            v ?: return@forEach
+            p.x = p.x.coerceIn(0, (w - 160).coerceAtLeast(0)); p.y = p.y.coerceIn(0, (h - 160).coerceAtLeast(0))
+            wm.updateViewLayout(v, p)
+        }
     }
 
     private fun closePanel() {

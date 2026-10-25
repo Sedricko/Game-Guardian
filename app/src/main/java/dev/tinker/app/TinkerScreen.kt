@@ -76,7 +76,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
@@ -86,6 +85,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -133,10 +135,12 @@ fun TinkerPanel(
     // a IA vai tocar no jogo: o painel sai da frente (a conversa continua; a bolinha abre de novo para ver ou parar)
     LaunchedEffect(s.aiHidePanel) { if (s.aiHidePanel && overlay) onMinimize() }
 
-    Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
+    // o tamanho que vale é o do painel (metade, de lado, tela dividida), não o da tela: tudo se ajusta a ele
+    Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) { BoxWithConstraints {
+        CompositionLocalProvider(LocalPanelSize provides DpSize(maxWidth, maxHeight)) {
         Column {
             // deitado (jogo na horizontal) a altura é pouca: cabeçalho e abas numa linha só, sobra mais para a lista
-            val wide = landscape()
+            val wide = landscape() && LocalPanelSize.current.width >= 600.dp  // painel estreito de lado: abas embaixo, senão não cabem
             if (wide) Row(verticalAlignment = Alignment.CenterVertically) {
                 Header(overlay, onPick = { picking = true }, onMinimize = onMinimize, onOpenOverlay = onOpenOverlay, onExit = onExit, run = run, onQuickBar = onQuickBar,
                     modifier = Modifier.weight(0.5f))
@@ -201,7 +205,8 @@ fun TinkerPanel(
                 }
             }
         }
-    }
+        }
+    } }
 }
 
 /** Abas do Tinker: o Tab do Material tem padding fixo e cortava "Memória" e "Registro" em telas estreitas. */
@@ -1052,7 +1057,7 @@ private fun FichaView(engine: Engine, center: String, run: (suspend () -> String
     // recolhido = altura 0, mas continua na tela (sem perder o que tinha dentro)
     val max = when {
         none -> Dp.Unspecified
-        switching -> (LocalConfiguration.current.screenHeightDp * 0.45f).dp
+        switching -> LocalPanelSize.current.height * 0.45f
         else -> 0.dp
     }
     Column(Modifier.fillMaxWidth().heightIn(max = max).clipToBounds().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1164,13 +1169,16 @@ private fun ClassOpener(engine: Engine) {
 @Composable
 private fun TopArea(content: @Composable ColumnScope.() -> Unit) {
     // deitado: só um quarto da altura para os controles (rolam), o resto fica para a lista
-    val max = (LocalConfiguration.current.screenHeightDp * if (landscape()) 0.25f else 0.45f).dp
+    val max = LocalPanelSize.current.height * if (landscape()) 0.25f else 0.45f
     Column(Modifier.fillMaxWidth().heightIn(max = max).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
 }
 
-/** Tela deitada (jogo na horizontal): mais larga que alta. */
+/** Tamanho do painel em dp (na Activity, a tela; no menu flutuante, o painel). */
+private val LocalPanelSize = androidx.compose.runtime.compositionLocalOf { DpSize(400.dp, 800.dp) }
+
+/** Pouca altura para o que mostra (jogo deitado, painel de lado ou pela metade): cabeçalho compacto e controles menores. */
 @Composable
-private fun landscape() = LocalConfiguration.current.let { it.screenWidthDp > it.screenHeightDp }
+private fun landscape() = LocalPanelSize.current.let { it.width > it.height || it.height < 480.dp }
 
 /** Uma classe da lista: nome, namespace, campos que bateram com o filtro; toque abre, ⧉ copia o nome. */
 @Composable
@@ -1534,6 +1542,12 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Tamanho do painel: ${PANEL_SIZES[s.panelSize].second}", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                         OutlinedButton(onClick = onResize) { Text("Trocar") }
+                    }
+                    Text("Em pé o tamanho é a altura; com o jogo deitado é a largura, e o painel fica de lado (o jogo continua à vista).",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Lado com o jogo deitado: ${if (s.panelLeft) "esquerda" else "direita"}", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                        OutlinedButton(onClick = { s.panelLeft = !s.panelLeft; engine.saveSettings() }) { Text("Trocar") }
                     }
                     Text("Transparência", style = MaterialTheme.typography.bodyMedium)
                     Slider(value = s.alpha, onValueChange = { s.alpha = it }, onValueChangeFinished = engine::saveSettings, valueRange = 0.35f..1f)

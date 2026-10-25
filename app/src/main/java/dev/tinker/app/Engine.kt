@@ -211,6 +211,8 @@ object Session {
     var paused by mutableStateOf(false)
     var alpha by mutableFloatStateOf(0.92f)
     var panelSize by mutableIntStateOf(2)  // índice em PANEL_SIZES; padrão: tela cheia
+    var panelLeft by mutableStateOf(false)  // tela deitada: painel à esquerda (padrão: à direita)
+    var panelWide by mutableStateOf(false)  // o painel está de lado agora (tela deitada, menor que a tela cheia)
     var peek by mutableStateOf(false)
     var autoPause by mutableStateOf(true)
     var findEncrypted by mutableStateOf(true)
@@ -282,7 +284,7 @@ class Engine private constructor(private val app: Context) {
     fun saveSettings() {
         prefs.edit().putBoolean("autoPause", Session.autoPause).putBoolean("findEncrypted", Session.findEncrypted)
             .putBoolean("autoPointers", Session.autoPointers).putBoolean("gameLibsOnly", Session.gameLibsOnly)
-            .putBoolean("autoOverlay", Session.autoOverlay).putBoolean("ownKeypad", Session.ownKeypad).putFloat("alpha", Session.alpha).putInt("panelSize2", Session.panelSize)
+            .putBoolean("autoOverlay", Session.autoOverlay).putBoolean("ownKeypad", Session.ownKeypad).putFloat("alpha", Session.alpha).putInt("panelSize2", Session.panelSize).putBoolean("panelLeft", Session.panelLeft)
             .putString("aiKey", Session.aiKey).putString("aiProvider", Session.aiProvider).putBoolean("aiCanTest", Session.aiCanTest).putBoolean("aiAuto", Session.aiAuto).putBoolean("aiControl", Session.aiControl)
             .putString("geminiKeys", Session.geminiKeys.joinToString("\n")).putInt("geminiKeyIndex", Session.geminiKeyIndex)
             .putString("geminiModel", Session.geminiModel).putBoolean("geminiAuto", Session.geminiAutoModel).putBoolean("watchFields", Session.watchFields)
@@ -322,6 +324,7 @@ class Engine private constructor(private val app: Context) {
         }
         prefs.getString("geminiSpeed", "").orEmpty().lines().forEach { l -> l.split('=').takeIf { it.size == 2 }?.let { (m, ms) -> ms.toLongOrNull()?.let { Session.geminiSpeed[m] = it } } }
         Session.alpha = prefs.getFloat("alpha", Session.alpha)
+        Session.panelLeft = prefs.getBoolean("panelLeft", false)
         Session.panelSize = prefs.getInt("panelSize2", Session.panelSize).coerceIn(0, PANEL_SIZES.lastIndex)  // chave nova: quem já usava volta uma vez para tela cheia, o novo padrão
         loadSaved()
         loadHistory()
