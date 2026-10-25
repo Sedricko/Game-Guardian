@@ -31,6 +31,18 @@ private val KEYS_WIDE = listOf(
     listOf("1", "2", "3", "0", "-", ".", ";", "::", "OK"),
 )
 
+// endereço (hexadecimal): letras a–f e o + para "7a0010+8"; o campo de endereço usava o teclado do telefone
+private val KEYS_HEX = listOf(
+    listOf("a", "b", "7", "8", "9", "⌫"),
+    listOf("c", "d", "4", "5", "6", "+"),
+    listOf("e", "f", "1", "2", "3", "0"),
+    listOf("OK"),
+)
+private val KEYS_HEX_WIDE = listOf(
+    listOf("a", "b", "c", "d", "e", "f", "+", "⌫"),
+    listOf("0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "OK"),
+)
+
 /** Uma tecla aplicada ao texto: ⌫ apaga a última, o resto escreve. */
 internal fun applyKey(text: String, key: String) = if (key == "⌫") text.dropLast(1) else text + key
 
@@ -39,9 +51,9 @@ internal fun applyKey(text: String, key: String) = if (key == "⌫") text.dropLa
  * telefone, que abria por cima do jogo e escondia o número que você queria ler.
  */
 @Composable
-fun NumPad(onKey: (String) -> Unit, onDone: () -> Unit, modifier: Modifier = Modifier, compact: Boolean = false) {
+fun NumPad(onKey: (String) -> Unit, onDone: () -> Unit, modifier: Modifier = Modifier, compact: Boolean = false, hex: Boolean = false) {
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        (if (compact) KEYS_WIDE else KEYS).forEach { row ->
+        (if (hex) (if (compact) KEYS_HEX_WIDE else KEYS_HEX) else if (compact) KEYS_WIDE else KEYS).forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 row.forEach { k ->
                     val ok = k == "OK"

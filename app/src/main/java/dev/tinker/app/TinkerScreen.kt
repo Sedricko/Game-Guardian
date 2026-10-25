@@ -1050,20 +1050,28 @@ private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
             )
         }
         // endereço, Ir e ▲▼ numa linha; Buscar perto recolhido: a lista fica com o resto da tela
+        // teclado do Tinker (como no valor da Busca): o do telefone cobria o jogo e o próprio campo
+        val ownPad = s.ownKeypad
+        var hexPad by remember { mutableStateOf(false) }
+        val addrTaps = remember { MutableInteractionSource() }
+        val addrPressed by addrTaps.collectIsPressedAsState()
+        LaunchedEffect(addrPressed) { if (addrPressed && ownPad) hexPad = true }
+        fun go() {
+            val a = parseAddress(goTo)
+            if (a != null) { s.view = a to type; hexPad = false } else error = "Endereço inválido: $goTo"
+        }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             OutlinedTextField(
                 value = goTo, onValueChange = { goTo = it.removePrefix("0x").trim() }, label = { Text("Endereço (7a0010+8)") },
-                singleLine = true, modifier = Modifier.weight(1f),
+                singleLine = true, readOnly = ownPad, interactionSource = addrTaps, modifier = Modifier.weight(1f),
             )
-            Button(shape = MaterialTheme.shapes.medium, onClick = {
-                val a = parseAddress(goTo)
-                if (a != null) s.view = a to type else error = "Endereço inválido: $goTo"
-            }, contentPadding = PaddingValues(horizontal = 12.dp)) { Text("Ir") }
+            Button(shape = MaterialTheme.shapes.medium, onClick = { go() }, contentPadding = PaddingValues(horizontal = 12.dp)) { Text("Ir") }
             if (center != "0") {
                 HeaderButton("▲", "Anteriores") { shift-- }
                 HeaderButton("▼", "Seguintes") { shift++ }
             }
         }
+        if (ownPad && hexPad) NumPad(onKey = { goTo = applyKey(goTo, it) }, onDone = { go() }, compact = landscape(), hex = true)
         TypeChips(type) { t -> s.view = center to t }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         if (center != "0") {
