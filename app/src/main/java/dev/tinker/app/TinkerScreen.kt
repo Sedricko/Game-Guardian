@@ -575,6 +575,19 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                         editingAll = false
                         run { if (chosen.isEmpty()) engine.writeAll(v) else engine.writeMany(chosen.map { it.addr to it.type }, v) }
                     }, onCancel = { editingAll = false })
+                    // como no GameGuardian: cada um ganha um número (100, 101, 102…) e o que aparecer no jogo é o certo
+                    val seqTargets = (if (chosen.isEmpty()) s.results else chosen).map { it.addr to it.type }
+                    Text("Em sequência (${seqTargets.size} endereços, +1 em cada):", style = MaterialTheme.typography.labelLarge)
+                    var seqStart by remember { mutableStateOf("100") }
+                    ValueField(seqStart, "Começar em", { seqStart = it }, keyboard = KeyboardType.Number)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = {
+                            run { engine.writeSequence(seqTargets, seqStart).let { w -> "${w.size} escritos (${seqStart}…): veja qual número apareceu no jogo e toque no resultado com ele." } }
+                        }, enabled = !s.busy && seqTargets.isNotEmpty()) { Text("Escrever em sequência") }
+                        FilledTonalButton(shape = MaterialTheme.shapes.medium, onClick = { run { engine.findBySequence(seqTargets, seqStart) } },
+                            enabled = !s.busy && seqTargets.isNotEmpty()) { Text("🎯 Descobrir pela tela") }
+                        TextButton(onClick = { run { engine.undoSequence() } }, enabled = !s.busy) { Text("Voltar como estava") }
+                    }
                 }
             }
         }
@@ -2236,6 +2249,9 @@ private val HELP = listOf(
     "📍 Onde o jogo escreve" to "Em Busca → Mais formas: Começar, carregue o jogo ou uma fase, Ver. Mostra em que regiões da memória o jogo " +
         "escreveu. Usar nas buscas deste jogo faz a busca começar só nelas (bem menos resultados); se não achar, ela procura em tudo sozinha. " +
         "Os salvos também ensinam: a região de cada salvo entra junto.",
+    "Editar em sequência" to "Como no GameGuardian: em Busca → Editar, \"Em sequência\" escreve 100, 101, 102… um em cada resultado (ou nos " +
+        "marcados). O número que aparecer no jogo mostra qual endereço é o certo. 🎯 Descobrir pela tela faz isso sozinho: escreve, lê a " +
+        "tela, diz qual foi e volta tudo como estava. Voltar como estava desfaz a sequência. Só em jogo offline.",
     "🎯 Achar sozinho" to "Digite o número que está na tela do jogo (ex.: 25 moedas) e toque em 🎯 Achar sozinho. O painel some, o Tinker lê esse " +
         "número na tela (no próprio aparelho, sem internet) e, a cada vez que ele muda enquanto você joga, refina sozinho. Com até 3 resultados, " +
         "se \"IA pode testar valores\" estiver ligado em Ajustes, ele muda cada um por 1 segundo: o que muda o número da tela é o verdadeiro, " +

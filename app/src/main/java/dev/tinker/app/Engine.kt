@@ -3666,6 +3666,49 @@ class Engine private constructor(private val app: Context) {
         if (fail == 0) "${targets.size} valores alterados." else "${targets.size - fail} alterados, $fail não couberam no tipo ou falharam."
     }
 
+    // ---- editar em sequência (como no GameGuardian): cada resultado ganha um número (100, 101, 102…); o que aparecer
+    // no jogo diz qual endereço é o certo. "Descobrir pela tela" lê a tela sozinho e volta tudo como estava. ----
+
+    private val seqOld = mutableListOf<Triple<String, String, String>>()  // endereço, tipo, valor de antes
+
+    /** start + i·step em cada um (até 300); guarda os valores de antes para Voltar como estava. */
+    suspend fun writeSequence(targets: List<Pair<String, String>>, start: String, step: Double = 1.0): Map<String, Long> = call { d ->
+        val base = normalizeNumbers(start).toDoubleOrNull() ?: error("Digite o número inicial (ex.: 100)")
+        seqOld.clear()
+        val written = LinkedHashMap<String, Long>()
+        targets.take(300).forEachIndexed { i, (addr, type) ->
+            val old = runCatching { d.send("read $addr $type", quiet = true).status }.getOrNull() ?: return@forEachIndexed
+            val v = (base + i * step).toLong()
+            if (runCatching { d.send("write $addr $type $v", quiet = true) }.isSuccess) { seqOld += Triple(addr, type, old); written[addr] = v }
+        }
+        Diag.add("Em sequência: ${written.size} endereços com ${base.toLong()}…${(base + (written.size - 1) * step).toLong()}")
+        written
+    }
+
+    suspend fun undoSequence(): String = call { d ->
+        val n = seqOld.count { (a, t, v) -> runCatching { d.send("write $a $t $v", quiet = true) }.isSuccess }
+        seqOld.clear()
+        Diag.add("Em sequência: $n valores voltaram")
+        "$n valores voltaram como estavam."
+    }
+
+    fun hasSequence() = seqOld.isNotEmpty()
+
+    /** Escreve em sequência, lê a tela e acha o número que apareceu: o dono dele é o endereço certo. Volta tudo depois. */
+    suspend fun findBySequence(targets: List<Pair<String, String>>, start: String): String {
+        val written = writeSequence(targets, start)
+        if (written.isEmpty()) return "Nenhum aceitou a escrita."
+        withContext(Dispatchers.Main) { Session.aiHidePanel = true }
+        delay(1500)  // o jogo redesenha a tela
+        withContext(Dispatchers.Main) { Session.aiHidePanel = false }
+        val seen = runCatching { screenNumbers().map { it.first }.toSet() }.getOrElse { undoSequence(); return "Não li a tela: ${it.message}" }
+        undoSequence()
+        val hit = written.entries.firstOrNull { it.value in seen }
+        Diag.add("Em sequência pela tela: " + (hit?.let { "0x${it.key} (${it.value} apareceu)" } ?: "nenhum dos números apareceu"))
+        return hit?.let { "É o 0x${it.key}: o ${it.value} apareceu no jogo. Tudo voltou como estava; salve esse resultado." }
+            ?: "Nenhum dos números (${written.values.first()}…${written.values.last()}) apareceu na tela: o certo não está entre estes, ou o jogo só atualiza a tela quando o valor muda de novo."
+    }
+
     suspend fun setSaved(items: List<SavedItem>, value: String): String {
         val live = items.filterNot(::stale)
         if (live.isEmpty()) return "Esses salvos são de outra vez do jogo: busque o valor de novo (ou use ponteiro) antes de editar."
