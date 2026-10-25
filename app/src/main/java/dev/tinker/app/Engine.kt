@@ -153,7 +153,7 @@ data class SheetRequest(val id: String, val tipo: String, val jogo: String, val 
 // tipos fixos que a aba Pedidos aceita: anotações e conferências, nada de comando livre nem escrita no jogo
 // os únicos que podem ficar "sempre permitidos": só conferem e mandam informação; nota e lição mudam o que a IA faz, pedem o toque toda vez
 val TRUSTABLE_REQUESTS = setOf("autoteste", "relatorio")
-val REQUEST_TYPES = mapOf("nota" to "Anotar no jogo", "licao" to "Guardar lição da IA", "autoteste" to "Rodar o autoteste", "relatorio" to "Mandar o relatório")
+val REQUEST_TYPES = mapOf("dica" to "Dica para você", "nota" to "Anotar no jogo", "licao" to "Guardar lição da IA", "autoteste" to "Rodar o autoteste", "relatorio" to "Mandar o relatório")
 
 data class Recipe(val id: String = java.util.UUID.randomUUID().toString(), val name: String, val steps: List<Step>, val auto: Boolean = false)
 
@@ -1284,6 +1284,7 @@ class Engine private constructor(private val app: Context) {
         withContext(Dispatchers.Main) { Session.sheetRequests.remove(r) }
         val result = if (!apply) "ignorado" else runCatching {
             when (r.tipo) {
+                "dica" -> "lida"  // só texto para a pessoa: o que buscar e como; ela faz no app se quiser
                 "nota" -> {
                     val pkg = r.jogo.takeIf { Regex("[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)+").matches(it) } ?: savedPkg ?: error("escreva o pacote do jogo na coluna Jogo ou escolha o jogo antes")
                     require(r.texto.isNotEmpty()) { "nota vazia" }

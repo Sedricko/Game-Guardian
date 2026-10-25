@@ -157,9 +157,9 @@ fun TinkerPanel(
                 ) {
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                         val more = if (s.sheetRequests.size > 1) " (+${s.sheetRequests.size - 1})" else ""
-                        Text("Pedido da planilha$more: ${REQUEST_TYPES[r.tipo]}. Permitir?", color = MaterialTheme.colorScheme.onSecondaryContainer, style = MaterialTheme.typography.titleSmall)
+                        Text("Pedido da planilha$more: ${REQUEST_TYPES[r.tipo]}${if (r.tipo == "dica") "" else ". Permitir?"}", color = MaterialTheme.colorScheme.onSecondaryContainer, style = MaterialTheme.typography.titleSmall)
                         listOf(r.jogo, r.texto).filter { it.isNotEmpty() }.joinToString(" · ").takeIf { it.isNotEmpty() }?.let {
-                            Text(it.take(300), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                            Text(if (r.tipo == "dica") it.take(2000) else it.take(300), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
                         }
                         // os outros que esperam, para "Permitir todos" saber o que vai acontecer
                         s.sheetRequests.drop(1).take(4).forEach { o ->
@@ -168,7 +168,8 @@ fun TinkerPanel(
                         }
                         if (s.sheetRequests.size > 5) Text("… e mais ${s.sheetRequests.size - 5}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(shape = MaterialTheme.shapes.medium, onClick = { engine.answerRequestLater(r, true) }) { Text("Permitir só desta vez") }
+                            if (r.tipo == "dica") Button(shape = MaterialTheme.shapes.medium, onClick = { engine.answerRequestLater(r, true) }) { Text("Entendi") }
+                            else Button(shape = MaterialTheme.shapes.medium, onClick = { engine.answerRequestLater(r, true) }) { Text("Permitir só desta vez") }
                             if (s.sheetRequests.size > 1) Button(shape = MaterialTheme.shapes.medium, onClick = {
                                 s.sheetRequests.toList().forEach { engine.answerRequestLater(it, true) }
                             }) { Text("Permitir todos (${s.sheetRequests.size})") }

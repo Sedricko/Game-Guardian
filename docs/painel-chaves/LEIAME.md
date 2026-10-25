@@ -32,6 +32,7 @@ Tinker usa. Uma instância nova (ou reinstalada) pega o aprendizado de lá ao ab
 ## Pedidos e Aparelhos
 
 Na aba **Pedidos** você escolhe o **Tipo** e escreve o **Texto**:
+- `dica`: só um texto para você ler no celular (ex.: o que buscar e como); nada é executado;
 - `nota`: anota no jogo (coluna **Jogo** com o pacote, ex.: `com.sega.sprint`, ou vazia para o jogo aberto);
 - `licao`: guarda uma lição para a IA;
 - `autoteste`: roda o autoteste;

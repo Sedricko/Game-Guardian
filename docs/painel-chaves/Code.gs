@@ -527,7 +527,7 @@ function json_(o) {
 
 const PEDIDOS = 'Pedidos';
 const PCOLS = ['Quando', 'Tipo', 'Jogo', 'Texto', 'Situação', 'Resposta'];
-const TIPOS = ['nota', 'licao', 'autoteste', 'relatorio'];
+const TIPOS = ['dica', 'nota', 'licao', 'autoteste', 'relatorio'];  // dica: só texto para a pessoa ler no celular
 
 function abaPedidos_() {
   const ss = SpreadsheetApp.getActive();
