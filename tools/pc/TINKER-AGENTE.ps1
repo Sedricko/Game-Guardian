@@ -92,6 +92,36 @@ function Post-Sheet($motivo, $problemas, $texto, $versao) {
     } catch { Say "nao mandei para a planilha: $($_.Exception.Message)" }
 }
 
+# print da tela do emulador, menor e em JPEG (cabe numa linha da planilha), como texto base64
+function Shot($name) {
+    $png = "$env:TEMP\tinker-$name.png"; $jpg = "$env:TEMP\tinker-$name.jpg"
+    cmd /c "`"$adb`" exec-out screencap -p > `"$png`""  # o > do PowerShell 5 estraga arquivo binario
+    Add-Type -AssemblyName System.Drawing
+    $img = [Drawing.Image]::FromFile($png)
+    $w = $(if ($img.Width -gt $img.Height) { 960 } else { 540 }); $h = [int]($img.Height * $w / $img.Width)
+    $bmp = New-Object Drawing.Bitmap $img, $w, $h
+    $codec = [Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object MimeType -eq "image/jpeg"
+    $p = New-Object Drawing.Imaging.EncoderParameters 1
+    $p.Param[0] = New-Object Drawing.Imaging.EncoderParameter ([Drawing.Imaging.Encoder]::Quality, [long]55)
+    $bmp.Save($jpg, $codec, $p); $bmp.Dispose(); $img.Dispose()
+    [Convert]::ToBase64String([IO.File]::ReadAllBytes($jpg))
+}
+
+function Send-Shots($v) {
+    try {
+        & $adb shell am start -n "$app/.MainActivity" | Out-Null
+        Start-Sleep 4
+        & $adb shell settings put system accelerometer_rotation 0
+        & $adb shell settings put system user_rotation 0
+        Start-Sleep 2
+        Post-Sheet "agente PC: print em pe" "" ("jpeg base64`n" + (Shot "pe")) $v
+        & $adb shell settings put system user_rotation 1
+        Start-Sleep 4
+        Post-Sheet "agente PC: print deitado" "" ("jpeg base64`n" + (Shot "deitado")) $v
+        & $adb shell settings put system user_rotation 0
+    } catch { Say "nao tirei os prints: $($_.Exception.Message)" }
+}
+
 function Test-Version {
     $rel = Invoke-RestMethod "https://api.github.com/repos/Sedricko/Game-Guardian/releases/latest" -Headers (Hdr)
     $v = $rel.tag_name.TrimStart("v")
@@ -124,6 +154,7 @@ function Test-Version {
     Say $first
     if ($fails) { Say $fails }
     Post-Sheet "agente PC: $first" $fails ($out + "`n`n=== crash ===`n" + $crash) $v
+    Send-Shots $v
     Set-Content $done $v
 }
 
