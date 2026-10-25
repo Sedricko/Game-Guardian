@@ -158,12 +158,17 @@ fun TinkerPanel(
                 ) {
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                         val more = if (s.sheetRequests.size > 1) " (+${s.sheetRequests.size - 1})" else ""
-                        Text("Pedido da planilha$more: ${REQUEST_TYPES[r.tipo]}", color = MaterialTheme.colorScheme.onSecondaryContainer, style = MaterialTheme.typography.titleSmall)
+                        Text("Pedido da planilha$more: ${REQUEST_TYPES[r.tipo]}. Permitir?", color = MaterialTheme.colorScheme.onSecondaryContainer, style = MaterialTheme.typography.titleSmall)
                         listOf(r.jogo, r.texto).filter { it.isNotEmpty() }.joinToString(" · ").takeIf { it.isNotEmpty() }?.let {
                             Text(it.take(300), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
                         }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(shape = MaterialTheme.shapes.medium, onClick = { reqScope.launch { s.status = engine.answerRequest(r, true) } }) { Text("Aplicar") }
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(shape = MaterialTheme.shapes.medium, onClick = { reqScope.launch { s.status = engine.answerRequest(r, true) } }) { Text("Permitir só desta vez") }
+                            if (r.tipo in TRUSTABLE_REQUESTS) OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = {
+                                s.alwaysRequests = s.alwaysRequests + r.tipo
+                                engine.saveSettings()
+                                reqScope.launch { s.status = engine.answerRequest(r, true) }
+                            }) { Text("Sempre permitir") }
                             TextButton(onClick = { reqScope.launch { engine.answerRequest(r, false) } }) { Text("Ignorar") }
                         }
                     }
@@ -1584,6 +1589,10 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                         OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { keyInfo = engine.restoreMemory() }) { Text("Restaurar do backup") }
                         // banco comum na planilha do painel: junta o que todas as instâncias aprenderam
                         if (s.keySource.isNotBlank()) OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { keyInfo = "Juntando com a planilha…"; scope.launch { keyInfo = engine.cloudPull() } }) { Text("Juntar com a planilha") }
+                        // "Sempre permitir" de um pedido da planilha: daqui volta a perguntar
+                        if (s.alwaysRequests.isNotEmpty()) OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { s.alwaysRequests = emptySet(); engine.saveSettings() }) {
+                            Text("Voltar a perguntar (sempre permitido: ${s.alwaysRequests.joinToString { REQUEST_TYPES[it].orEmpty().lowercase() }})")
+                        }
                         // backup de outro aparelho ou outra instância (copiado para cá): escolher o arquivo
                         openMemory?.let { l -> OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { l.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }) { Text("Abrir arquivo") } }
                     }

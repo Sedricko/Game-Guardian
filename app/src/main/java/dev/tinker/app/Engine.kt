@@ -151,6 +151,8 @@ data class GameEngine(val name: String, val bits: Int) {
 data class SheetRequest(val id: String, val tipo: String, val jogo: String, val texto: String)
 
 // tipos fixos que a aba Pedidos aceita: anotações e conferências, nada de comando livre nem escrita no jogo
+// os únicos que podem ficar "sempre permitidos": só conferem e mandam informação; nota e lição mudam o que a IA faz, pedem o toque toda vez
+val TRUSTABLE_REQUESTS = setOf("autoteste", "relatorio")
 val REQUEST_TYPES = mapOf("nota" to "Anotar no jogo", "licao" to "Guardar lição da IA", "autoteste" to "Rodar o autoteste", "relatorio" to "Mandar o relatório")
 
 data class Recipe(val id: String = java.util.UUID.randomUUID().toString(), val name: String, val steps: List<Step>, val auto: Boolean = false)
@@ -247,6 +249,7 @@ object Session {
     val recipes = mutableStateListOf<Recipe>()
     val aiProposals = mutableStateListOf<AiProposal>()
     val sheetRequests = mutableStateListOf<SheetRequest>()
+    var alwaysRequests by mutableStateOf(setOf<String>())  // tipos que a pessoa mandou lembrar
     val aiUndo = mutableStateListOf<AiUndo>()
     val aiClasses = mutableStateListOf<GameClass>()  // classes que a IA recomendou: aparecem no topo da lista de classes
     var aiAsk by mutableStateOf<Pair<String, String>?>(null)  // pedido automático: (onde, pergunta) — a caixa ✨ daquela tela pergunta sozinha
@@ -318,6 +321,7 @@ class Engine private constructor(private val app: Context) {
             .putString("geminiKeys", Session.geminiKeys.joinToString("\n")).putInt("geminiKeyIndex", Session.geminiKeyIndex)
             .putString("keySource", Session.keySource).putString("sheetKeys", Session.sheetKeys.joinToString("\n"))
             .putString("geminiModel", Session.geminiModel).putBoolean("geminiAuto", Session.geminiAutoModel).putBoolean("watchFields", Session.watchFields)
+            .putString("alwaysRequests", Session.alwaysRequests.joinToString(","))
             .putString("geminiUse", quotaDay() + ";" + Session.geminiUse.entries.joinToString(",") { "${it.key}=${it.value}" } + ";" + Session.geminiOut.entries.joinToString(",") { "${it.key}=${it.value}" })
             .putString("geminiSpeed", Session.geminiSpeed.entries.joinToString("\n") { "${it.key}=${it.value}" }).apply()
     }
@@ -369,6 +373,7 @@ class Engine private constructor(private val app: Context) {
             while (true) { fetchRequests().takeIf { it.isNotEmpty() }?.let(Diag::add); delay(180_000) }
         }
         Session.watchFields = prefs.getBoolean("watchFields", true)
+        Session.alwaysRequests = prefs.getString("alwaysRequests", "").orEmpty().split(',').filter { it in TRUSTABLE_REQUESTS }.toSet()
         prefs.getString("geminiUse", "").orEmpty().split(';').takeIf { it.size == 3 && it[0] == quotaDay() }?.let { (_, use, out) ->
             use.split(',').forEach { e -> e.split('=').takeIf { it.size == 2 }?.let { (k, n) -> k.toIntOrNull()?.let { Session.geminiUse[it] = n.toIntOrNull() ?: 0 } } }
             out.split(',').forEach { e -> e.split('=', limit = 2).takeIf { it.size == 2 }?.let { (k, t) -> k.toIntOrNull()?.let { Session.geminiOut[it] = t } } }
@@ -1196,15 +1201,20 @@ class Engine private constructor(private val app: Context) {
         val list = (0 until arr.length()).map { arr.getJSONObject(it) }
             .map { SheetRequest(it.optString("id"), it.optString("tipo").lowercase().replace("ç", "c").replace("õ", "o"), it.optString("jogo").trim(), it.optString("texto").trim().take(2000)) }
             .filter { it.id.isNotEmpty() && it.tipo in REQUEST_TYPES }
-        withContext(Dispatchers.Main) {
-            val fresh = list.any { r -> Session.sheetRequests.none { it.id == r.id } }
-            Session.sheetRequests.clear(); Session.sheetRequests.addAll(list)
-            if (fresh) "Planilha: ${list.size} pedido(s) esperando você no painel" else ""
+        val (auto, ask) = list.partition { it.tipo in Session.alwaysRequests && it.tipo in TRUSTABLE_REQUESTS }
+        val msg = withContext(Dispatchers.Main) {
+            val fresh = ask.any { r -> Session.sheetRequests.none { it.id == r.id } }
+            Session.sheetRequests.clear(); Session.sheetRequests.addAll(ask)
+            if (fresh) "Planilha: ${ask.size} pedido(s) esperando você no painel" else ""
         }
+        // a pessoa marcou "Sempre permitir" para este tipo: acontece sem perguntar (um de cada tipo por volta)
+        auto.distinctBy { it.tipo }.forEach { answerRequest(it, true, remembered = true) }
+        auto.groupBy { it.tipo }.values.flatMap { it.drop(1) }.forEach { answerRequest(it, false) }
+        msg
     }
 
     /** A pessoa tocou em Aplicar (ou Ignorar) num pedido da planilha: faz e devolve a resposta para a aba Pedidos. */
-    suspend fun answerRequest(r: SheetRequest, apply: Boolean): String {
+    suspend fun answerRequest(r: SheetRequest, apply: Boolean, remembered: Boolean = false): String {
         withContext(Dispatchers.Main) { Session.sheetRequests.remove(r) }
         val result = if (!apply) "ignorado" else runCatching {
             when (r.tipo) {
@@ -1219,9 +1229,9 @@ class Engine private constructor(private val app: Context) {
                 else -> error("tipo desconhecido")
             }
         }.getOrElse { "não deu: ${it.message}" }
-        Diag.add("Pedido da planilha (${REQUEST_TYPES[r.tipo]}): $result")
+        Diag.add("Pedido da planilha (${REQUEST_TYPES[r.tipo]}${if (remembered) ", sempre permitido" else ""}): $result")
         withContext(Dispatchers.IO) {
-            panelUrl("feito=${enc(r.id)}&situacao=${if (apply) "aplicado" else "ignorado"}&resposta=${enc(result.take(300))}")?.let { panelGet(it) }
+            panelUrl("feito=${enc(r.id)}&situacao=${if (!apply) "ignorado" else if (remembered) "automático" else "aplicado"}&resposta=${enc(result.take(300))}")?.let { panelGet(it) }
         }
         return result
     }

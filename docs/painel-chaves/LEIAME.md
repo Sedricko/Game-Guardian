@@ -37,7 +37,7 @@ Na aba **Pedidos** você escolhe o **Tipo** e escreve o **Texto**:
 - `autoteste`: roda o autoteste;
 - `relatorio`: manda o relatório.
 
-O Tinker lê a aba a cada 3 minutos e mostra o pedido no painel. Ele **só acontece quando você toca em Aplicar** no celular. **Ignorar** descarta o pedido. A **Situação** e a **Resposta** voltam para a planilha. Outros tipos são recusados.
+O Tinker lê a aba a cada 3 minutos e mostra o pedido no painel. Ele **só acontece quando você toca em Permitir só desta vez** no celular, e **Ignorar** descarta o pedido. Para `autoteste` e `relatorio` também há **Sempre permitir**: dali em diante esses pedidos acontecem sozinhos (Situação: automático). Para voltar a perguntar, use Ajustes → Voltar a perguntar. `nota` e `licao` pedem o toque toda vez. A **Situação** e a **Resposta** voltam para a planilha. Outros tipos são recusados.
 
 A aba **Aparelhos** mostra, para cada aparelho, a versão do Tinker, o último contato e o último autoteste.
 
