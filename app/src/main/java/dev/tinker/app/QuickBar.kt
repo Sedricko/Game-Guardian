@@ -102,18 +102,18 @@ fun QuickBar(engine: Engine, onDrag: (Float, Float) -> Unit, onKeyboard: (Boolea
                     // saiu do campo (tocou fora, fechou o teclado): o jogo volta a receber as teclas
                     .onFocusChanged { if (!it.isFocused) onKeyboard(false) },
             )
-            if (n > 0) FilledTonalButton(onClick = { act { engine.refine(s.value) } }, enabled = enabled && s.value.isNotBlank(), contentPadding = small) { Text("Refinar") }
-            else Button(onClick = { act { engine.search(s.types, s.value) } }, enabled = enabled && s.value.isNotBlank(), contentPadding = small) { Text("Buscar") }
+            if (n > 0) FilledTonalButton(shape = MaterialTheme.shapes.medium, onClick = { act { engine.refine(s.value) } }, enabled = enabled && s.value.isNotBlank(), contentPadding = small) { Text("Refinar") }
+            else Button(shape = MaterialTheme.shapes.medium, onClick = { act { engine.search(s.types, s.value) } }, enabled = enabled && s.value.isNotBlank(), contentPadding = small) { Text("Buscar") }
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             if (n > 0) {
                 listOf("inc" to "↑", "dec" to "↓", "same" to "=", "changed" to "≠").forEach { (op, label) ->
-                    OutlinedButton(onClick = { act { engine.compare(op) } }, enabled = enabled, contentPadding = PaddingValues(0.dp), modifier = Modifier.size(48.dp)) {
+                    OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { act { engine.compare(op) } }, enabled = enabled, contentPadding = PaddingValues(0.dp), modifier = Modifier.size(48.dp)) {
                         Text(label, fontSize = 18.sp)
                     }
                 }
             } else {
-                OutlinedButton(onClick = { act { engine.startUnknown(s.types) } }, enabled = enabled, contentPadding = small) { Text("Sem valor") }
+                OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { act { engine.startUnknown(s.types) } }, enabled = enabled, contentPadding = small) { Text("Sem valor") }
             }
             Text(
                 when {
@@ -130,11 +130,11 @@ fun QuickBar(engine: Engine, onDrag: (Float, Float) -> Unit, onKeyboard: (Boolea
         }
         // editar: todos os resultados (até 50) passam para o valor do campo
         if (n in 1L..50L) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            OutlinedButton(onClick = { act { engine.writeAll(s.value) } }, enabled = enabled && s.value.isNotBlank(), contentPadding = small) {
+            OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { act { engine.writeAll(s.value) } }, enabled = enabled && s.value.isNotBlank(), contentPadding = small) {
                 Text("Editar ${if (n == 1L) "" else "os $n "}para ${s.value.ifBlank { "…" }}", maxLines = 1)
             }
             // sobrou um: congela e salva direto daqui
-            if (n == 1L) OutlinedButton(onClick = { act { s.results.firstOrNull()?.let { engine.addSaved(listOf(it), frozen = true); "Congelado e salvo." } ?: "Nada para congelar." } },
+            if (n == 1L) OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { act { s.results.firstOrNull()?.let { engine.addSaved(listOf(it), frozen = true); "Congelado e salvo." } ?: "Nada para congelar." } },
                 enabled = enabled, contentPadding = small) { Text("❄") }
             if (n <= 5L) Text(s.results.take(5).joinToString("  ") { it.value }, Modifier.weight(1f), style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.primary, maxLines = 1)

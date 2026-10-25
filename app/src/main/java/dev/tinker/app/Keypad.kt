@@ -40,7 +40,7 @@ fun NumPad(onKey: (String) -> Unit, onDone: () -> Unit, modifier: Modifier = Mod
                 row.forEach { k ->
                     val ok = k == "OK"
                     Box(
-                        Modifier.weight(1f).height(40.dp).clip(RoundedCornerShape(10.dp))
+                        Modifier.weight(1f).height(48.dp).clip(MaterialTheme.shapes.small)
                             .background(if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest)
                             .clickable { if (ok) onDone() else onKey(k) },
                         contentAlignment = Alignment.Center,

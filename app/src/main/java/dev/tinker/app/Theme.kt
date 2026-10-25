@@ -32,7 +32,7 @@ private val Colors = darkColorScheme(
 
 // cantos arredondados em tudo: campos de texto (extraSmall), chips (small), cards (medium) e painéis
 private val TinkerShapes = Shapes(
-    extraSmall = RoundedCornerShape(12.dp),
+    extraSmall = RoundedCornerShape(16.dp),
     small = RoundedCornerShape(16.dp),
     medium = RoundedCornerShape(16.dp),
     large = RoundedCornerShape(20.dp),

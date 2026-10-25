@@ -160,7 +160,7 @@ fun TinkerPanel(
                         Text(if (s.gameGoneByUser) "Ao reabrir, os salvos voltam sozinhos." else "O motivo da queda fica na aba Registro. Ao reabrir, os salvos voltam sozinhos.",
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onTertiaryContainer)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = { s.status = engine.relaunch(); if (overlay) onMinimize() }) { Text("Reabrir") }
+                            Button(shape = MaterialTheme.shapes.medium, onClick = { s.status = engine.relaunch(); if (overlay) onMinimize() }) { Text("Reabrir") }
                             TextButton(onClick = { s.gameGone = null }) { Text("Agora não") }
                             // queda: a IA lê o registro e explica
                             if (!s.gameGoneByUser && Assistant.ready()) TextButton(onClick = {
@@ -257,7 +257,7 @@ private fun Header(
     // uma linha só, como no GameGuardian: o resto da tela fica para a lista; tocar no nome troca o jogo
     Row(modifier.padding(horizontal = 8.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         Row(
-            Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).clickable(enabled = !s.busy, onClick = onPick).padding(4.dp),
+            Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).sizeIn(minHeight = 48.dp).clickable(enabled = !s.busy, onClick = onPick).padding(4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             AppIcon(p, 30)
@@ -371,8 +371,8 @@ private fun InlineEditor(initial: String, label: String, onSave: (String) -> Uni
     var text by remember { mutableStateOf(initial) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         ValueField(text, label, { text = it })
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { onSave(text) }, enabled = text.isNotBlank()) { Text("Salvar") }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Button(shape = MaterialTheme.shapes.medium, onClick = { onSave(text) }, enabled = text.isNotBlank()) { Text("Salvar") }
             TextButton(onClick = onCancel) { Text("Cancelar") }
             extra()
         }
@@ -426,16 +426,17 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                     }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { run { engine.search(s.types, s.value) } }, enabled = enabled && s.value.isNotBlank(), modifier = Modifier.weight(1f)) {
+                    Button(shape = MaterialTheme.shapes.medium, onClick = { run { engine.search(s.types, s.value) } }, enabled = enabled && s.value.isNotBlank(), modifier = Modifier.weight(1f)) {
                         Text("Nova busca")
                     }
                     FilledTonalButton(
+                        shape = MaterialTheme.shapes.medium,
                         onClick = { run { engine.refine(s.value) } },
                         enabled = enabled && (s.count ?: 0) > 0 && s.value.isNotBlank(),
                         modifier = Modifier.weight(1f),
                     ) { Text("Refinar") }
                     // sem número na tela (barra de vida): começa já aqui, sem abrir "Mais formas de buscar"
-                    if (s.count == null) OutlinedButton(onClick = { run { engine.startUnknown(s.types) } }, enabled = enabled) { Text("Sem valor") }
+                    if (s.count == null) OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { run { engine.startUnknown(s.types) } }, enabled = enabled) { Text("Sem valor") }
                 }
                 if (s.canUndo) TextButton(onClick = { run { engine.undo() } }, enabled = enabled) { Text("↶ Desfazer último refino") }
                 // com resultados: refinar pelo jeito que mudou, sem precisar do número
@@ -478,11 +479,11 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
         }
         if (s.results.isNotEmpty()) {
             item {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilledTonalButton(onClick = { engine.addSaved(targets); s.status = "${targets.size} salvos na lista." }) { Text("Salvar $label") }
-                    FilledTonalButton(onClick = { engine.addSaved(targets, frozen = true); s.status = "${targets.size} congelados (veja Salvos)." }) { Text("Congelar $label") }
-                    OutlinedButton(onClick = { editingAll = !editingAll }, enabled = !s.busy) { Text("Editar $label") }
-                    OutlinedButton(onClick = { nearOpen = !nearOpen }, enabled = !s.busy) { Text("Buscar perto (${targets.size})") }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    FilledTonalButton(shape = MaterialTheme.shapes.medium, onClick = { engine.addSaved(targets); s.status = "${targets.size} salvos na lista." }) { Text("Salvar $label") }
+                    FilledTonalButton(shape = MaterialTheme.shapes.medium, onClick = { engine.addSaved(targets, frozen = true); s.status = "${targets.size} congelados (veja Salvos)." }) { Text("Congelar $label") }
+                    OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { editingAll = !editingAll }, enabled = !s.busy) { Text("Editar $label") }
+                    OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { nearOpen = !nearOpen }, enabled = !s.busy) { Text("Buscar perto (${targets.size})") }
                 }
             }
         }
@@ -546,21 +547,21 @@ private fun UnknownSearch(engine: Engine, enabled: Boolean, run: (suspend () -> 
     val s = Session
     Text("Não sabe o número? (barra de vida, energia…) Comece sem valor e depois diga como ele mudou.",
         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    OutlinedButton(onClick = { run { engine.startUnknown(s.types) } }, enabled = enabled) { Text("Começar sem valor") }
+    OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { run { engine.startUnknown(s.types) } }, enabled = enabled) { Text("Começar sem valor") }
 }
 
 /** Refinar pelo jeito que o valor mudou: ↑ ↓ = ≠ e, com um número no campo, quanto mudou. */
 @Composable
 private fun CompareButtons(engine: Engine, enabled: Boolean, run: (suspend () -> String) -> Unit) {
     val s = Session
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         listOf("inc" to "↑ Aumentou", "dec" to "↓ Diminuiu", "changed" to "≠ Mudou", "same" to "= Não mudou").forEach { (op, label) ->
-            FilledTonalButton(onClick = { run { engine.compare(op) } }, enabled = enabled, contentPadding = PaddingValues(horizontal = 10.dp)) { Text(label, maxLines = 1) }
+            FilledTonalButton(shape = MaterialTheme.shapes.medium, onClick = { run { engine.compare(op) } }, enabled = enabled, contentPadding = PaddingValues(horizontal = 10.dp)) { Text(label, maxLines = 1) }
         }
         // com um número no campo: quanto mudou (ex.: perdeu 10 de vida → Diminuiu 10)
         if (s.value.isNotBlank()) {
-            OutlinedButton(onClick = { run { engine.compare("incby", s.value) } }, enabled = enabled) { Text("+${s.value}", maxLines = 1) }
-            OutlinedButton(onClick = { run { engine.compare("decby", s.value) } }, enabled = enabled) { Text("−${s.value}", maxLines = 1) }
+            OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { run { engine.compare("incby", s.value) } }, enabled = enabled) { Text("+${s.value}", maxLines = 1) }
+            OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { run { engine.compare("decby", s.value) } }, enabled = enabled) { Text("−${s.value}", maxLines = 1) }
         }
     }
 }
@@ -581,7 +582,7 @@ private fun AobSearch(engine: Engine, enabled: Boolean, run: (suspend () -> Stri
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         FilterChip(selected = !code, onClick = { code = false }, label = { Text("Dados") })
         FilterChip(selected = code, onClick = { code = true }, label = { Text("Código") })
-        Button(onClick = { run { engine.searchAob(pattern, code) } }, enabled = enabled && pattern.isNotBlank()) { Text("Buscar bytes") }
+        Button(shape = MaterialTheme.shapes.medium, onClick = { run { engine.searchAob(pattern, code) } }, enabled = enabled && pattern.isNotBlank()) { Text("Buscar bytes") }
     }
 }
 
@@ -606,7 +607,7 @@ private fun PointerPanel(engine: Engine, item: SavedItem, run: (suspend () -> St
                 else -> "sem ponteiro"
             } + " · ${item.chains.size} reservas · assinatura ${if (sigUseful(item.sig)) "pronta" else "aprendendo"}",
             style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
+            modifier = Modifier.fillMaxWidth().sizeIn(minHeight = 48.dp).clickable { expanded = !expanded },
         )
         if (!expanded) return@Column
         if (item.pointer.isNotEmpty()) {
@@ -624,8 +625,8 @@ private fun PointerPanel(engine: Engine, item: SavedItem, run: (suspend () -> St
             OutlinedTextField(levels, { levels = it.filter(Char::isDigit).take(1) }, label = { Text("Níveis") }, singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(0.6f))
         }
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilledTonalButton(onClick = { run { engine.scanPointers(item, maxOff.toIntOrNull() ?: 4096, levels.toIntOrNull() ?: 4) } }, enabled = !s.busy && s.process != null && !engine.stale(item)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            FilledTonalButton(shape = MaterialTheme.shapes.medium, onClick = { run { engine.scanPointers(item, maxOff.toIntOrNull() ?: 4096, levels.toIntOrNull() ?: 4) } }, enabled = !s.busy && s.process != null && !engine.stale(item)) {
                 Text(if (item.chains.isEmpty()) "Buscar ponteiros" else "Buscar de novo")
             }
         }
@@ -638,7 +639,7 @@ private fun PointerPanel(engine: Engine, item: SavedItem, run: (suspend () -> St
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(now, { now = it }, label = { Text("Valor agora no jogo") }, singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii), modifier = Modifier.weight(1f))
-                FilledTonalButton(onClick = { run { engine.filterPointersByValue(item, now) } }, enabled = !s.busy && s.process != null && now.isNotBlank()) {
+                FilledTonalButton(shape = MaterialTheme.shapes.medium, onClick = { run { engine.filterPointersByValue(item, now) } }, enabled = !s.busy && s.process != null && now.isNotBlank()) {
                     Text("Filtrar pelo valor")
                 }
             }
@@ -719,24 +720,24 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
         item {
             // exportar/importar é raro: recolhido, os salvos e as ações do dia a dia ficam em cima
             TextButton(onClick = { porting = !porting }) { Text((if (porting) "▾ " else "▸ ") + "Exportar / importar lista") }
-            if (porting) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                OutlinedButton(onClick = {
+            if (porting) FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = {
                     val file = File(context.cacheDir, "reports").apply { mkdirs() }
                         .let { File(it, "tinker-salvos-${System.currentTimeMillis() / 1000}.json") }.apply { writeText(engine.exportSaved()) }
                     info = saveToDownloads(context, file, "application/json")?.let { "Salvo em Download/Tinker/${file.name}" } ?: "Lista pronta: ${file.name}"
                     if (overlay) onMinimize()  // o seletor de apps abre atrás do painel
                     shareFile(context, file, "application/json")
                 }, enabled = s.saved.isNotEmpty()) { Text("Exportar") }
-                OutlinedButton(onClick = {
+                OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = {
                     context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Lista do Tinker", engine.exportSaved()))
                     info = "Lista copiada. Cole onde quiser."
                 }, enabled = s.saved.isNotEmpty()) { Text("Copiar lista") }
-                OutlinedButton(onClick = {
+                OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = {
                     val clip = context.getSystemService(ClipboardManager::class.java).primaryClip
                     val text = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString()
                     if (text.isNullOrBlank()) info = "A área de transferência está vazia." else import(text)
                 }) { Text("Colar lista") }
-                if (openFile != null) OutlinedButton(onClick = { openFile.launch(arrayOf("application/json", "text/plain", "*/*")) }) { Text("Abrir arquivo") }
+                if (openFile != null) OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { openFile.launch(arrayOf("application/json", "text/plain", "*/*")) }) { Text("Abrir arquivo") }
             }
             info?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 4.dp)) }
             if (s.restoreInfo.isNotEmpty()) Text(s.restoreInfo, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 4.dp))
@@ -797,20 +798,20 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
             }
         }
         item {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilledTonalButton(onClick = { engine.setFrozen(targets, true) }) { Text("Congelar $label") }
-                FilledTonalButton(onClick = { engine.setFrozen(targets, false) }) { Text("Descongelar $label") }
-                OutlinedButton(onClick = { editingMany = !editingMany }, enabled = !s.busy) { Text("Editar $label") }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                FilledTonalButton(shape = MaterialTheme.shapes.medium, onClick = { engine.setFrozen(targets, true) }) { Text("Congelar $label") }
+                FilledTonalButton(shape = MaterialTheme.shapes.medium, onClick = { engine.setFrozen(targets, false) }) { Text("Descongelar $label") }
+                OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { editingMany = !editingMany }, enabled = !s.busy) { Text("Editar $label") }
                 TextButton(onClick = { engine.removeSaved(targets); selected = emptySet() }) { Text("Remover $label") }
                 // receita: guarda os campos marcados pelo nome (classe IL2CPP) para aplicar com um toque, toda vez
-                if (chosen.isNotEmpty()) OutlinedButton(onClick = { naming = true }) { Text("Criar receita (${chosen.size})") }
+                if (chosen.isNotEmpty()) OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { naming = true }) { Text("Criar receita (${chosen.size})") }
             }
             if (naming) {
                 // nome tem letras: teclado do telefone (o do Tinker só tem números)
                 var name by remember { mutableStateOf("") }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     OutlinedTextField(name, { name = it }, label = { Text("Nome da receita") }, singleLine = true, modifier = Modifier.weight(1f))
-                    Button(onClick = { naming = false; info = engine.createRecipe(chosen, name); selected = emptySet() }) { Text("Criar") }
+                    Button(shape = MaterialTheme.shapes.medium, onClick = { naming = false; info = engine.createRecipe(chosen, name); selected = emptySet() }) { Text("Criar") }
                     TextButton(onClick = { naming = false }) { Text("✕") }
                 }
             }
@@ -891,7 +892,7 @@ private fun Recipes(engine: Engine, run: (suspend () -> String) -> Unit, onInfo:
             }
             r.steps.forEachIndexed { i, st ->
                 val key = r.id + i
-                Row(Modifier.fillMaxWidth().clickable { editing = if (editing == key) null else key }, verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().sizeIn(minHeight = 48.dp).clickable { editing = if (editing == key) null else key }, verticalAlignment = Alignment.CenterVertically) {
                     Text("${st.label} · ${st.how}", Modifier.weight(1f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(st.value + if (st.freeze) " ❄" else "", fontFamily = FontFamily.Monospace, fontSize = 14.sp)
                 }
@@ -910,9 +911,9 @@ private fun Recipes(engine: Engine, run: (suspend () -> String) -> Unit, onInfo:
                     }
                 }
             }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { run { engine.applyRecipe(r) } }, enabled = !s.busy && s.process != null) { Text("Aplicar") }
-                OutlinedButton(onClick = {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(shape = MaterialTheme.shapes.medium, onClick = { run { engine.applyRecipe(r) } }, enabled = !s.busy && s.process != null) { Text("Aplicar") }
+                OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = {
                     context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Receita do Tinker", engine.exportRecipe(r)))
                     onInfo("Receita copiada. Quem colar em Salvos → Colar lista recebe ela.")
                 }) { Text("Copiar") }
@@ -991,7 +992,7 @@ private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
                 value = goTo, onValueChange = { goTo = it.removePrefix("0x").trim() }, label = { Text("Endereço (7a0010+8)") },
                 singleLine = true, modifier = Modifier.weight(1f),
             )
-            Button(onClick = {
+            Button(shape = MaterialTheme.shapes.medium, onClick = {
                 val a = parseAddress(goTo)
                 if (a != null) s.view = a to type else error = "Endereço inválido: $goTo"
             }, contentPadding = PaddingValues(horizontal = 12.dp)) { Text("Ir") }
@@ -1017,7 +1018,7 @@ private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
                             hot -> MaterialTheme.colorScheme.tertiaryContainer
                             else -> MaterialTheme.colorScheme.surfaceContainerLow
                         })
-                        .clickable { editing = if (editing == row.addr) null else row.addr }.padding(horizontal = 12.dp, vertical = 6.dp),
+                        .sizeIn(minHeight = 48.dp).clickable { editing = if (editing == row.addr) null else row.addr }.padding(horizontal = 12.dp, vertical = 6.dp),
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(row.addr, Modifier.weight(1f), fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
@@ -1111,7 +1112,7 @@ private fun ClassOpener(engine: Engine) {
     }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         OutlinedTextField(cls, { cls = it }, label = { Text("Classe ou campo") }, placeholder = { Text("PlayerData, gold") }, singleLine = true, modifier = Modifier.weight(1f))
-        Button(onClick = { open(cls) }, enabled = !loading && s.process != null && cls.isNotBlank(), contentPadding = PaddingValues(horizontal = 12.dp)) { Text("Abrir") }
+        Button(shape = MaterialTheme.shapes.medium, onClick = { open(cls) }, enabled = !loading && s.process != null && cls.isNotBlank(), contentPadding = PaddingValues(horizontal = 12.dp)) { Text("Abrir") }
         if (cls.isNotBlank()) TextButton(onClick = { copy(cls) }, contentPadding = PaddingValues(0.dp), modifier = Modifier.size(48.dp)) { Text("⧉", fontSize = 18.sp) }
     }
     // atalhos: classes abertas antes e as dos salvos que têm nome IL2CPP
@@ -1191,7 +1192,7 @@ private fun landscape() = LocalPanelSize.current.let { it.width > it.height || i
 private fun ClassRow(gc: GameClass, matched: List<String>, onOpen: () -> Unit, onCopy: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceContainerLow)
-            .clickable(onClick = onOpen).padding(horizontal = 12.dp, vertical = 8.dp),
+            .sizeIn(minHeight = 48.dp).clickable(onClick = onOpen).padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -1262,9 +1263,9 @@ private fun FichaBody(engine: Engine, center: String, run: (suspend () -> String
         context = { engine.fichaContext(il2, rows) },
     )
     if (looked && c == null) {
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = { page-- }) { Text("▲ Antes") }
-            OutlinedButton(onClick = { page++ }) { Text("▼ Depois") }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { page-- }) { Text("▲ Antes") }
+            OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { page++ }) { Text("▼ Depois") }
         }
     }
     if (c != null && c.fields.size > 6) {
@@ -1276,7 +1277,7 @@ private fun FichaBody(engine: Engine, center: String, run: (suspend () -> String
             list.take(40).forEach { it2 ->
                 Row(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceContainerLow)
-                        .clickable(enabled = it2.isRef) { s.view = it2.addr to "i32" }.padding(horizontal = 12.dp, vertical = 6.dp),
+                        .sizeIn(minHeight = 48.dp).clickable(enabled = it2.isRef) { s.view = it2.addr to "i32" }.padding(horizontal = 12.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(it2.label, Modifier.weight(1f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1300,7 +1301,7 @@ private fun FichaBody(engine: Engine, center: String, run: (suspend () -> String
                         hot -> MaterialTheme.colorScheme.tertiaryContainer
                         else -> MaterialTheme.colorScheme.surfaceContainerLow
                     })
-                    .clickable { open = if (open == r.addr) null else r.addr }.padding(horizontal = 12.dp, vertical = 6.dp),
+                    .sizeIn(minHeight = 48.dp).clickable { open = if (open == r.addr) null else r.addr }.padding(horizontal = 12.dp, vertical = 6.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(offsetText(r.off), Modifier.width(64.dp), fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
@@ -1309,16 +1310,16 @@ private fun FichaBody(engine: Engine, center: String, run: (suspend () -> String
                 }
                 if (open == r.addr) {
                     Text("0x${r.addr}", fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         if (r.type.isNotEmpty()) {
                             // entra nos Salvos já ligado pelo offset aos outros da mesma ficha, com nome do campo quando é IL2CPP
-                            FilledTonalButton(onClick = { engine.addSaved(listOf(Hit(r.addr, r.type, "?", r.value))); s.status = "Salvo: ${r.label}"; open = null }) { Text("Salvar") }
+                            FilledTonalButton(shape = MaterialTheme.shapes.medium, onClick = { engine.addSaved(listOf(Hit(r.addr, r.type, "?", r.value))); s.status = "Salvo: ${r.label}"; open = null }) { Text("Salvar") }
                             // congela já no valor de agora (vira salvo congelado, com o nome do campo)
-                            OutlinedButton(onClick = { engine.addSaved(listOf(Hit(r.addr, r.type, "?", r.value)), frozen = true); s.status = "Congelado: ${r.label}"; open = null }) { Text("Congelar") }
+                            OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { engine.addSaved(listOf(Hit(r.addr, r.type, "?", r.value)), frozen = true); s.status = "Congelado: ${r.label}"; open = null }) { Text("Congelar") }
                         }
                         if (r.value.startsWith("0x")) {
                             // ponteiro: abre a ficha do objeto para onde ele aponta
-                            OutlinedButton(onClick = { s.view = r.value.removePrefix("0x") to "i32"; open = null }) { Text("Abrir o objeto") }
+                            OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { s.view = r.value.removePrefix("0x") to "i32"; open = null }) { Text("Abrir o objeto") }
                         }
                     }
                     if (r.type.isNotEmpty()) {
@@ -1364,12 +1365,12 @@ private fun NearSearch(engine: Engine, centers: List<String>, initialType: Strin
                 singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f),
             )
         }
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { go { engine.searchNear(centers, type, radius.toIntOrNull() ?: 100, values) } }, enabled = values.isNotBlank() && !working) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Button(shape = MaterialTheme.shapes.medium, onClick = { go { engine.searchNear(centers, type, radius.toIntOrNull() ?: 100, values) } }, enabled = values.isNotBlank() && !working) {
                 Text("Buscar ${TYPE_NAMES[type]}")
             }
             // o valor mudou no jogo: digite o novo e a lista diminui
-            if (!found.isNullOrEmpty()) FilledTonalButton(onClick = { go { engine.refineNear(found.orEmpty(), values) } }, enabled = values.isNotBlank() && !working) {
+            if (!found.isNullOrEmpty()) FilledTonalButton(shape = MaterialTheme.shapes.medium, onClick = { go { engine.refineNear(found.orEmpty(), values) } }, enabled = values.isNotBlank() && !working) {
                 Text("Refinar")
             }
             if (found != null) TextButton(onClick = { found = null }) { Text("Limpar") }
@@ -1389,7 +1390,7 @@ private fun NearSearch(engine: Engine, centers: List<String>, initialType: Strin
                 val d = delta(hit)
                 Column(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                        .clickable { open = if (open == hit.addr) null else hit.addr }.padding(horizontal = 12.dp, vertical = 6.dp),
+                        .sizeIn(minHeight = 48.dp).clickable { open = if (open == hit.addr) null else hit.addr }.padding(horizontal = 12.dp, vertical = 6.dp),
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(hit.addr, Modifier.weight(1f), fontFamily = FontFamily.Monospace, fontSize = 13.sp, maxLines = 1)
@@ -1400,7 +1401,7 @@ private fun NearSearch(engine: Engine, centers: List<String>, initialType: Strin
                         fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
                     )
                     if (open == hit.addr) {
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             TextButton(onClick = { engine.addSaved(listOf(hit.copy(region = "?"))); open = null }) { Text("Salvar") }
                             TextButton(onClick = { s.view = hit.addr to type; s.tab = TAB_MEMORY }) { Text("Ir para") }
                         }
@@ -1481,9 +1482,9 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                             placeholder = { Text(if (gemini) "AIza… ou AQ.…" else "gsk_…") }, maxLines = 3,
                             visualTransformation = PasswordVisualTransformation(), modifier = Modifier.weight(1f))
                         // no menu flutuante o Android não mostra "Colar" ao segurar o campo: o botão lê a área de transferência direto
-                        Button(onClick = { val t = clipRaw(); if (t.isEmpty()) keyInfo = noClip else newKey = t }) { Text("Colar") }
+                        Button(shape = MaterialTheme.shapes.medium, onClick = { val t = clipRaw(); if (t.isEmpty()) keyInfo = noClip else newKey = t }) { Text("Colar") }
                     }
-                    Button(onClick = { keyInfo = engine.addKeys(s.aiProvider, newKey); newKey = "" }, enabled = newKey.isNotBlank()) { Text("+ Adicionar") }
+                    Button(shape = MaterialTheme.shapes.medium, onClick = { keyInfo = engine.addKeys(s.aiProvider, newKey); newKey = "" }, enabled = newKey.isNotBlank()) { Text("+ Adicionar") }
                 }
                 Section("Painel de chaves (planilha)", if (s.keySource.isBlank()) "desligado" else "ligado: chaves e aprendizado vêm de lá", startOpen = s.keySource.isBlank()) {
                     // painel de chaves numa planilha do Google (docs/painel-chaves): o app pega as chaves de lá sozinho
@@ -1493,10 +1494,10 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                         OutlinedTextField(s.keySource, { s.keySource = it.trim(); engine.saveSettings() }, label = { Text("Link do painel") },
                             placeholder = { Text("https://script.google.com/…") }, singleLine = true,
                             visualTransformation = PasswordVisualTransformation(), modifier = Modifier.weight(1f))
-                        Button(onClick = { val t = clipText(); if (t.isEmpty()) keyInfo = noClip else { s.keySource = t; engine.saveSettings(); scope.launch { keyInfo = engine.syncKeys() } } }) { Text("Colar") }
+                        Button(shape = MaterialTheme.shapes.medium, onClick = { val t = clipText(); if (t.isEmpty()) keyInfo = noClip else { s.keySource = t; engine.saveSettings(); scope.launch { keyInfo = engine.syncKeys() } } }) { Text("Colar") }
                     }
                     if (s.keySource.isNotBlank()) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        OutlinedButton(onClick = { keyInfo = "Lendo o painel…"; scope.launch { keyInfo = engine.syncKeys() } }) { Text("Atualizar do painel") }
+                        OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { keyInfo = "Lendo o painel…"; scope.launch { keyInfo = engine.syncKeys() } }) { Text("Atualizar do painel") }
                         TextButton(onClick = { s.keySource = ""; engine.saveSettings() }) { Text("Desligar painel") }
                 }
                 }
@@ -1544,22 +1545,22 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                     Text("Backup automático em Download/Tinker/$MEMORY_FILE" + (if (engine.lastMemoryBackup.isEmpty()) "" else " (último: ${engine.lastMemoryBackup})") +
                         if (s.keySource.isNotBlank()) ". Também vai para a planilha do painel (aba Aprendizado), que junta o de todas as instâncias." else "",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        OutlinedButton(onClick = { keyInfo = if (engine.backupMemory()) "Backup feito em Download/Tinker." else "Backup não deu certo (veja o Registro)." }) { Text("Fazer backup") }
-                        OutlinedButton(onClick = {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { keyInfo = if (engine.backupMemory()) "Backup feito em Download/Tinker." else "Backup não deu certo (veja o Registro)." }) { Text("Fazer backup") }
+                        OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = {
                             val file = File(clipCtx.cacheDir, "reports").apply { mkdirs() }.let { File(it, MEMORY_FILE) }.apply { writeText(engine.memoryJson()) }
                             shareFile(clipCtx, file, "application/json")
                         }) { Text("Exportar") }
-                        OutlinedButton(onClick = {
+                        OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = {
                             val clip = clipCtx.getSystemService(ClipboardManager::class.java).primaryClip
                             val t = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(clipCtx)?.toString().orEmpty()
                             keyInfo = if (t.isBlank()) "Copie o conteúdo do arquivo $MEMORY_FILE e toque de novo." else engine.importMemory(t)
                         }) { Text("Importar (colar)") }
-                        OutlinedButton(onClick = { keyInfo = engine.restoreMemory() }) { Text("Restaurar do backup") }
+                        OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { keyInfo = engine.restoreMemory() }) { Text("Restaurar do backup") }
                         // banco comum na planilha do painel: junta o que todas as instâncias aprenderam
-                        if (s.keySource.isNotBlank()) OutlinedButton(onClick = { keyInfo = "Juntando com a planilha…"; scope.launch { keyInfo = engine.cloudPull() } }) { Text("Juntar com a planilha") }
+                        if (s.keySource.isNotBlank()) OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { keyInfo = "Juntando com a planilha…"; scope.launch { keyInfo = engine.cloudPull() } }) { Text("Juntar com a planilha") }
                         // backup de outro aparelho ou outra instância (copiado para cá): escolher o arquivo
-                        openMemory?.let { l -> OutlinedButton(onClick = { l.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }) { Text("Abrir arquivo") } }
+                        openMemory?.let { l -> OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { l.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }) { Text("Abrir arquivo") } }
                     }
                 }
             }
@@ -1573,13 +1574,13 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                 if (overlay) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Tamanho do painel: ${PANEL_SIZES[s.panelSize].second}", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                        OutlinedButton(onClick = onResize) { Text("Trocar") }
+                        OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = onResize) { Text("Trocar") }
                     }
                     Text("Em pé o tamanho é a altura; com o jogo deitado é a largura, e o painel fica de lado (o jogo continua à vista).",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Lado com o jogo deitado: ${if (s.panelLeft) "esquerda" else "direita"}", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                        OutlinedButton(onClick = { s.panelLeft = !s.panelLeft; engine.saveSettings() }) { Text("Trocar") }
+                        OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { s.panelLeft = !s.panelLeft; engine.saveSettings() }) { Text("Trocar") }
                     }
                     Text("Transparência", style = MaterialTheme.typography.bodyMedium)
                     Slider(value = s.alpha, onValueChange = { s.alpha = it }, onValueChangeFinished = engine::saveSettings, valueRange = 0.35f..1f)
@@ -1615,7 +1616,7 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
             item {
                 Panel {
                     Text("Jogo", style = MaterialTheme.typography.titleSmall)
-                    OutlinedButton(onClick = {
+                    OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = {
                         if (confirmKill) run { engine.killGame() }
                         confirmKill = !confirmKill
                     }, enabled = !s.busy) { Text(if (confirmKill) "Toque de novo para fechar o jogo" else "Fechar jogo", maxLines = 1) }
@@ -1731,10 +1732,10 @@ private fun GroqModels(engine: Engine) {
     var info by remember { mutableStateOf<String?>(null) }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text("Modelo: ${s.groqModel.ifEmpty { "escolhido sozinho" }}", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-        OutlinedButton(onClick = { info = "Vendo os modelos…"; scope.launch { info = engine.detectGroqModels() } }, enabled = s.groqKeys.isNotEmpty()) { Text("Detectar") }
+        OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { info = "Vendo os modelos…"; scope.launch { info = engine.detectGroqModels() } }, enabled = s.groqKeys.isNotEmpty()) { Text("Detectar") }
     }
     info?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
-    if (s.groqModels.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    if (s.groqModels.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         s.groqModels.take(12).forEach { m ->
             FilterChip(selected = m == s.groqModel, onClick = { s.groqModel = m; engine.saveSettings() }, label = { Text(m, maxLines = 1) })
         }
@@ -1765,11 +1766,11 @@ private fun GeminiModels(engine: Engine) {
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text("Modelo: ${s.geminiModel}", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-        OutlinedButton(onClick = ::detect, enabled = !checking && s.geminiKey.isNotBlank()) { Text("Detectar") }
+        OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = ::detect, enabled = !checking && s.geminiKey.isNotBlank()) { Text("Detectar") }
     }
     if (checking) LinearProgressIndicator(Modifier.fillMaxWidth())
     info?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
-    if (s.geminiModels.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    if (s.geminiModels.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         s.geminiModels.take(12).forEach { m ->
             // escolher na mão desliga a escolha automática
             FilterChip(selected = m == s.geminiModel, onClick = { s.geminiModel = m; s.geminiAutoModel = false; engine.saveSettings() },
@@ -1807,7 +1808,7 @@ private fun KnownFields(engine: Engine) {
     val item = known.firstOrNull { it.id == open } ?: return
     msg?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
     // os com valor diferente de zero primeiro: o objeto da corrida atual costuma ser o que tem número
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         values.sortedBy { it.second == "0" }.take(16).forEach { (addr, v) ->
             FilterChip(selected = addr == item.addr, onClick = { msg = engine.retarget(item, addr); open = null }, label = { Text(v, maxLines = 1) })
         }
@@ -1854,7 +1855,7 @@ private fun HelpPanel() {
     Panel {
         Text("Ajuda", style = MaterialTheme.typography.titleSmall)
         HELP.forEachIndexed { i, (title, body) ->
-            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { open = if (open == i) null else i }.padding(vertical = 6.dp)) {
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).sizeIn(minHeight = 48.dp).clickable { open = if (open == i) null else i }.padding(vertical = 6.dp)) {
                 Text((if (open == i) "▾ " else "▸ ") + title, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary)
                 if (open == i) Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
             }
@@ -1890,8 +1891,8 @@ private fun LogTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, onE
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(vertical = 8.dp),
         )
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Button(onClick = {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Button(shape = MaterialTheme.shapes.medium, onClick = {
                 fetch {
                     val file = engine.report()
                     info = saveToDownloads(context, file)?.let { "Salvo em Download/Tinker/${file.name}" } ?: "Relatório pronto: ${file.name}"
@@ -1900,7 +1901,7 @@ private fun LogTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, onE
                     shareFile(context, file)
                 }
             }, enabled = !working) { Text("Compartilhar relatório") }
-            FilledTonalButton(onClick = {
+            FilledTonalButton(shape = MaterialTheme.shapes.medium, onClick = {
                 fetch {
                     val text = engine.report().readText()
                     // a área de transferência do Android aguenta ~1 MB; fica o final, que tem o mais recente
@@ -1909,13 +1910,13 @@ private fun LogTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, onE
                     info = "Relatório copiado (${clip.length / 1024} KB). Cole onde quiser."
                 }
             }, enabled = !working) { Text("Copiar tudo") }
-            OutlinedButton(onClick = { fetch { engine.crashLog() } }, enabled = !working) { Text("Ver falhas") }
-            OutlinedButton(onClick = { fetch { engine.gameLog() } }, enabled = !working && Session.process != null) { Text("Ver logcat do jogo") }
+            OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { fetch { engine.crashLog() } }, enabled = !working) { Text("Ver falhas") }
+            OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { fetch { engine.gameLog() } }, enabled = !working && Session.process != null) { Text("Ver logcat do jogo") }
             // dois toques: apagar o registro não tem volta
             if (confirmClear) {
-                Button(onClick = { Diag.clear(); info = "Registro apagado."; confirmClear = false }) { Text("Apagar mesmo") }
+                Button(shape = MaterialTheme.shapes.medium, onClick = { Diag.clear(); info = "Registro apagado."; confirmClear = false }) { Text("Apagar mesmo") }
                 TextButton(onClick = { confirmClear = false }) { Text("Cancelar") }
-            } else OutlinedButton(onClick = { confirmClear = true }) { Text("Limpar registro") }
+            } else OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { confirmClear = true }) { Text("Limpar registro") }
         }
         AiBox(
             engine, "Analisar o registro com IA",
@@ -2002,7 +2003,7 @@ private fun Picker(engine: Engine, onBack: () -> Unit, onPick: (GameProcess) -> 
             else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 items(list.filter { filter.isBlank() || it.label.contains(filter, true) || it.pkg.contains(filter, true) }) { p ->
                     Row(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { onPick(p) }.padding(8.dp),
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).sizeIn(minHeight = 48.dp).clickable { onPick(p) }.padding(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         AppIcon(p, 40)

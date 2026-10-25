@@ -109,7 +109,7 @@ fun AiBox(
     if (!Assistant.ready()) {
         Text("Para usar, coloque uma chave do Gemini ou do Groq (as duas são grátis).", style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Button(onClick = { s.tab = TABS.indexOf("Ajustes") }) { Text("Configurar IA") }
+        Button(shape = MaterialTheme.shapes.medium, onClick = { s.tab = TABS.indexOf("Ajustes") }) { Text("Configurar IA") }
         return
     }
     val going = turns.isNotEmpty()
@@ -159,7 +159,7 @@ fun AiBox(
                         else "${p.label.ifEmpty { "0x" + p.addr }} → ${p.value}${if (p.freeze) " ❄" else ""}",
                         Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium,
                     )
-                    Button(onClick = { scope.launch { applied = runCatching { engine.applyProposal(p) }.getOrElse { it.message } } }) {
+                    Button(shape = MaterialTheme.shapes.medium, onClick = { scope.launch { applied = runCatching { engine.applyProposal(p) }.getOrElse { it.message } } }) {
                         Text(if (p.recipe.isNotEmpty()) "Criar" else "Aplicar")
                     }
                 }
@@ -178,18 +178,18 @@ fun AiBox(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(if (s.aiControl) "Trabalhando (pode tocar no jogo)…" else "Pensando… (pode levar até um minuto)", Modifier.weight(1f),
                     style = MaterialTheme.typography.bodySmall)
-                Button(onClick = { c.job?.cancel() }) { Text("⏹ Parar") }
+                Button(shape = MaterialTheme.shapes.medium, onClick = { c.job?.cancel() }) { Text("⏹ Parar") }
             }
         }
         // o que a IA olhou sozinha na memória (procurar classe, abrir objeto, buscar)
         steps.takeLast(8).forEach { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             OutlinedTextField(question, { question = it }, label = { Text(if (going) "Responder ou perguntar mais" else "Sua pergunta") }, modifier = Modifier.weight(1f))
-            Button(onClick = { ask(question, fresh = false) }, enabled = !loading && question.isNotBlank()) { Text(if (going) "Enviar" else "Perguntar") }
+            Button(shape = MaterialTheme.shapes.medium, onClick = { ask(question, fresh = false) }, enabled = !loading && question.isNotBlank()) { Text(if (going) "Enviar" else "Perguntar") }
         }
         if (going && !loading) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             // a IA pediu para mexer no jogo (gastar, ganhar, levar dano): a pessoa faz e toca aqui
-            Button(onClick = { ask("Pronto, fiz o que você pediu no jogo. Continue.", fresh = false) }) { Text("Continuar") }
+            Button(shape = MaterialTheme.shapes.medium, onClick = { ask("Pronto, fiz o que você pediu no jogo. Continue.", fresh = false) }) { Text("Continuar") }
             TextButton(onClick = { chat.reset(); turns = emptyList(); steps = emptyList(); applied = null }) { Text("Nova conversa") }
         }
     }
