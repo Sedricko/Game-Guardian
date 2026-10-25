@@ -226,6 +226,15 @@ class ValuesTest {
     }
 
     @Test
+    fun groqResetHeader() {
+        assertEquals(7.66, groqSecs("7.66s"), 0.001)
+        assertEquals(62.5, groqSecs("1m2.5s"), 0.001)
+        assertEquals(7380.0, groqSecs("2h3m"), 0.001)
+        assertEquals(0.25, groqSecs("250ms"), 0.001)
+        assertEquals(0.0, groqSecs(null), 0.001)
+    }
+
+    @Test
     fun returnPatchBytes() {
         val ret = "c0035fd6"
         assertEquals(ret, returnPatch(0x01, ""))                               // void: só RET

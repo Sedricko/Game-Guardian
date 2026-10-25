@@ -194,6 +194,7 @@ jogo abrir, use propor_receita com os salvos."""
                     .apply { if (fns.length() > 0) put("tools", fns).put("tool_choice", "auto") }
                     .put("max_completion_tokens", 2048).toString()
                 val sent = System.currentTimeMillis()
+                groqSwapEarly(body().length / 3L + 2048)  // ~3 letras por token, mais a resposta máxima
                 var (code, reply) = groqHttp("chat/completions", Session.groqKey, body())
                 // pedido maior que o limite por minuto da conta: encolhe a conversa e tenta de novo
                 if (code == 413 || (code == 400 && "too large" in reply.lowercase())) {
@@ -331,6 +332,25 @@ jogo abrir, use propor_receita com os salvos."""
         return rankGroq((0 until data.length()).mapNotNull { data.optJSONObject(it)?.optString("id")?.takeIf { id -> id.isNotEmpty() } })
     }
 
+    private class GroqLeft(val tokens: Long, val fullAt: Long, val requests: Long)
+    private val groqLeft = java.util.concurrent.ConcurrentHashMap<String, GroqLeft>()
+
+    /**
+     * Antes de mandar: se a chave de agora não aguenta este pedido (tokens do minuto) ou está no último pedido do dia,
+     * passa para outra que aguenta. Assim não bate no limite e não espera. Nenhuma aguenta: fica, e a espera de sempre cuida.
+     */
+    private fun groqSwapEarly(need: Long) {
+        fun fits(k: String) = groqLeft[k]?.let { l -> l.requests > 1 && (l.tokens >= need || System.currentTimeMillis() >= l.fullAt) } ?: true
+        if (fits(Session.groqKey)) return
+        val n = Session.groqKeys.size
+        val next = (1 until n).map { (Session.groqKeyIndex + it) % n }.firstOrNull { fits(Session.groqKeys[it]) } ?: return
+        val l = groqLeft[Session.groqKey]
+        val msg = "Groq: chave ${Session.groqKeyIndex + 1} quase no limite (${l?.tokens} tokens no minuto, ${l?.requests} pedidos no dia); passando antes para a chave ${next + 1} de $n"
+        Session.groqKeyIndex = next
+        Diag.add(msg)
+        Diag.ai(msg)
+    }
+
     private fun groqHttp(path: String, key: String, body: String?): Pair<Int, String> {
         val c = URL(GROQ + path).openConnection() as HttpURLConnection
         try {
@@ -345,6 +365,12 @@ jogo abrir, use propor_receita com os salvos."""
             }
             val code = c.responseCode
             val text = (if (code < 400) c.inputStream else c.errorStream)?.bufferedReader()?.use { it.readText() }.orEmpty()
+            // o Groq diz em cada resposta quanto sobra: tokens do minuto (e quando enchem de novo) e pedidos do dia
+            val now = System.currentTimeMillis()
+            c.getHeaderField("x-ratelimit-remaining-tokens")?.toLongOrNull()?.let { left ->
+                groqLeft[key] = GroqLeft(left, now + (groqSecs(c.getHeaderField("x-ratelimit-reset-tokens")) * 1000).toLong(),
+                    c.getHeaderField("x-ratelimit-remaining-requests")?.toLongOrNull() ?: Long.MAX_VALUE)
+            }
             if (code == 429 && groqWait(code, text) == null) reportOut(key, java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date()))
             return code to text
         } finally {
@@ -626,6 +652,12 @@ internal fun rankGroq(ids: List<String>): List<String> {
     val best = listOf("gpt-oss-120b", "kimi-k2", "llama-4-maverick", "qwen3", "llama-3.3-70b", "llama-4-scout", "gpt-oss-20b", "llama-3.1-8b")
     return ids.filter { id -> skip.none { it in id.lowercase() } }.distinct()
         .sortedBy { id -> best.indexOfFirst { it in id.lowercase() }.let { if (it < 0) best.size else it } }
+}
+
+/** "7.66s", "1m2.5s", "2h3m": segundos (cabeçalho x-ratelimit-reset-* do Groq). */
+internal fun groqSecs(t: String?): Double = Regex("""([\d.]+)(ms|h|m|s)""").findAll(t.orEmpty()).sumOf { m ->
+    val v = m.groupValues[1].toDoubleOrNull() ?: 0.0
+    when (m.groupValues[2]) { "h" -> v * 3600; "m" -> v * 60; "ms" -> v / 1000; else -> v }
 }
 
 /** Modelo do Groq que lê imagem (print da tela). */
