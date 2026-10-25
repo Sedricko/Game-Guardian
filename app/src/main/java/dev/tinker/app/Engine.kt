@@ -1210,6 +1210,34 @@ class Engine private constructor(private val app: Context) {
             val bytes = call { d -> d.send("dump $addr i8 $n", quiet = true).lines.map { l -> l.substringAfter(' ').toIntOrNull()?.let { "%02x".format(it and 0xff) } ?: "??" } }
             "0x$addr: " + bytes.joinToString(" ")
         },
+        AiTool("criar_assinatura", "Monta agora a assinatura AOB de salvos: lê os bytes em volta do valor várias vezes, o que muda vira ?? e confere " +
+            "em quantos lugares ela aparece. Achando um lugar só, o salvo volta pelos bytes quando o jogo reabrir, mesmo sem classe nem ponteiro. " +
+            "Leva uns 4 s com o jogo rodando.",
+            mapOf("salvos" to "nomes ou endereços dos salvos, separados por vírgula, ou todos"), listOf("salvos")) { a ->
+            val items = matchSaved(a.optString("salvos"), Session.saved.toList()).filter { it.pid == currentPid && !it.temp }.take(5)
+            if (items.isEmpty()) return@AiTool "Nenhum salvo desta vez do jogo com esses nomes."
+            // várias leituras: cada byte que mexe (contador, ponteiro, tempo) vira ?? e a assinatura sobrevive ao reabrir
+            repeat(6) { k ->
+                call { d -> items.forEach { i -> Session.saved.firstOrNull { it.id == i.id }?.let { d.learnSig(it) } } }
+                if (k < 5) delay(700)
+            }
+            items.mapNotNull { i -> Session.saved.firstOrNull { it.id == i.id } }.map { item ->
+                val fixed = item.sig.chunked(2).count { it != "??" }
+                "${label(item)}: " + when {
+                    !sigUseful(item.sig) -> "só $fixed bytes fixos em volta (muita coisa muda ou é tudo zero); não serve como assinatura"
+                    else -> {
+                        val r = call { d -> runCatching { d.send("aobfind ${item.sig}", quiet = true) }.getOrNull() }
+                        val places = r?.lines?.map { (it.toLong(16) + item.sigOff).toString(16) }.orEmpty()
+                        when {
+                            r == null -> "não deu para conferir agora"
+                            places == listOf(item.addr) -> "assinatura de ${item.sig.length / 2} bytes ($fixed fixos) acha só este lugar: volta sozinho ao reabrir ✓"
+                            item.addr in places -> "assinatura acha ${r.status} lugares (este entre eles): ao reabrir vale o que tiver o último valor"
+                            else -> "assinatura acha ${r.status} lugares e nenhum é este; jogue um pouco e tente de novo"
+                        }
+                    }
+                }
+            }.joinToString("\n")
+        },
         AiTool("ver_salvos", "Mostra os salvos (com ponteiro, assinatura, histórico e se voltaram ao reabrir) e as receitas.", emptyMap(), emptyList()) { savedContext() },
         AiTool("propor_receita", "Sugere criar uma receita com salvos (aplica tudo de uma vez, e sozinha ao abrir o jogo). Aparece um botão para a pessoa.",
             mapOf("nome" to "nome da receita", "salvos" to "nomes ou endereços dos salvos, separados por vírgula, ou todos", "ao_abrir" to "sim para aplicar sozinha quando o jogo abrir"),

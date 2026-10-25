@@ -54,6 +54,7 @@ Regras para acertar (siga sempre):
   refine de novo (peça para gastar/ganhar e diga o valor) ou teste cada um. Nunca proponha com vários candidatos sem confirmar.
 - esperar_mudanca serve para quando a pessoa não sabe dizer o número; se ela sabe, peça o número e use refinar.
 - Já sabe a classe mas não o campo (velocidade, tempo, vida)? Use o_que_muda no objeto enquanto a pessoa joga: mostra só os campos que mudaram.
+- Salvou um valor que não tem classe IL2CPP (jogo sem Unity, ou cópia solta)? Chame criar_assinatura nele: é o AOB que faz o salvo voltar ao reabrir.
 - Diga com quantos candidatos e qual evidência você chegou à resposta.
 - Não busque números pequenos e comuns (0 a 100, como 10) sozinhos: dão dezenas de milhares de resultados. Prefira o nome da
   classe/campo, busca em grupo com outros valores da tela, ou peça um número maior.
