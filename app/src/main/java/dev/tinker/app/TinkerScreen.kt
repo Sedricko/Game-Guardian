@@ -711,7 +711,7 @@ private fun PhotoPanel(engine: Engine, enabled: Boolean, chosen: List<String>, r
 private fun AobSearch(engine: Engine, enabled: Boolean, run: (suspend () -> String) -> Unit) {
     var open by remember { mutableStateOf(false) }
     var pattern by remember { mutableStateOf("") }
-    var code by remember { mutableStateOf(false) }
+    var where by remember { mutableStateOf("data") }
     TextButton(onClick = { open = !open }) { Text((if (open) "▾ " else "▸ ") + "Busca por bytes (AOB) ou texto") }
     if (!open) return
     OutlinedTextField(
@@ -719,11 +719,13 @@ private fun AobSearch(engine: Engine, enabled: Boolean, run: (suspend () -> Stri
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii), textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace),
         modifier = Modifier.fillMaxWidth(),
     )
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        FilterChip(selected = !code, onClick = { code = false }, label = { Text("Dados") })
-        FilterChip(selected = code, onClick = { code = true }, label = { Text("Código") })
-        Button(shape = MaterialTheme.shapes.medium, onClick = { run { engine.searchAob(pattern, code) } }, enabled = enabled && pattern.isNotBlank()) { Text("Buscar bytes") }
+    // Xa = código do jogo; Xs = código do sistema (como no GameGuardian); quase tudo que importa fica no Xa
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf("data" to "Dados", "xa" to "Código do jogo (Xa)", "xs" to "Código do sistema (Xs)").forEach { (k, l) ->
+            FilterChip(selected = where == k, onClick = { where = k }, label = { Text(l) })
+        }
     }
+    Button(shape = MaterialTheme.shapes.medium, onClick = { run { engine.searchAob(pattern, where) } }, enabled = enabled && pattern.isNotBlank()) { Text("Buscar bytes") }
     // texto (nome de item, apelido): tenta UTF-8 e, se não achar, UTF-16; texto tem letras, então teclado do telefone
     var text by remember { mutableStateOf("") }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -978,8 +980,15 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
             }
             compareText?.let { t ->
                 Panel {
+                    // as diferenças em destaque (como o Dissect data do Cheat Engine): o campo que muda costuma ser o valor
+                    var onlyDiff by remember { mutableStateOf(false) }
                     Text("≠ = muda de um para o outro", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(t, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+                    FilterChip(selected = onlyDiff, onClick = { onlyDiff = !onlyDiff }, label = { Text("Só as diferenças") })
+                    t.lines().filterIndexed { i, l -> i == 0 || !onlyDiff || '≠' in l }.forEach { l ->
+                        Text(l, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
+                            color = if ('≠' in l) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                            fontWeight = if ('≠' in l) androidx.compose.ui.text.font.FontWeight.Bold else null)
+                    }
                     TextButton(onClick = { compareText = null }) { Text("Fechar") }
                 }
             }
@@ -1283,6 +1292,18 @@ private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
                 else hexScope.launch { hex = runCatching { engine.hexView(center, 16) }.getOrElse { "Não leu: ${it.message}" } }
             }) { Text((if (hex != null) "▾ " else "▸ ") + "Ver bytes (hexadecimal)") }
             hex?.let { Text(it, fontFamily = FontFamily.Monospace, fontSize = 10.sp, lineHeight = 13.sp, softWrap = false, modifier = Modifier.horizontalScroll(rememberScrollState())) }
+            // editar direto nos bytes, como o hex editor do GG e do Cheat Engine
+            if (hex != null) {
+                var at by remember(center) { mutableStateOf(center) }
+                var bytes by remember { mutableStateOf("") }
+                OutlinedTextField(at, { at = it.filter { c -> c.isLetterOrDigit() }.lowercase() }, label = { Text("Escrever a partir de (endereço)") }, singleLine = true,
+                    textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace), modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(bytes, { bytes = it }, label = { Text("Bytes (ex.: 1F 20 03 D5)") }, singleLine = true,
+                    textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace), modifier = Modifier.fillMaxWidth())
+                Button(shape = MaterialTheme.shapes.medium, enabled = bytes.isNotBlank() && at.toLongOrNull(16) != null, onClick = {
+                    run { engine.writeBytes(at, bytes).also { hex = runCatching { engine.hexView(center, 16) }.getOrElse { e -> "Não leu: ${e.message}" } } }
+                }) { Text("Escrever bytes") }
+            }
             TextButton(onClick = { near = !near }) { Text((if (near) "▾ " else "▸ ") + "Buscar perto deste endereço") }
             if (near) TopArea { NearSearch(engine, listOf(center), type, chooseType = false, onError = { error = it }) }
         }

@@ -267,6 +267,7 @@ static int region_of(const char *perms, const char *name) {
 }
 
 static int region_exec;  // 1: percorre o código (r-x) em vez das regiões graváveis, para a busca AOB no código
+static int exec_only;    // com region_exec: 0 todo o código; 1 só o do jogo (Xa, /data); 2 só o do sistema (Xs, /system /apex /vendor)
 static int region_all;   // 1: tudo que dá para ler (os nomes das classes IL2CPP ficam no metadata, só leitura)
 
 // Chama fn para cada região gravável do alvo. Devolve -1 se não abriu o maps.
@@ -283,6 +284,11 @@ static int each_region(void (*fn)(uint64_t s, uint64_t e, int region, void *ctx)
         if (perms[0] != 'r' || (!region_all && (region_exec ? perms[2] != 'x' : perms[1] != 'w'))) continue;
         char *name = off ? line + off : line + strlen(line);
         name[strcspn(name, "\n")] = 0;
+        if (region_exec && exec_only) {
+            int game = !strncmp(name, "/data/", 6);
+            int sys = !strncmp(name, "/system/", 8) || !strncmp(name, "/apex/", 6) || !strncmp(name, "/vendor/", 8) || !strncmp(name, "/product/", 9);
+            if (exec_only == 1 ? !game : !sys) continue;
+        }
         int r = region_of(perms, name);
         if (r >= 0) fn(s, e, r, ctx);
     }
@@ -1660,6 +1666,20 @@ static void cmd_selftestdata(void) {
     puts("ok");
 }
 
+// "o sistema deixa o Tinker se ligar a um processo como depurador?" É a base do speedhack e do unrandomizer (que precisam
+// rodar código dentro do jogo). Testa num processo filho que só dorme: o jogo não é tocado.
+static void cmd_canattach(void) {
+    pid_t c = fork();
+    if (c < 0) { printf("err fork: %s\n", strerror(errno)); return; }
+    if (!c) { for (;;) pause(); }
+    int ok = ptrace(PTRACE_ATTACH, c, 0, 0) == 0, why = errno, st = 0;
+    if (ok) { waitpid(c, &st, __WALL); ptrace(PTRACE_DETACH, c, 0, 0); }
+    kill(c, SIGKILL);
+    waitpid(c, &st, 0);
+    if (ok) puts("ok sim");
+    else printf("ok não (%s)\n", strerror(why));
+}
+
 // "libjogo.so+1a2b30 18 40": base da lib + 1a2b30, lê o ponteiro, soma 18, lê, soma 40 = endereço do valor.
 static void cmd_resolve(char *chain) {
     char *save = NULL, *tok = strtok_r(chain, " \n", &save);
@@ -1904,10 +1924,13 @@ static void cmd_aob(const char *pat, const char *mode, int keep) {
     aob_t *p = calloc(1, sizeof *p);
     if (!p) { puts("err sem memória"); exit(1); }
     if (!parse_aob(pat, p)) { printf("err padrão inválido: %s\n", pat); free(p); return; }
-    region_exec = !strcmp(mode, "code");
+    // code = todo o código; xa = só o do jogo; xs = só o do sistema (as regiões Xa e Xs do GameGuardian)
+    region_exec = !strcmp(mode, "code") || !strcmp(mode, "xa") || !strcmp(mode, "xs");
+    exec_only = !strcmp(mode, "xa") ? 1 : !strcmp(mode, "xs") ? 2 : 0;
     p->cs.want = keep && !region_exec ? ranges : ~(1u << R_V);
     int r = each_region(add_chunks, &p->cs);
     region_exec = 0;
+    exec_only = 0;
     if (r) { puts("err não leu o mapa de memória"); free(p->cs.c); free(p); return; }
     p->out = calloc(p->cs.n ? p->cs.n : 1, sizeof *p->out);
     if (!p->out) { puts("err sem memória"); exit(1); }
@@ -2317,6 +2340,7 @@ int main(void) {
             cmd_input(kind, xs, n > 0 ? n - 1 : 0);
             continue;
         }
+        if (!strcmp(cmd, "canattach")) { cmd_canattach(); continue; }
         if (!strcmp(cmd, "info")) {
             // para o relatório: confirma root, kernel, tamanho de página e SELinux
             struct utsname u;
@@ -2369,7 +2393,7 @@ int main(void) {
         else if (!strcmp(cmd, "snapshot")) cmd_snapshot(a1);
         else if (!strcmp(cmd, "pointers")) cmd_pointers(a1, a2, a3, a4[0] == '1');
         else if (!strcmp(cmd, "aob")) cmd_aob(a1, a2, 1);
-        else if (!strcmp(cmd, "aobfind")) cmd_aob(a1, "data", 0);
+        else if (!strcmp(cmd, "aobfind")) cmd_aob(a1, a2[0] ? a2 : "data", 0);
         else if (!strcmp(cmd, "il2cpp")) cmd_il2cpp(a1);
         else if (!strcmp(cmd, "il2objs")) cmd_il2objs(a1);
         else if (!strcmp(cmd, "il2classes")) cmd_il2classes();

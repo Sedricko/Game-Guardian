@@ -82,6 +82,9 @@ val REGION_NAMES = mapOf(
 data class CodePatch(
     val id: String = java.util.UUID.randomUUID().toString(), val name: String, val where: String, val orig: String, val new: String,
     val enabled: Boolean = false, val suspect: Boolean = false, val note: String = "",
+    // ctx: os bytes do código em volta (4 instruções antes, as originais e 4 depois); com o jogo atualizado e a
+    // instrução em outro lugar, o patch acha ela de novo por esses bytes e passa a valer no endereço novo
+    val ctx: String = "",
 )
 
 // Um método IL2CPP: endereço do código, tipo de retorno (código do Unity: 01 void, 02 bool, 08 int, 0a long, 0c float,
@@ -1734,6 +1737,12 @@ class Engine private constructor(private val app: Context) {
             require("48213" in text.filter { !it.isWhitespace() }) { "leu \"${text.take(40)}\" em vez de 48213" }
             "ok"
         }
+        // speedhack e unrandomizer precisam rodar código dentro do jogo; isto só confere se o sistema permite a base disso
+        check("base do speedhack e unrandomizer") {
+            val r = withSelf { t -> t.call("canattach").status }
+            require(r.startsWith("sim")) { "o sistema não deixa ($r): speedhack e unrandomizer não funcionariam neste aparelho" }
+            "o sistema permite: dá para construir os dois aqui"
+        }
         check("depurador (O que escreve aqui?)") {
             val v = prefs.getString("depurador", null) ?: return@check "ainda não testado: use \"O que escreve aqui?\" uma vez"
             require(v == "funciona") { v }
@@ -2195,7 +2204,7 @@ class Engine private constructor(private val app: Context) {
             "Os lugares viram os resultados da busca. Bom para achar de novo um valor pelos bytes em volta (assinatura) quando o endereço muda.",
             mapOf("padrao" to "pares hex com ?? de curinga, ex.: 1F 20 ?? D5 00 00", "onde" to "dados (memória do jogo, padrão) ou codigo (instruções)"),
             listOf("padrao")) { a ->
-            aiBusy { resultsText(searchAob(a.optString("padrao"), a.optString("onde").trim().lowercase().startsWith("c"))) }
+            aiBusy { resultsText(searchAob(a.optString("padrao"), if (a.optString("onde").trim().lowercase().startsWith("c")) "xa" else "data")) }
         },
         AiTool("ler_bytes", "Mostra os bytes crus (hex) a partir de um endereço, para montar um padrão AOB em volta de um valor.",
             mapOf("endereco" to "endereço em hexadecimal (ex.: de um resultado, menos alguns bytes)", "quantidade" to "quantos bytes, até 64 (padrão 32)"),
@@ -3013,10 +3022,11 @@ class Engine private constructor(private val app: Context) {
     }
 
     /** Busca AOB do usuário: os achados viram resultados (como Dword) para ver, salvar e editar. */
-    suspend fun searchAob(pattern: String, code: Boolean): String = call { d ->
+    /** where: data (dados), xa (código do jogo) ou xs (código do sistema), como as regiões Xa e Xs do GameGuardian. */
+    suspend fun searchAob(pattern: String, where: String): String = call { d ->
         val p = pattern.replace(" ", "").lowercase()
         require(AOB.matches(p) && p.chunked(2).any { it != "??" }) { "Padrão inválido: use pares hex e ?? (ex.: 1F 20 ?? D5)" }
-        val n = d.frozenGame { d.send("aob $p ${if (code) "code" else "data"}") }.status
+        val n = d.frozenGame { d.send("aob $p ${where.takeIf { it == "xa" || it == "xs" } ?: "data"}") }.status
         Session.canUndo = false
         inFile = false
         step(true, "AOB $pattern", n)
@@ -3086,14 +3096,24 @@ class Engine private constructor(private val app: Context) {
         }.joinToString("\n")
     }
 
+    /** Editar no visor hexadecimal: escreve os bytes ("1F 20 03 D5") a partir de addr, um por um. */
+    suspend fun writeBytes(addr: String, hex: String): String = call { d ->
+        val h = hex.replace(" ", "").lowercase()
+        require(Regex("""([0-9a-f]{2}){1,64}""").matches(h)) { "Bytes inválidos: pares hexadecimais, ex.: 1F 20 03 D5" }
+        val a = addr.toLong(16)
+        h.chunked(2).forEachIndexed { i, b -> d.send("write ${(a + i).toString(16)} i8 ${b.toInt(16).toByte()}", quiet = true) }
+        Diag.add("Bytes escritos em 0x$addr: $hex")
+        "${h.length / 2} bytes escritos em 0x$addr."
+    }
+
     /** Busca por texto: primeiro como UTF-8 (C++, Lua), se não achar como UTF-16 (Java, C#). Os achados aparecem como Dword. */
     suspend fun searchText(text: String): String {
         require(text.length >= 3) { "Digite pelo menos 3 letras." }
         val utf8 = text.toByteArray(Charsets.UTF_8).joinToString("") { "%02x".format(it) }
-        val r = searchAob(utf8, false)
+        val r = searchAob(utf8, "data")
         if (!r.startsWith("Nenhum")) return "\"$text\" (UTF-8): $r"
         val utf16 = text.toByteArray(Charsets.UTF_16LE).joinToString("") { "%02x".format(it) }
-        return "\"$text\" (UTF-16): " + searchAob(utf16, false)
+        return "\"$text\" (UTF-16): " + searchAob(utf16, "data")
     }
 
     // ---- foto do jogo: antes/depois de uma ação (ex.: pegar a recompensa do correio) e voltar como estava ----
@@ -3344,14 +3364,17 @@ class Engine private constructor(private val app: Context) {
         val hex = newHex.replace(" ", "").lowercase()
         require(Regex("""([0-9a-f]{8}){1,16}""").matches(hex)) { "bytes inválidos: use 8 dígitos por instrução (ex.: 1f2003d5 = NOP)" }
         require(savedPkg != null) { "escolha o jogo primeiro" }
-        val (where, orig) = call { d ->
+        val (where, orig, ctx) = call { d ->
             val w = d.send("where $addr", quiet = true).status
             val n = hex.length / 8
             val cur = d.send("dump $addr i32 $n", quiet = true).lines.map { it.substringAfter(' ').toLong().toInt() }
-            w to wordsHex(cur)
+            val around = runCatching {
+                d.send("dump ${(addr.toLong(16) - 16).toString(16)} i32 ${n + 8}", quiet = true).lines.map { it.substringAfter(' ').toLong().toInt() }
+            }.getOrDefault(emptyList())
+            Triple(w, wordsHex(cur), if (around.size == n + 8) wordsHex(around) else "")
         }
         require(orig != hex) { "esses já são os bytes de agora" }
-        val p = CodePatch(name = name.ifBlank { where }, where = where, orig = orig, new = hex, note = note.take(300))
+        val p = CodePatch(name = name.ifBlank { where }, where = where, orig = orig, new = hex, note = note.take(300), ctx = ctx)
         withContext(Dispatchers.Main) { Session.patches.add(p); storePatches() }
         Diag.add("Patch criado: ${p.name} em $where ($orig → $hex)")
         return if (apply) setPatch(p, true) else "Patch \"${p.name}\" guardado (desligado): ligue em Salvos → Patches de código."
@@ -3361,6 +3384,7 @@ class Engine private constructor(private val app: Context) {
 
     /** Liga (bytes novos) ou desliga (bytes originais) um patch; confere antes que o código ainda é o esperado. */
     suspend fun setPatch(p: CodePatch, on: Boolean): String {
+        var relocated: String? = null
         val msg = call { d ->
             val addr = d.send("resolve ${p.where}", quiet = true).status
             val n = p.new.length / 8
@@ -3373,12 +3397,23 @@ class Engine private constructor(private val app: Context) {
                     if (on) lastPatchAt = System.currentTimeMillis()
                     if (on) "ligado" else "desligado"
                 }
-                else -> error("o código ali mudou (jogo atualizado?): esperava ${if (on) p.orig else p.new}, achei $cur")
+                else -> {
+                    // jogo atualizado: a instrução foi para outro lugar; acha pelos bytes em volta, no código do jogo (Xa)
+                    val moved = if (p.ctx.isEmpty()) null else runCatching { d.send("aobfind ${p.ctx} xa", quiet = true) }.getOrNull()
+                        ?.takeIf { it.status == "1" }?.lines?.firstOrNull()?.trim()?.toLongOrNull(16)?.let { (it + 16).toString(16) }
+                    if (moved == null) error("o código ali mudou (jogo atualizado?): esperava ${if (on) p.orig else p.new}, achei $cur, e não achei a instrução em outro lugar")
+                    val w = d.send("where $moved", quiet = true).status
+                    relocated = w
+                    hexWords(want).forEachIndexed { i, word -> d.send("write ${(moved.toLong(16) + 4L * i).toString(16)} i32 $word") }
+                    if (on) lastPatchAt = System.currentTimeMillis()
+                    "o jogo atualizou e a instrução mudou de lugar: achei em $w e ${if (on) "liguei" else "desliguei"} lá"
+                }
             }
         }
         withContext(Dispatchers.Main) {
             val i = Session.patches.indexOfFirst { it.id == p.id }
-            if (i >= 0) Session.patches[i] = Session.patches[i].copy(enabled = on, suspect = if (on) false else Session.patches[i].suspect)
+            if (i >= 0) Session.patches[i] = Session.patches[i].copy(enabled = on, suspect = if (on) false else Session.patches[i].suspect,
+                where = relocated ?: Session.patches[i].where)
             storePatches()
         }
         Diag.add("Patch ${p.name}: $msg")
@@ -4288,7 +4323,7 @@ private fun Drawable.toImageBitmap(): ImageBitmap {
 private val WHERE = Regex("""[A-Za-z0-9_.@+-]{1,120}\+[0-9a-f]{1,10}""")
 
 private fun CodePatch.toJson() = JSONObject().put("id", id).put("name", name).put("where", where).put("orig", orig).put("new", new)
-    .put("enabled", enabled).put("suspect", suspect).put("note", note)
+    .put("enabled", enabled).put("suspect", suspect).put("note", note).put("ctx", ctx)
 
 private fun JSONObject.toPatch(): CodePatch? = runCatching {
     val w = getString("where")
@@ -4297,5 +4332,6 @@ private fun JSONObject.toPatch(): CodePatch? = runCatching {
     // vai para o daemon: só lib+deslocamento e hex
     require(WHERE.matches(w) && Regex("""([0-9a-f]{8}){1,16}""").matches(o) && o.length == n.length && Regex("""[0-9a-f]+""").matches(n))
     CodePatch(optString("id").ifEmpty { java.util.UUID.randomUUID().toString() }, optString("name", w).take(60), w, o, n,
-        optBoolean("enabled", false), optBoolean("suspect", false), optString("note", "").take(300))
+        optBoolean("enabled", false), optBoolean("suspect", false), optString("note", "").take(300),
+        optString("ctx", "").lowercase().takeIf { Regex("""([0-9a-f]{8}){9,24}""").matches(it) }.orEmpty())
 }.getOrNull()

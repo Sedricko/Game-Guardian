@@ -285,6 +285,18 @@ fu=$( { printf '%s\n' "attach $pid" "freeze $iaddr i32 1000 up" "write $iaddr i3
 echo "$fu"
 [ "$(grep -cx 'ok 1000' <<<"$fu")" = 1 ] && [ "$(grep -cx 'ok 2000' <<<"$fu")" = 2 ] || { echo "FALHOU: congelar com regra"; exit 1; }
 
+# AOB no código por região: o código do alvo fica fora de /data, então aparece em "code" e não em "xa" (só o do jogo)
+cw=$(printf '%s\n' "attach $pid" "dump $caddr i32 4" | "$out/tinkerd" | grep "^$caddr\|^[0-9a-f]* -\?[0-9]" | head -4 | awk '{printf "%08x", ($2 < 0 ? $2 + 4294967296 : $2)}')
+ch=$(echo "$cw" | sed 's/\(..\)\(..\)\(..\)\(..\)/\4\3\2\1/g')
+cx=$(printf '%s\n' "attach $pid" "aobfind $ch code" "aobfind $ch xa" | "$out/tinkerd")
+echo "$cx"
+grep -qE "^ok [1-9]" <<<"$cx" && grep -qx "ok 0" <<<"$cx" || { echo "FALHOU: AOB no código por região"; exit 1; }
+
+# Base do speedhack: o daemon consegue se ligar a um processo filho de teste (resposta sim ou não, nunca erro)
+ca=$(printf '%s\n' "canattach" | "$out/tinkerd")
+echo "$ca"
+grep -qE "^ok (sim|não)" <<<"$ca" || { echo "FALHOU: canattach"; exit 1; }
+
 # Autoteste do app: o daemon se liga a ele mesmo e acha os próprios valores de teste (não toca em outro processo)
 sp="$out/self.fifo"; mkfifo "$sp"
 "$out/tinkerd" < "$sp" > "$out/self.out" & spid=$!
