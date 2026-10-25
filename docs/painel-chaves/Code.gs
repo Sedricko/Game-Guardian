@@ -2,7 +2,7 @@
 // A planilha nunca fica pública: o link só devolve as chaves ativas para quem tem o token.
 
 // Versão do script: sobe a cada mudança. O Tinker mostra no registro e avisa quando a planilha está numa anterior.
-const VERSAO = 11;
+const VERSAO = 12;
 
 const ABA = 'Chaves';
 const COLS = ['Chave', 'Nome', 'Ativa', 'Situação', 'Atualizado', 'Provedor'];
@@ -14,6 +14,7 @@ function onOpen() {
     .addItem('Definir o link da implantação', 'definirLink')
     .addItem('Gerar novo token (invalida o link antigo)', 'novoToken')
     .addItem('Consertar relatórios com #ERROR!', 'consertarRelatorios')
+    .addItem('Apagar de vez os salvos e receitas marcados como apagados', 'limparApagados')
     .addToUi();
   abaPedidos_();  // a aba Pedidos já fica pronta para usar
 }
@@ -626,4 +627,22 @@ function guardarBusca_(r) {
   s.getRange(2, 2, 1, BCOLS.length - 1).setNumberFormat('@');
   s.getRange(2, 1, 1, BCOLS.length).setValues([row.map(texto_)]);
   linhaFina_(s, 2, 1, BCOLS.length);
+}
+
+// só pelo menu, pela pessoa: tira de vez do banco o que está marcado "apagado no app" (o app nunca faz isso)
+function limparApagados() {
+  const ui = SpreadsheetApp.getUi();
+  const m = memoriaGuardada_();
+  if (!m) return;
+  let n = 0;
+  Object.keys(m.jogos || {}).forEach(pkg => {
+    const g = m.jogos[pkg];
+    ['salvos', 'receitas'].forEach(k => { const antes = (g[k] || []).length; g[k] = (g[k] || []).filter(x => !x.apagado); n += antes - g[k].length; });
+  });
+  if (!n) { ui.alert('Nada marcado como apagado.'); return; }
+  if (ui.alert('Apagar de vez ' + n + ' item(ns) marcados como apagados?', ui.ButtonSet.YES_NO) !== ui.Button.YES) return;
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try { guardarMemoria_(m); } finally { lock.releaseLock(); }
+  ui.alert(n + ' item(ns) apagados de vez.');
 }

@@ -36,7 +36,11 @@ A planilha é o banco de dados do app. O app e o script não apagam nada dela:
 - salvo ou receita apagado no app continua na planilha, com **Situação: apagado no app**, e o app não traz de volta;
 - lições e notas só são somadas.
 
-As abas Aprendizado, Salvos, Receitas e Problemas são só para leitura e são refeitas a partir da MemoriaBruta e dos Relatórios. Remover uma chave no painel é você quem faz.
+Apagar à mão funciona assim:
+- **Relatórios, Buscas, Pedidos e Aparelhos:** apague as linhas que quiser, direto na aba.
+- **Salvos e Receitas:** apague no app; ou, para tirar de vez da planilha, use **Tinker → Apagar de vez os salvos e receitas marcados como apagados**.
+- **Aprendizado, Salvos, Receitas e Problemas** são abas de leitura refeitas pelo script. Linha apagada nelas volta na próxima atualização.
+- Remover uma chave no painel é sempre você quem faz.
 
 ## Versão do script
 
