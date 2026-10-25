@@ -2,7 +2,7 @@
 // A planilha nunca fica pública: o link só devolve as chaves ativas para quem tem o token.
 
 // Versão do script: sobe a cada mudança. O Tinker mostra no registro e avisa quando a planilha está numa anterior.
-const VERSAO = 10;
+const VERSAO = 11;
 
 const ABA = 'Chaves';
 const COLS = ['Chave', 'Nome', 'Ativa', 'Situação', 'Atualizado', 'Provedor'];
@@ -252,16 +252,18 @@ function legivel_(m) {
   const nome = pkg => (jogos[pkg] && jogos[pkg].nome) || pkg;
   const aprendizado = [['Jogo', 'Tipo', 'Texto']];
   linhas2_(m.licoes).forEach(l => aprendizado.push(['(todos os jogos)', 'lição', l]));
-  const salvos = [['Jogo', 'Nome', 'Tipo', 'Classe IL2CPP', 'Ponteiro', 'Assinatura AOB', 'Último valor', 'Reservas']];
-  const receitas = [['Jogo', 'Receita', 'Ao abrir', 'Passos']];
+  const salvos = [['Jogo', 'Nome', 'Tipo', 'Classe IL2CPP', 'Ponteiro', 'Assinatura AOB', 'Último valor', 'Reservas', 'Situação']];
+  const receitas = [['Jogo', 'Receita', 'Ao abrir', 'Passos', 'Situação']];
   Object.keys(jogos).forEach(pkg => {
     const g = jogos[pkg] || {};
     linhas2_(g.notas).forEach(l => aprendizado.push([nome(pkg), 'nota', l]));
     (g.salvos || []).forEach(v => salvos.push([nome(pkg), v.name || '', v.type || '', v.il2 || '', v.pointer || '',
-      v.sig ? (v.sig.match(/.{1,2}/g) || []).join(' ') + ' (valor em +' + (v.sigOff || 0) + ')' : '', String(v.value || ''), (v.chains || []).length]));
+      v.sig ? (v.sig.match(/.{1,2}/g) || []).join(' ') + ' (valor em +' + (v.sigOff || 0) + ')' : '', String(v.value || ''), (v.chains || []).length,
+      v.apagado ? 'apagado no app' : 'ativo']));
     (g.receitas || []).forEach(r => receitas.push([nome(pkg), r.name || '', r.auto ? 'sim' : 'não',
       (r.steps || []).map(st => (st.label || st.cls || st.ptr || 'AOB') + ' = ' + st.value + (st.freeze ? ' ❄' : '') +
-        (st.cls ? ' [' + st.cls + '+' + Number(st.off || 0).toString(16) + ']' : st.ptr ? ' [' + st.ptr + ']' : st.sig ? ' [AOB]' : '')).join('; ')]));
+        (st.cls ? ' [' + st.cls + '+' + Number(st.off || 0).toString(16) + ']' : st.ptr ? ' [' + st.ptr + ']' : st.sig ? ' [AOB]' : '')).join('; '),
+      r.apagado ? 'apagado no app' : 'ativo']));
   });
   tabela_(LEGIVEL, aprendizado);
   tabela_('Salvos', salvos);
@@ -305,7 +307,7 @@ function juntarLinhas_(a, b) {
 }
 
 function juntarMemoria_(velha, nova) {
-  // apagado em qualquer instância sai de todas (salvos e receitas, pela id) e não volta
+  // apagado no app: continua guardado aqui (a planilha é o banco e não perde nada), só marcado; o app não traz de volta
   const apagados = Array.from(new Set((velha.apagados || []).concat(nova.apagados || []))).slice(-2000);
   const fora = new Set(apagados);
   const m = { tinker: 'memoria-ia', versao: 2, licoes: juntarLinhas_(velha.licoes, nova.licoes), jogos: {}, apagados: apagados };
@@ -320,7 +322,8 @@ function juntarMemoria_(velha, nova) {
       salvos[igual < 0 ? salvos.length : igual] = igual < 0 ? consenso_(null, v) : consenso_(salvos[igual], v);
     });
     m.jogos[pkg] = { nome: b.nome || a.nome || pkg, notas: juntarLinhas_(a.notas, b.notas),
-      receitas: receitas.filter(r => !fora.has(r.id)), salvos: salvos.filter(v => !fora.has(v.id)) };
+      receitas: receitas.map(r => Object.assign(r, { apagado: fora.has(r.id) })),
+      salvos: salvos.map(v => Object.assign(v, { apagado: fora.has(v.id) })) };
   });
   return m;
 }
@@ -345,7 +348,7 @@ function guardarRelatorio_(r) {
   s.getRange(2, 2, 1, RCOLS.length - 1).setNumberFormat('@');
   s.getRange(2, 1, 1, RCOLS.length).setValues([row.map(texto_)]);
   linhaFina_(s, 2, 1, RCOLS.length);  // a linha nova herdava o negrito e o tamanho do cabeçalho
-  if (s.getLastRow() > 201) s.deleteRows(202, s.getLastRow() - 201);  // guarda os 200 últimos
+  // nada é apagado: a planilha guarda todos os relatórios (o mais novo em cima)
 }
 
 function relatorios_(n) {
@@ -623,5 +626,4 @@ function guardarBusca_(r) {
   s.getRange(2, 2, 1, BCOLS.length - 1).setNumberFormat('@');
   s.getRange(2, 1, 1, BCOLS.length).setValues([row.map(texto_)]);
   linhaFina_(s, 2, 1, BCOLS.length);
-  if (s.getLastRow() > 201) s.deleteRows(202, s.getLastRow() - 201);
 }
