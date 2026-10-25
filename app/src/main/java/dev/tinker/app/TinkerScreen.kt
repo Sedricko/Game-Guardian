@@ -217,7 +217,10 @@ fun TinkerPanel(
 private fun TabBar(modifier: Modifier = Modifier) {
     val s = Session
     val primary = MaterialTheme.colorScheme.primary
-    Row(modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+    // abas e indicador numa Column: deitado a TabBar fica dentro da linha do cabeçalho, e as duas Rows soltas iam lado a lado
+    // (o indicador empurrava o cabeçalho e as abas para fora da tela)
+    Column(modifier) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
         TABS.forEachIndexed { i, title ->
             val on = s.tab == i
             Box(
@@ -243,6 +246,7 @@ private fun TabBar(modifier: Modifier = Modifier) {
             Box(Modifier.weight(1f).padding(horizontal = 14.dp).fillMaxWidth().height(3.dp)
                 .background(if (s.tab == i) primary else MaterialTheme.colorScheme.background, RoundedCornerShape(2.dp)))
         }
+    }
     }
 }
 
@@ -361,7 +365,7 @@ private fun ValueField(value: String, label: String, onChange: (String) -> Unit,
             keyboardOptions = KeyboardOptions(keyboardType = keyboard),
             modifier = Modifier.fillMaxWidth(),
         )
-        if (own && pad) NumPad(onKey = { onChange(applyKey(value, it)) }, onDone = { pad = false })
+        if (own && pad) NumPad(onKey = { onChange(applyKey(value, it)) }, onDone = { pad = false }, compact = landscape())
     }
 }
 

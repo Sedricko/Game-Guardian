@@ -25,6 +25,12 @@ private val KEYS = listOf(
     listOf("-", "0", ".", "::", "OK"),
 )
 
+// deitado: as mesmas teclas em 2 linhas largas (4 linhas de 48 dp tomavam a altura toda da tela)
+private val KEYS_WIDE = listOf(
+    listOf("7", "8", "9", "4", "5", "6", "⌫", "~"),
+    listOf("1", "2", "3", "0", "-", ".", ";", "::", "OK"),
+)
+
 /** Uma tecla aplicada ao texto: ⌫ apaga a última, o resto escreve. */
 internal fun applyKey(text: String, key: String) = if (key == "⌫") text.dropLast(1) else text + key
 
@@ -33,10 +39,10 @@ internal fun applyKey(text: String, key: String) = if (key == "⌫") text.dropLa
  * telefone, que abria por cima do jogo e escondia o número que você queria ler.
  */
 @Composable
-fun NumPad(onKey: (String) -> Unit, onDone: () -> Unit, modifier: Modifier = Modifier) {
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        KEYS.forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+fun NumPad(onKey: (String) -> Unit, onDone: () -> Unit, modifier: Modifier = Modifier, compact: Boolean = false) {
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        (if (compact) KEYS_WIDE else KEYS).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 row.forEach { k ->
                     val ok = k == "OK"
                     Box(
