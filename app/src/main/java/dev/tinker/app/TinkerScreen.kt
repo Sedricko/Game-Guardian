@@ -1851,6 +1851,7 @@ private fun LogTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, onE
                 fetch {
                     val file = engine.report()
                     info = saveToDownloads(context, file)?.let { "Salvo em Download/Tinker/${file.name}" } ?: "Relatório pronto: ${file.name}"
+                    engine.sendReport("enviado por você")  // também vai para a aba Relatórios da planilha
                     if (overlay) onMinimize()  // o seletor de apps abre atrás do painel
                     shareFile(context, file)
                 }

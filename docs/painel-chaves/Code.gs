@@ -39,6 +39,17 @@ function token_() {
   return t;
 }
 
+// token só de leitura (relatórios e aprendizado, nunca as chaves): para quem for analisar os problemas
+function leitura_() {
+  const p = PropertiesService.getScriptProperties();
+  let t = p.getProperty('LEITURA');
+  if (!t) {
+    t = 'l' + Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
+    p.setProperty('LEITURA', t);
+  }
+  return t;
+}
+
 function novoToken() {
   PropertiesService.getScriptProperties().deleteProperty('TOKEN');
   token_();
@@ -89,6 +100,7 @@ function dadosPainel() {
       atualizado: r.atualizado instanceof Date ? Utilities.formatDate(r.atualizado, tz, 'dd/MM HH:mm') : '',
     })),
     link: url ? url + '?token=' + token_() : '',
+    leitura: url ? url + '?leitura=' + leitura_() : '',
   };
 }
 
@@ -135,6 +147,11 @@ function testarTodas() {
 
 function doGet(e) {
   const p = (e && e.parameter) || {};
+  // link de leitura: os últimos relatórios e o aprendizado, sem as chaves
+  if (p.leitura) {
+    if (p.leitura !== leitura_()) return json_({ erro: 'token' });
+    return json_({ relatorios: relatorios_(Math.min(Number(p.n) || 3, 20)), memoria: memoriaGuardada_() || {} });
+  }
   if (p.token !== token_()) return json_({ erro: 'token' });
   // o Tinker avisa que a chave terminada em "fim" ficou sem cota (só os 6 últimos caracteres, nunca a chave)
   if (p.fim && p.situacao) {
@@ -232,9 +249,47 @@ function juntarMemoria_(velha, nova) {
   return m;
 }
 
+// ---- relatórios (o Tinker manda sozinho quando algo dá errado, e quando você compartilha) ----
+
+const RELS = 'Relatórios';
+const RCOLS = ['Quando', 'Jogo', 'Versão', 'Motivo', 'Problemas', 'Relatório'];
+
+function guardarRelatorio_(r) {
+  const ss = SpreadsheetApp.getActive();
+  let s = ss.getSheetByName(RELS);
+  if (!s) {
+    s = ss.insertSheet(RELS);
+    s.getRange(1, 1, 1, RCOLS.length).setValues([RCOLS]).setFontWeight('bold');
+    s.setFrozenRows(1);
+  }
+  const row = [new Date(), String(r.jogo || ''), String(r.versao || ''), String(r.motivo || ''), String(r.problemas || '').slice(0, 5000), String(r.texto || '').slice(0, 45000)];
+  s.insertRowAfter(1);  // o mais novo em cima
+  s.getRange(2, 2, 1, 5).setNumberFormat('@');
+  s.getRange(2, 1, 1, RCOLS.length).setValues([row]);
+  if (s.getLastRow() > 201) s.deleteRows(202, s.getLastRow() - 201);  // guarda os 200 últimos
+}
+
+function relatorios_(n) {
+  const s = SpreadsheetApp.getActive().getSheetByName(RELS);
+  if (!s || s.getLastRow() < 2) return [];
+  const tz = Session.getScriptTimeZone();
+  return s.getRange(2, 1, Math.min(n, s.getLastRow() - 1), RCOLS.length).getValues().map(r => ({
+    quando: r[0] instanceof Date ? Utilities.formatDate(r[0], tz, 'dd/MM/yyyy HH:mm') : String(r[0]),
+    jogo: r[1], versao: r[2], motivo: r[3], problemas: r[4], texto: r[5],
+  }));
+}
+
 function doPost(e) {
   const p = (e && e.parameter) || {};
   if (p.token !== token_()) return json_({ erro: 'token' });
+  if (p.relatorio) {
+    let r;
+    try { r = JSON.parse(e.postData.contents); } catch (err) { return json_({ erro: 'json' }); }
+    const lock = LockService.getScriptLock();
+    lock.waitLock(20000);
+    try { guardarRelatorio_(r); } finally { lock.releaseLock(); }
+    return json_({ ok: true });
+  }
   let nova;
   try { nova = JSON.parse(e.postData.contents); } catch (err) { return json_({ erro: 'json' }); }
   if (!nova || nova.tinker !== 'memoria-ia') return json_({ erro: 'nao e memoria do Tinker' });

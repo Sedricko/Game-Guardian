@@ -423,6 +423,7 @@ class Engine private constructor(private val app: Context) {
         // salvos com pid continuam congelados: ficam parados até voltar sozinhos quando o jogo reabrir
         Session.saved.replaceAll { if (it.pid == 0) it.copy(frozen = false) else it }
         Session.status = "O jogo fechou. Veja a aba Registro para o motivo."
+        sendReport("o jogo fechou sozinho", auto = true)
         Diag.add("=== O jogo ${p.label} (PID ${p.pid}) fechou. Falhas registradas pelo Android: ===")
         runCatching { dedupe(crashesOf(d.call("crashlog").lines, p.pkg)).forEach(Diag::add) }
         Diag.add("=== Últimas linhas do logcat do jogo ===")
@@ -1088,6 +1089,38 @@ class Engine private constructor(private val app: Context) {
                 disconnect()
             }
         }.onFailure { Diag.add("Aprendizado não foi para a planilha: ${it.message}") } }
+    }
+
+    @Volatile private var lastAutoReport = 0L
+
+    /**
+     * Manda o relatório para a aba Relatórios do painel. auto (o jogo fechou sozinho): no máximo um a cada 10 min,
+     * 3 s depois, para a falha do Android já estar no registro.
+     */
+    fun sendReport(reason: String, auto: Boolean = false) {
+        val url = panelUrl("relatorio=1") ?: return
+        val now = System.currentTimeMillis()
+        if (auto && now - lastAutoReport < 600_000) return
+        if (auto) lastAutoReport = now
+        val p = Session.process
+        scope.launch(Dispatchers.IO) {
+            if (auto) delay(3000)
+            runCatching {
+                val text = report().readText()
+                val problems = text.substringAfter("=== Resumo de problemas", "").substringBefore("=== Registro do Tinker").take(5000)
+                val body = JSONObject().put("jogo", p?.let { "${it.label} (${it.pkg})" } ?: "nenhum")
+                    .put("versao", runCatching { app.packageManager.getPackageInfo(app.packageName, 0).versionName }.getOrNull().orEmpty())
+                    .put("motivo", reason).put("problemas", problems).put("texto", text.take(45_000)).toString()
+                (java.net.URL(url).openConnection() as java.net.HttpURLConnection).run {
+                    connectTimeout = 15_000; readTimeout = 60_000; requestMethod = "POST"; doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                    outputStream.use { it.write(body.toByteArray()) }
+                    val code = responseCode
+                    disconnect()
+                    Diag.add(if (code < 400) "Relatório enviado para a planilha ($reason)" else "Relatório não foi para a planilha: código $code")
+                }
+            }.onFailure { Diag.add("Relatório não foi para a planilha: ${it.message}") }
+        }
     }
 
     /** Traz o aprendizado de todas as instâncias da planilha e junta com o daqui (depois manda o resultado de volta). */

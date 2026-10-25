@@ -20,7 +20,7 @@
   .s { color: #5f6368; font-size: 12px; margin: 2px 0 4px; }
   .ok { color: #188038; } .bad { color: #d93025; }
   #msg { color: #1a73e8; min-height: 18px; margin: 4px 0 8px; }
-  #link { word-break: break-all; font-size: 11px; background: #f1f3f4; padding: 6px; border-radius: 6px; margin: 6px 0; user-select: all; }
+  #link, .link { word-break: break-all; font-size: 11px; background: #f1f3f4; padding: 6px; border-radius: 6px; margin: 6px 0; user-select: all; }
   @media (max-width: 640px) { .cols { flex-direction: column; } #chave { width: 100%; } }
 </style>
 </head>
@@ -40,7 +40,11 @@
   <h3 style="margin-top:12px">Link para o Tinker</h3>
   <div class="s">Cole em Tinker → Ajustes → Assistente (IA) → Link do painel. Quem tem este link lê as chaves ativas: não compartilhe.</div>
   <div id="link"></div>
-  <button onclick="copiar()">Copiar link</button>
+  <button onclick="copiar('link')">Copiar link</button>
+  <h3 style="margin-top:12px">Link de leitura (para análise)</h3>
+  <div class="s">Só os relatórios (aba Relatórios) e o aprendizado, nunca as chaves. É este que você passa para o Claude analisar os problemas.</div>
+  <div id="leitura" class="link"></div>
+  <button onclick="copiar('leitura')">Copiar link de leitura</button>
 <script>
   function msg(t) { document.getElementById('msg').textContent = t || ''; }
   function esc(t) { return String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
@@ -59,6 +63,7 @@
       document.getElementById(p).innerHTML = ks.length ? ks.map(item).join('') : '<div class="s">Nenhuma chave ainda.</div>';
     });
     document.getElementById('link').textContent = d.link || 'Implante como App da Web (veja o LEIAME) para ter o link.';
+    document.getElementById('leitura').textContent = d.leitura || '';
   }
   function fail(e) { msg(e.message || String(e)); }
   function run(fn, arg) { msg('…'); google.script.run.withSuccessHandler(show).withFailureHandler(fail)[fn](arg); }
@@ -68,8 +73,8 @@
     google.script.run.withSuccessHandler(d => { document.getElementById('chave').value = ''; document.getElementById('nome').value = ''; show(d); })
       .withFailureHandler(fail).adicionar(document.getElementById('chave').value, document.getElementById('nome').value, document.getElementById('prov').value);
   }
-  function copiar() {
-    const t = document.getElementById('link').textContent;
+  function copiar(id) {
+    const t = document.getElementById(id).textContent;
     const done = () => msg('Link copiado.');
     if (navigator.clipboard) navigator.clipboard.writeText(t).then(done, fallback); else fallback();
     function fallback() {

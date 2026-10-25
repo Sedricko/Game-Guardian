@@ -29,6 +29,12 @@ O Tinker também manda o que a IA aprendeu (lições e a biblioteca de cada jogo
 o que vem de todas as instâncias. A aba **Aprendizado** mostra tudo para ler; a aba escondida **MemoriaBruta** é a que o
 Tinker usa. Uma instância nova (ou reinstalada) pega o aprendizado de lá ao abrir.
 
+## Relatórios
+
+Quando o jogo fecha sozinho, ou quando você toca em **Compartilhar relatório**, o Tinker manda o relatório para a aba
+**Relatórios** (os 200 últimos, o mais novo em cima). O **Link de leitura** do painel devolve só os relatórios e o
+aprendizado, nunca as chaves: é o que você passa para quem for analisar os problemas.
+
 ## Segurança
 
 - A planilha continua privada. O link só devolve as chaves para quem tem o token que vai nele.
