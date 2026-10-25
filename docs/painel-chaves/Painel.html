@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<style>
+  body { font-family: Arial, sans-serif; font-size: 13px; margin: 8px; color: #202124; }
+  h3 { margin: 4px 0 8px; }
+  .k { border: 1px solid #dadce0; border-radius: 8px; padding: 6px 8px; margin-bottom: 6px; }
+  .off { opacity: .5; }
+  .s { color: #5f6368; font-size: 12px; }
+  input { width: 100%; box-sizing: border-box; margin: 3px 0; padding: 6px; }
+  button { margin: 3px 3px 0 0; padding: 5px 8px; cursor: pointer; }
+  #link { word-break: break-all; font-size: 11px; background: #f1f3f4; padding: 6px; border-radius: 6px; }
+  #msg { color: #1a73e8; margin: 6px 0; min-height: 16px; }
+</style>
+</head>
+<body>
+  <h3>Nova chave</h3>
+  <input id="chave" placeholder="AIza… ou AQ.…" autocomplete="off">
+  <input id="nome" placeholder="Nome (opcional), ex.: conta 2">
+  <button onclick="add()">+ Adicionar</button>
+  <button onclick="run('testarTodas')">Testar todas</button>
+  <div id="msg"></div>
+  <h3>Chaves</h3>
+  <div id="lista">Carregando…</div>
+  <h3>Link para o Tinker</h3>
+  <div class="s">Cole em Tinker → Ajustes → Assistente (IA) → Painel de chaves. Quem tem este link lê as chaves ativas: não compartilhe.</div>
+  <div id="link"></div>
+  <button onclick="copiar()">Copiar link</button>
+<script>
+  function msg(t) { document.getElementById('msg').textContent = t || ''; }
+  function esc(t) { return String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+  function show(d) {
+    msg('');
+    document.getElementById('lista').innerHTML = d.chaves.length ? d.chaves.map(k =>
+      '<div class="k' + (k.ativa ? '' : ' off') + '"><b>' + esc(k.fim) + '</b> ' + esc(k.nome) +
+      '<div class="s">' + (k.ativa ? 'ativa' : 'desligada') + (k.situacao ? ' · ' + esc(k.situacao) : '') + (k.atualizado ? ' · ' + esc(k.atualizado) : '') + '</div>' +
+      '<button onclick="run(\'alternar\',' + k.linha + ')">' + (k.ativa ? 'Desligar' : 'Ligar') + '</button>' +
+      '<button onclick="if (confirm(\'Apagar esta chave?\')) run(\'remover\',' + k.linha + ')">Apagar</button></div>'
+    ).join('') : 'Nenhuma chave ainda.';
+    document.getElementById('link').textContent = d.link || 'Implante como App da Web (veja o LEIAME) para ter o link.';
+  }
+  function fail(e) { msg(e.message || String(e)); }
+  function run(fn, arg) { msg('…'); google.script.run.withSuccessHandler(show).withFailureHandler(fail)[fn](arg); }
+  function add() {
+    msg('Testando a chave…');
+    google.script.run.withSuccessHandler(d => { document.getElementById('chave').value = ''; document.getElementById('nome').value = ''; show(d); })
+      .withFailureHandler(fail).adicionar(document.getElementById('chave').value, document.getElementById('nome').value);
+  }
+  function copiar() { navigator.clipboard.writeText(document.getElementById('link').textContent).then(() => msg('Link copiado.'), () => msg('Selecione e copie o link.')); }
+  google.script.run.withSuccessHandler(show).withFailureHandler(fail).dadosPainel();
+</script>
+</body>
+</html>

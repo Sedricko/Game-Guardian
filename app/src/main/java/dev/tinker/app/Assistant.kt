@@ -416,6 +416,15 @@ jogo abrir, use propor_receita com os salvos."""
         return true
     }
 
+    /** Avisa o painel de chaves que esta chave ficou sem cota hoje (manda só os 6 últimos caracteres, nunca a chave). */
+    private fun reportOut(key: String, at: String) {
+        val src = Session.keySource.trim().takeIf { it.startsWith("https://script.google.com/") } ?: return
+        if (key !in Session.sheetKeys) return
+        val url = src + (if ('?' in src) "&" else "?") + "fim=" + java.net.URLEncoder.encode(key.trim().takeLast(6), "UTF-8") +
+            "&situacao=" + java.net.URLEncoder.encode("sem cota hoje desde $at", "UTF-8")
+        Thread { runCatching { (URL(url).openConnection() as HttpURLConnection).run { connectTimeout = 15_000; readTimeout = 30_000; inputStream.close(); disconnect() } } }.start()
+    }
+
     /** Modelos Gemini que a chave pode usar para texto, o melhor primeiro (vazio: chave errada ou sem internet). */
     fun geminiModels(key: String): List<String> {
         val (code, reply) = runCatching { http("models?pageSize=1000", key, null) }.getOrNull() ?: return emptyList()
@@ -444,7 +453,11 @@ jogo abrir, use propor_receita com os salvos."""
             if (body != null) Session.geminiKeys.indexOf(key).takeIf { it >= 0 }?.let { k ->
                 if (Session.geminiUseDay != quotaDay()) { Session.geminiUse.clear(); Session.geminiOut.clear(); Session.geminiUseDay = quotaDay() }
                 Session.geminiUse[k] = (Session.geminiUse[k] ?: 0) + 1
-                if (code == 429 && geminiWait(code, text) == null) Session.geminiOut[k] = java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date())
+                if (code == 429 && geminiWait(code, text) == null) {
+                    val at = java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date())
+                    if (Session.geminiOut[k] == null) reportOut(key, at)
+                    Session.geminiOut[k] = at
+                }
             }
             return code to text
         } finally {

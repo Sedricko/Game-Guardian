@@ -243,6 +243,8 @@ object Session {
     val geminiUse = mutableStateMapOf<Int, Int>()  // pedidos de hoje por chave (índice); o dia vira à meia-noite do Pacífico, como a cota
     val geminiOut = mutableStateMapOf<Int, String>()  // chave → hora em que a cota acabou hoje
     var geminiUseDay = quotaDay()
+    var keySource by mutableStateOf("")  // link do painel de chaves (planilha do Google com o script do Tinker)
+    var sheetKeys = setOf<String>()  // chaves que vieram do painel: saem daqui quando saem de lá
     var aiHidePanel by mutableStateOf(false)  // a IA vai tocar no jogo: o painel se minimiza para os toques chegarem nele
     var geminiKeys by mutableStateOf(listOf<String>())  // em ordem: a cota de uma acabou, o Tinker passa para a próxima
     var geminiKeyIndex by mutableIntStateOf(0)
@@ -287,6 +289,7 @@ class Engine private constructor(private val app: Context) {
             .putBoolean("autoOverlay", Session.autoOverlay).putBoolean("ownKeypad", Session.ownKeypad).putFloat("alpha", Session.alpha).putInt("panelSize2", Session.panelSize).putBoolean("panelLeft", Session.panelLeft)
             .putString("aiKey", Session.aiKey).putString("aiProvider", Session.aiProvider).putBoolean("aiCanTest", Session.aiCanTest).putBoolean("aiAuto", Session.aiAuto).putBoolean("aiControl", Session.aiControl)
             .putString("geminiKeys", Session.geminiKeys.joinToString("\n")).putInt("geminiKeyIndex", Session.geminiKeyIndex)
+            .putString("keySource", Session.keySource).putString("sheetKeys", Session.sheetKeys.joinToString("\n"))
             .putString("geminiModel", Session.geminiModel).putBoolean("geminiAuto", Session.geminiAutoModel).putBoolean("watchFields", Session.watchFields)
             .putString("geminiUse", quotaDay() + ";" + Session.geminiUse.entries.joinToString(",") { "${it.key}=${it.value}" } + ";" + Session.geminiOut.entries.joinToString(",") { "${it.key}=${it.value}" })
             .putString("geminiSpeed", Session.geminiSpeed.entries.joinToString("\n") { "${it.key}=${it.value}" }).apply()
@@ -317,6 +320,9 @@ class Engine private constructor(private val app: Context) {
         }
         Session.geminiModel = prefs.getString("geminiModel", Session.geminiModel).orEmpty().ifBlank { "gemini-2.5-flash" }
         Session.geminiAutoModel = prefs.getBoolean("geminiAuto", true)
+        Session.keySource = prefs.getString("keySource", "").orEmpty()
+        Session.sheetKeys = prefs.getString("sheetKeys", "").orEmpty().split('\n').filter { it.isNotBlank() }.toSet()
+        if (Session.keySource.isNotBlank()) scope.launch { Diag.add(syncKeys()) }
         Session.watchFields = prefs.getBoolean("watchFields", true)
         prefs.getString("geminiUse", "").orEmpty().split(';').takeIf { it.size == 3 && it[0] == quotaDay() }?.let { (_, use, out) ->
             use.split(',').forEach { e -> e.split('=').takeIf { it.size == 2 }?.let { (k, n) -> k.toIntOrNull()?.let { Session.geminiUse[it] = n.toIntOrNull() ?: 0 } } }
@@ -870,7 +876,16 @@ class Engine private constructor(private val app: Context) {
                 (if (notes.isBlank()) "" else "\n\n=== Suas anotações deste jogo (de outras conversas) ===\n$notes") +
                 (if (server.isBlank()) "" else "\n\n=== Sinais de que o servidor ou o antitrapaça confere valores (logcat do jogo) ===\n$server")
         }
-        Assistant.ask(chat, full, question, tools, onStep).also {
+        Assistant.ask(chat, full, question, tools, onStep).let { a ->
+            // a cota acabou em todas: o painel de chaves pode ter chave nova; se tiver, segue de onde parou
+            if (Session.aiProvider != "gemini" || Session.keySource.isBlank() || !a.startsWith("A cota grátis do Gemini acabou")) return@let a
+            val before = Session.geminiKeys.toSet()
+            val sync = syncKeys()
+            Diag.add(sync)
+            if (Session.geminiKeys.none { it !in before }) return@let a
+            onStep("🔑 Chave nova do painel: continuando")
+            Assistant.ask(chat, full, "Continue de onde parou.", tools, onStep)
+        }.also {
             saveSettings()  // o Gemini pode ter trocado de modelo sozinho
             Diag.add("Assistente respondeu: ${it.take(600).replace('\n', ' ')}")
         }
@@ -1441,6 +1456,38 @@ class Engine private constructor(private val app: Context) {
             else -> Session.geminiKeyIndex.coerceAtMost((Session.geminiKeys.size - 1).coerceAtLeast(0))
         }
         saveSettings()
+    }
+
+    /**
+     * Chaves do painel (planilha do Google com o script do Tinker, docs/painel-chaves): junta com as de agora; as que
+     * saíram de lá (apagadas ou desligadas) saem daqui. As postas à mão no app ficam.
+     */
+    suspend fun syncKeys(): String = withContext(Dispatchers.IO) {
+        val url = Session.keySource.trim()
+        if (url.isEmpty()) return@withContext "Sem link do painel de chaves."
+        if (!url.startsWith("https://script.google.com/")) return@withContext "O link do painel começa com https://script.google.com/ (copie no painel da planilha)."
+        val text = runCatching {
+            (java.net.URL(url).openConnection() as java.net.HttpURLConnection).run {
+                connectTimeout = 15_000; readTimeout = 30_000
+                try { inputStream.bufferedReader().use { it.readText() } } finally { disconnect() }
+            }
+        }.getOrElse { return@withContext "Não li o painel de chaves: ${it.message}" }
+        val j = runCatching { JSONObject(text) }.getOrNull()
+            ?: return@withContext "O painel não respondeu a lista. Confira a implantação: App da Web, Executar como Eu, Qualquer pessoa."
+        if (j.has("erro")) return@withContext "O painel recusou o link (token antigo?). Copie o link de novo no painel."
+        val got = j.optJSONArray("chaves")?.let { a -> (0 until a.length()).map { a.optString(it).trim() } }.orEmpty()
+            .filter { GEMINI_KEY.matches(it) }.distinct()
+        val (before, total) = withContext(Dispatchers.Main) {
+            val current = Session.geminiKey
+            val old = Session.geminiKeys
+            Session.geminiKeys = (old.filter { it !in Session.sheetKeys } + got).distinct()
+            Session.sheetKeys = got.toSet()
+            Session.geminiKeyIndex = Session.geminiKeys.indexOf(current).coerceAtLeast(0)
+            saveSettings()
+            old to Session.geminiKeys.size
+        }
+        val added = got.count { it !in before }
+        "Painel de chaves: ${got.size} chaves ativas lá" + (if (added > 0) ", $added novas" else "") + " · $total no app."
     }
 
     /** Pergunta ao Google quais modelos a chave pode usar; se o escolhido não está entre eles, troca pelo melhor. */
@@ -2711,6 +2758,7 @@ internal fun readable(value: String, cipherType: String): String? {
 }
 
 const val MEMORY_FILE = "tinker-memoria-ia.json"
+private val GEMINI_KEY = Regex("""[A-Za-z0-9._-]{20,200}""")
 private val WATCH_TYPES = setOf("i8", "i16", "i32", "i64", "f32", "f64", "xi32", "xf32")
 private val PKG = Regex("""[A-Za-z0-9._]{1,120}""")  // nome de pacote que vira nome de arquivo
 

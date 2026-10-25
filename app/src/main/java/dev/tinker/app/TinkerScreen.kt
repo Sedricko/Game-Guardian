@@ -1462,6 +1462,19 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                         Button(onClick = { val t = clipText(); if (t.isEmpty()) keyInfo = noClip else newKey = t }) { Text("Colar") }
                     }
                     Button(onClick = { keyInfo = engine.addGeminiKey(newKey); newKey = "" }, enabled = newKey.isNotBlank()) { Text("+ Adicionar chave") }
+                    // painel de chaves numa planilha do Google (docs/painel-chaves): o app pega as chaves de lá sozinho
+                    Text("Painel de chaves (Google Planilhas): o Tinker pega as chaves ativas ao abrir e quando a cota de todas acaba.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedTextField(s.keySource, { s.keySource = it.trim(); engine.saveSettings() }, label = { Text("Link do painel") },
+                            placeholder = { Text("https://script.google.com/…") }, singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(), modifier = Modifier.weight(1f))
+                        Button(onClick = { val t = clipText(); if (t.isEmpty()) keyInfo = noClip else { s.keySource = t; engine.saveSettings(); scope.launch { keyInfo = engine.syncKeys() } } }) { Text("Colar") }
+                    }
+                    if (s.keySource.isNotBlank()) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedButton(onClick = { keyInfo = "Lendo o painel…"; scope.launch { keyInfo = engine.syncKeys() } }) { Text("Atualizar do painel") }
+                        TextButton(onClick = { s.keySource = ""; engine.saveSettings() }) { Text("Desligar painel") }
+                    }
                 } else Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     OutlinedTextField(
                         s.aiKey, { s.aiKey = it.trim(); engine.saveSettings() },
