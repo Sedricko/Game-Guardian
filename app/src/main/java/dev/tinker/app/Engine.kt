@@ -3030,7 +3030,7 @@ class Engine private constructor(private val app: Context) {
         Session.canUndo = false
         inFile = false
         step(true, "AOB $pattern", n)
-        if (n == "0") "Nenhum lugar com esses bytes${if (code) " no código" else ""}." else "$n lugares com esses bytes."
+        if (n == "0") "Nenhum lugar com esses bytes${if (where == "xa" || where == "xs") " no código" else ""}." else "$n lugares com esses bytes."
     }
 
     /**
