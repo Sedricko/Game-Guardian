@@ -891,7 +891,13 @@ class Engine private constructor(private val app: Context) {
 
     /** Nome do campo de um endereço ("PlayerData.UpgradeStone"), ou "cópia temporária (Int32)" quando é número solto do C#. */
     suspend fun il2Names(addrs: List<String>): Map<String, String> = call { d ->
-        addrs.associateWith { a -> d.il2(a)?.let { c -> fieldLabel(c, a) }.orEmpty() }.filterValues { it.isNotEmpty() }
+        val lua = Session.engine?.lua == true
+        addrs.associateWith { a ->
+            d.il2(a)?.let { c -> fieldLabel(c, a) }
+                // jogo com Lua: o nome do campo da tabela do Lua em que o número está (kills, gold…), sem abrir a Ficha
+                ?: if (lua) runCatching { d.send("luatable $a", quiet = true).lines }.getOrDefault(emptyList())
+                    .firstOrNull { it.startsWith("lua $a ") }?.split(' ', limit = 5)?.getOrNull(3)?.let { "🌙 $it" }.orEmpty() else ""
+        }.filterValues { it.isNotEmpty() }
     }
 
     private fun fieldLabel(c: Il2Class, addr: String): String {
