@@ -1549,6 +1549,85 @@ static void cmd_luatable(const char *addr) {
     printf("ok %d\n", n);
 }
 
+// ---- onde o jogo escreve: "activity start" marca todas as páginas como limpas (soft-dirty do kernel); o jogo carrega ou
+// joga; "activity" conta, por região (Ca, A, Jh…), quanto foi escrito desde então. Mostra onde procurar, não o valor.
+typedef struct { int fd; long pg; uint64_t dirty[11], total[11]; } act_t;
+
+static void act_region(uint64_t s, uint64_t e, int region, void *ctx) {
+    act_t *a = ctx;
+    if (region < 0 || region > 10) return;
+    uint64_t buf[4096];
+    a->total[region] += (e - s) / (uint64_t)a->pg;
+    for (uint64_t p = s; p < e;) {
+        size_t n = (size_t)((e - p) / (uint64_t)a->pg);
+        if (n > 4096) n = 4096;
+        if (!n) break;
+        ssize_t r = pread(a->fd, buf, n * 8, (off_t)(p / (uint64_t)a->pg * 8));
+        if (r <= 0) break;
+        size_t got = (size_t)r / 8;
+        for (size_t k = 0; k < got; k++) if (buf[k] >> 55 & 1) a->dirty[region]++;  // bit 55: escrita desde a marcação
+        p += got * (uint64_t)a->pg;
+    }
+}
+
+// reserva quando o kernel não marca (sem soft-dirty): o "Private_Dirty" de cada região no smaps só cresce quando o jogo
+// escreve em páginas novas; a diferença entre o começo e agora mostra onde o carregamento guardou coisa nova
+static uint64_t act_base[11];
+
+static int smaps_dirty(uint64_t out[11]) {
+    char path[64], line[1024];
+    snprintf(path, sizeof path, "/proc/%d/smaps", target);
+    FILE *f = fopen(path, "r");
+    if (!f) return -1;
+    memset(out, 0, 11 * sizeof *out);
+    int region = -1;
+    while (fgets(line, sizeof line, f)) {
+        unsigned long long s, e;
+        char perms[8];
+        int off = 0;
+        if (sscanf(line, "%llx-%llx %7s %*s %*s %*s %n", &s, &e, perms, &off) >= 3 && strchr(line, '-') < strchr(line, ' ')) {
+            char *name = off ? line + off : line + strlen(line);
+            name[strcspn(name, "\n")] = 0;
+            region = perms[1] == 'w' ? region_of(perms, name) : -1;
+            continue;
+        }
+        unsigned long kb;
+        if (region >= 0 && region <= 10 && sscanf(line, "Private_Dirty: %lu kB", &kb) == 1) out[region] += kb;
+    }
+    fclose(f);
+    return 0;
+}
+
+static void cmd_activity(const char *arg) {
+    char path[64];
+    if (arg && !strcmp(arg, "start")) {
+        if (smaps_dirty(act_base)) { puts("err não leu o smaps do jogo"); return; }
+        snprintf(path, sizeof path, "/proc/%d/clear_refs", target);
+        int fd = open(path, O_WRONLY);
+        if (fd >= 0) { if (write(fd, "4", 1) != 1) { /* sem soft-dirty: fica só a reserva */ } close(fd); }
+        puts("ok");
+        return;
+    }
+    act_t a = {.pg = sysconf(_SC_PAGESIZE)};
+    snprintf(path, sizeof path, "/proc/%d/pagemap", target);
+    a.fd = open(path, O_RDONLY);
+    if (a.fd < 0) { printf("err não abriu o pagemap: %s\n", strerror(errno)); return; }
+    int r = each_region(act_region, &a);
+    close(a.fd);
+    if (r) { puts("err não leu o mapa de memória"); return; }
+    uint64_t sum = 0, kb[11], now[11];
+    for (int i = 0; i < 11; i++) sum += kb[i] = a.dirty[i] * (uint64_t)a.pg >> 10;
+    int soft = sum > 0;
+    if (!soft) {  // o kernel não marcou nada: usa o quanto cada região ganhou de páginas escritas
+        if (smaps_dirty(now)) { puts("err não leu o smaps do jogo"); return; }
+        for (int i = 0; i < 11; i++) sum += kb[i] = now[i] > act_base[i] ? now[i] - act_base[i] : 0;
+    }
+    for (int i = 0; i < 11; i++)
+        if (a.total[i]) printf("act %s %" PRIu64 " %" PRIu64 "\n", REGIONS[i], kb[i], a.total[i] * (uint64_t)a.pg >> 10);
+    printf("how %s\n", soft ? "soft" : "smaps");
+    printf("ok %" PRIu64 "\n", sum);
+}
+
 // "libjogo.so+1a2b30 18 40": base da lib + 1a2b30, lê o ponteiro, soma 18, lê, soma 40 = endereço do valor.
 static void cmd_resolve(char *chain) {
     char *save = NULL, *tok = strtok_r(chain, " \n", &save);
@@ -2269,6 +2348,7 @@ int main(void) {
         else if (!strcmp(cmd, "photodiff")) cmd_photodiff();
         else if (!strcmp(cmd, "photorestore")) cmd_photorestore(strcmp(a1, "except") ? a1 : strstr(line, "except"));
         else if (!strcmp(cmd, "photodrop")) { drop_photo(); puts("ok"); }
+        else if (!strcmp(cmd, "activity")) cmd_activity(a1);
         else if (!strcmp(cmd, "watch")) cmd_watch(a1, a2);
         else if (!strcmp(cmd, "trace")) cmd_trace(a1, a2);
         else if (!strcmp(cmd, "il2methods")) cmd_il2methods(a1);

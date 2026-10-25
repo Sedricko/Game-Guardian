@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <unistd.h>
 
 // Imitação das estruturas do IL2CPP (Unity) que o daemon lê para dar nome aos campos
@@ -112,9 +113,11 @@ int main(void) {
     // ponteiro para a memória do jogo: as duas metades não podem passar por um Dword 🔒 (chave + valor cifrado)
     void **pp = malloc(64);
     pp[0] = a;
-    printf("%d %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx\n", getpid(), (unsigned long)&i[7], (unsigned long)&f[3], (unsigned long)v, (unsigned long)x,
+    // memória nova, ainda não escrita: o teste escreve nela e "onde o jogo escreve" tem que contar na região A
+    char *fresh = mmap(NULL, 1 << 20, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    printf("%d %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx\n", getpid(), (unsigned long)&i[7], (unsigned long)&f[3], (unsigned long)v, (unsigned long)x,
            (unsigned long)obj, (unsigned long)y, (unsigned long)z, (unsigned long)q, (unsigned long)w, (unsigned long)&ticks, (unsigned long)never_called, (unsigned long)mail, (unsigned long)tick_once,
-           (unsigned long)lt, (unsigned long)nodes, (unsigned long)pp);
+           (unsigned long)lt, (unsigned long)nodes, (unsigned long)pp, (unsigned long)fresh);
     fflush(stdout);
     pause();
     return 0;

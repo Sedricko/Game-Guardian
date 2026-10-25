@@ -8,7 +8,7 @@ cc -O2 -Wall -Werror -pthread -o "$out/tinkerd" daemon/tinkerd.c -lm
 cc -O2 -pthread -o "$out/target" tests/target.c
 "$out/target" > "$out/info" & tpid=$!
 for _ in $(seq 50); do [ -s "$out/info" ] && break; sleep 0.1; done
-read -r pid iaddr faddr paddr xaddr oaddr yaddr zaddr qaddr waddr taddr caddr maddr kaddr ltaddr lnaddr ppaddr < "$out/info"
+read -r pid iaddr faddr paddr xaddr oaddr yaddr zaddr qaddr waddr taddr caddr maddr kaddr ltaddr lnaddr ppaddr fraddr < "$out/info"
 
 got=$("$out/tinkerd" <<CMDS
 search i32 1
@@ -269,6 +269,13 @@ read -r plo phi <<<"$pl"
 pv=$(( (plo ^ phi) )); pv=$(( pv > 2147483647 ? pv - 4294967296 : (pv < -2147483648 ? pv + 4294967296 : pv) ))
 px=$(printf '%s\n' "attach $pid" "search xi32 $pv" "list 100000" | "$out/tinkerd")
 ! grep -q "^$ppaddr xi32" <<<"$px" || { echo "FALHOU: ponteiro achado como Dword 🔒"; exit 1; }
+
+# Onde o jogo escreve: marca as páginas, o ticker do alvo escreve, e conta por região (em KB); aparelho sem soft-dirty: erro claro
+ac=$( { printf '%s\n' "attach $pid" "activity start"
+        for k in 0 1 2 3 4 5 6 7; do printf 'write %x i32 7\n' $((0x$fraddr + k * 4096)); done; sleep 0.3; printf '%s\n' "activity"; } | "$out/tinkerd")
+echo "$ac"
+grep -qE "^act A ([3-9][0-9]|[1-9][0-9]{2,}) [0-9]+$" <<<"$ac" && grep -qE "^how (soft|smaps)$" <<<"$ac" && grep -qE "^ok [0-9]+$" <<<"$ac" \
+    || { echo "FALHOU: onde o jogo escreve"; exit 1; }
 
 # Autoteste do app: o daemon se liga a ele mesmo e acha os próprios valores de teste (não toca em outro processo)
 sp="$out/self.fifo"; mkfifo "$sp"

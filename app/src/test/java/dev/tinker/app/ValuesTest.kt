@@ -226,6 +226,12 @@ class ValuesTest {
     }
 
     @Test
+    fun busyRegionsPicksMostWritten() {
+        assertEquals(setOf("Ca", "A"), busyRegions(listOf(Triple("Ca", 800L, 9000L), Triple("A", 150L, 4000L), Triple("Jh", 10L, 500L), Triple("V", 900L, 900L))))
+        assertEquals(emptySet<String>(), busyRegions(listOf(Triple("Ca", 0L, 10L))))
+    }
+
+    @Test
     fun droppedLines() {
         assertEquals("25/10 boa\n", dropLines("25/10 boa\n25/10 ruim\n", setOf("ruim")))
         assertEquals("", dropLines("24/10 ruim\n", setOf("ruim")))

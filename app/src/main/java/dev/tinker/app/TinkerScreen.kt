@@ -427,6 +427,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
     var nearOpen by remember { mutableStateOf(false) }
     var names by remember { mutableStateOf(mapOf<String, String>()) }
     var more by remember { mutableStateOf(false) }
+    var confirmNew by remember { mutableStateOf(false) }
     val enabled = s.process != null && !s.busy
     // valores ao vivo, como no Cheat Engine: relê os resultados mostrados a cada segundo
     LaunchedEffect(Unit) {
@@ -468,16 +469,28 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                         }
                     }
                 }
+                // com resultados, a Nova busca pede confirmação: no meio do refino ela zerava tudo sem querer
+                if (confirmNew) {
+                    Text("Começar do zero? Os ${s.count} resultados de agora somem.", style = MaterialTheme.typography.bodyMedium)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Button(shape = MaterialTheme.shapes.medium, onClick = { confirmNew = false; run { engine.search(s.types, s.value) } }) { Text("Sim, nova busca") }
+                        TextButton(onClick = { confirmNew = false }) { Text("Não, continuar refinando") }
+                    }
+                }
+                // o mesmo número do último refino não filtra nada: o botão avisa em vez de refinar à toa
+                val same = s.value.trim().isNotEmpty() && s.value.trim() == s.lastRefine
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(shape = MaterialTheme.shapes.medium, onClick = { run { engine.search(s.types, s.value) } }, enabled = enabled && s.value.isNotBlank(), modifier = Modifier.weight(1f)) {
+                    Button(shape = MaterialTheme.shapes.medium, onClick = {
+                        if ((s.count ?: 0) > 0) confirmNew = true else run { engine.search(s.types, s.value) }
+                    }, enabled = enabled && s.value.isNotBlank() && !confirmNew, modifier = Modifier.weight(1f)) {
                         Text("Nova busca")
                     }
                     FilledTonalButton(
                         shape = MaterialTheme.shapes.medium,
                         onClick = { run { engine.refine(s.value) } },
-                        enabled = enabled && (s.count ?: 0) > 0 && s.value.isNotBlank(),
+                        enabled = enabled && (s.count ?: 0) > 0 && s.value.isNotBlank() && !same,
                         modifier = Modifier.weight(1f),
-                    ) { Text("Refinar") }
+                    ) { Text(if (same) "Mude no jogo" else "Refinar", maxLines = 1) }
                     // sem número na tela (barra de vida): começa já aqui, sem abrir "Mais formas de buscar"
                     if (s.count == null) OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { run { engine.startUnknown(s.types) } }, enabled = enabled) { Text("Sem valor") }
                 }
@@ -506,6 +519,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                     UnknownSearch(engine, enabled, run)
                     AobSearch(engine, enabled, run)
                     PhotoPanel(engine, enabled, s.results.filter { it.addr + it.type in selected }.map { it.addr }, run)
+                    ActivityPanel(engine, enabled)
                     TextButton(onClick = { s.view = null; s.tab = TAB_MEMORY }, enabled = s.process != null) { Text("Ir para endereço…") }
                 }
                 if (s.process != null) AiBox(
@@ -1770,6 +1784,54 @@ private fun LuaPanel(engine: Engine, center: String, run: (suspend () -> String)
     }
 }
 
+/**
+ * 📍 Onde o jogo escreve: marca a memória, a pessoa carrega o jogo ou uma fase, e o Tinker mostra por região quanto foi
+ * escrito. As regiões com mais escrita viram as "deste jogo": a próxima busca começa só nelas (menos resultados).
+ */
+@Composable
+private fun ActivityPanel(engine: Engine, enabled: Boolean) {
+    val s = Session
+    val scope = rememberCoroutineScope()
+    var open by remember { mutableStateOf(false) }
+    var info by remember { mutableStateOf<String?>(null) }
+    var rows by remember { mutableStateOf<List<Triple<String, Long, Long>>>(emptyList()) }
+    var learned by remember(s.process) { mutableStateOf(engine.learnedRegions()) }
+    TextButton(onClick = { open = !open }, enabled = s.process != null) {
+        Text((if (open) "▾ " else "▸ ") + "📍 Onde o jogo escreve" + if (learned.isNotEmpty()) " (${learned.joinToString()})" else "")
+    }
+    if (!open) return
+    Panel {
+        Text("Toque em Começar, carregue o jogo ou uma fase (ou faça a ação do valor) e toque em Ver. As regiões onde o jogo mais escreveu " +
+            "viram as deste jogo: a busca começa só nelas, com bem menos resultados; se não achar lá, procura em tudo sozinha.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            FilledTonalButton(shape = MaterialTheme.shapes.medium, enabled = enabled, onClick = {
+                scope.launch { info = runCatching { engine.activityStart() }.getOrElse { it.message }; rows = emptyList() }
+            }) { Text("Começar") }
+            OutlinedButton(shape = MaterialTheme.shapes.medium, enabled = enabled, onClick = {
+                scope.launch {
+                    runCatching { engine.activityResult() }.onSuccess { (how, r) ->
+                        rows = r
+                        info = if (r.sumOf { it.second } == 0L) "Nada escrito desde Começar: carregue algo no jogo e veja de novo."
+                            else if (how == "soft") "Páginas escritas desde Começar:" else "Memória nova escrita desde Começar (este aparelho não marca cada página):"
+                    }.onFailure { info = it.message }
+                }
+            }) { Text("Ver") }
+        }
+        info?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        val total = rows.sumOf { it.second }.coerceAtLeast(1)
+        rows.filter { it.second > 0 }.take(8).forEach { (code, kb, all) ->
+            Text("$code: ${if (kb >= 1024) "${kb / 1024} MB" else "$kb KB"} escritos (${kb * 100 / total}%) · região de ${all / 1024} MB",
+                fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+        }
+        val busy = busyRegions(rows)
+        if (busy.isNotEmpty()) FilledTonalButton(shape = MaterialTheme.shapes.medium, onClick = {
+            engine.setLearnedRegions(busy); learned = busy; s.status = "Buscas deste jogo começam em ${busy.joinToString()}."
+        }) { Text("Usar ${busy.joinToString()} nas buscas deste jogo") }
+        if (learned.isNotEmpty()) TextButton(onClick = { engine.setLearnedRegions(emptySet()); learned = emptySet() }) { Text("Esquecer as regiões deste jogo") }
+    }
+}
+
 /** Copia o endereço (como no Cheat Engine) e devolve o aviso para a linha de status. */
 private fun copyAddress(context: android.content.Context, addr: String): String {
     context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Endereço", addr))
@@ -2153,6 +2215,9 @@ private val HELP = listOf(
         "Aparece a instrução que muda o valor; \"Ver código\" abre Memória → Código, com as instruções traduzidas (SUB, STR…). Tocar numa " +
         "instrução deixa trocar por NOP (não faz nada) ou por outros bytes: vira um patch em Salvos → Patches de código, com liga/desliga. " +
         "Os bytes de antes ficam guardados; o patch volta sozinho quando o jogo reabre. Se o jogo fechar logo depois, o patch fica suspeito e desligado.",
+    "📍 Onde o jogo escreve" to "Em Busca → Mais formas: Começar, carregue o jogo ou uma fase, Ver. Mostra em que regiões da memória o jogo " +
+        "escreveu. Usar nas buscas deste jogo faz a busca começar só nelas (bem menos resultados); se não achar, ela procura em tudo sozinha. " +
+        "Os salvos também ensinam: a região de cada salvo entra junto.",
     "🎯 Achar sozinho" to "Digite o número que está na tela do jogo (ex.: 25 moedas) e toque em 🎯 Achar sozinho. O painel some, o Tinker lê esse " +
         "número na tela (no próprio aparelho, sem internet) e, a cada vez que ele muda enquanto você joga, refina sozinho. Com até 3 resultados, " +
         "se \"IA pode testar valores\" estiver ligado em Ajustes, ele muda cada um por 1 segundo: o que muda o número da tela é o verdadeiro, " +

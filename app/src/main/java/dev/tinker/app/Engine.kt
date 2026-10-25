@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -336,6 +337,7 @@ object Session {
     var update by mutableStateOf<Pair<String, String>?>(null)
     var gameGone by mutableStateOf<GameProcess?>(null)
     var gameGoneByUser = false  // fechado pelo botão do Tinker: mostra "Reabrir", mas não abre o painel sozinho  // o jogo fechou sozinho (não pelo Tinker): pergunta se reabre  // versão nova na página de releases: nome e link do APK  // a bolinha abre a barra rápida em vez do painel  // a busca também procura valores cifrados (🔒)
+    var lastRefine by mutableStateOf("")  // o número do último refino: refinar de novo com ele não muda nada
     var canUndo by mutableStateOf(false)  // há um refino para desfazer  // pausa o jogo durante busca/refino, para o valor não mudar no meio
     var view by mutableStateOf<Pair<String, String>?>(null)
     var codeMode by mutableStateOf(false)  // aba Memória: instruções (Código)
@@ -785,16 +787,27 @@ class Engine private constructor(private val app: Context) {
         // "150X4" (como no GameGuardian): só o cifrado com a chave nessa distância
         val gg = ggXor(value)
         val list = if (gg != null) base.filter { it == "i32" || it == "f32" }.ifEmpty { listOf("i32", "f32") }.joinToString(",") { "x$it@${gg.second}" }
-            else (base + (if (Session.findEncrypted) base.filter { it != "i8" && it != "i16" }.map { "x$it" } else emptyList()) + lua).joinToString(",")
+            // Auto começa sem os 🔒 (eram a maior parte dos falsos); se não achar, a nova tentativa inclui eles
+            else (base + (if (Session.findEncrypted && types.isNotEmpty()) base.filter { it != "i8" && it != "i16" }.map { "x$it" } else emptyList()) + lua).joinToString(",")
         val term = gg?.first ?: value
         // "100;250::64": busca em grupo, os valores todos a até 64 bytes um do outro (como no GameGuardian)
         val group = term.substringAfter("::", "").trim()
         if ("::" in term) require(Regex("""\d{1,5}""").matches(group) && ';' in term.substringBefore("::")) {
             "Busca em grupo: valores separados por ; e a distância em bytes depois de ::, ex.: 100;250::64"
         }
-        val n = d.frozenGame {
+        fun run() = d.frozenGame {
             if ("::" in term) d.send("group $list ${term.substringBefore("::").arg()} $group") else d.send("search $list ${term.arg()}")
         }.status
+        // regiões onde este jogo guarda os valores (salvos e "onde o jogo escreve"): começa só nelas; nada lá, busca em tudo
+        val focus = if (Session.regions.any { !it.enabled }) emptySet() else focusRegions()
+        var where = ""
+        var n = if (focus.isEmpty()) run() else {
+            d.send("ranges ${focus.joinToString(",")}", quiet = true)
+            try { run() } finally { d.send("ranges all", quiet = true) }
+        }
+        if (focus.isNotEmpty()) {
+            if (n == "0") n = run() else where = " (só em ${focus.joinToString()}: as regiões deste jogo)"
+        }
         // nada: tenta sozinho do jeito que a pessoa tentaria (todos os tipos, cifrados, número arredondado na tela)
         var found = n
         var how = ""
@@ -803,21 +816,26 @@ class Engine private constructor(private val app: Context) {
             if (found != "0") { how = why; break }
         }
         Session.canUndo = false
+        Session.lastRefine = ""
         addRecent(Recent(types, value.trim()))
         inFile = false
         step(true, value.trim() + if (how.isEmpty()) "" else " ($how)", found)
         if (how.isNotEmpty()) "Não achei como pedido; achei $found $how. Mude o valor no jogo e refine."
         else if (found == "0") "Nada encontrado (tentei também todos os tipos, cifrados com a chave em qualquer lado, em dobro e o número arredondado). Dicas: use Auto; se o número da tela é arredondado (1.2K), busque uma faixa como 1150~1250; ou marque mais regiões em Ajustes." + byName
-        else "$found encontrados. Mude o valor no jogo e refine."
+        else "$found encontrados$where. Mude o valor no jogo e refine."
     }
 
     suspend fun refine(value: String): String = call { d ->
         val before = Session.count
         val n = d.frozenGame(few = (before ?: Long.MAX_VALUE) < 20_000) { d.send("refine ${value.arg()}") }.status
         Session.canUndo = true
+        Session.lastRefine = value.trim()
         step(false, value.trim(), n)
         when {
-            n == "0" -> "Nenhum restou. O valor pode ter mudado de novo antes do refino: toque em Desfazer e refine com o valor atual." + byName
+            n == "0" -> "Nenhum restou. O valor pode ter mudado de novo antes do refino: toque em Desfazer e refine com o valor atual." + byName +
+                focusRegions().takeIf { it.isNotEmpty() && Session.regions.none { r -> !r.enabled } }?.let {
+                    " A busca começou só em ${it.joinToString()}; se o valor estiver em outra região, esqueça as regiões em Mais formas → Onde o jogo escreve."
+                }.orEmpty()
             // refinar com o mesmo número não filtra nada: o valor precisa mudar no jogo antes
             n == before?.toString() -> "Continuam $n: nenhum mudou. Faça o valor mudar no jogo (gaste ou ganhe) e refine com o número novo."
             else -> "$n restantes."
@@ -1601,7 +1619,10 @@ class Engine private constructor(private val app: Context) {
      * Autoteste: confere as partes do Tinker neste aparelho, só com leituras (nada é escrito no jogo), e manda o
      * resultado junto do relatório para a planilha. Bom depois de cada atualização.
      */
-    suspend fun selfTest(): String = withContext(Dispatchers.IO) {
+    // no escopo do app: com o painel fechando no meio, o teste da tela era cancelado ("rememberCoroutineScope left the composition")
+    suspend fun selfTest(): String = scope.async { selfTestIn() }.await()
+
+    private suspend fun selfTestIn(): String = withContext(Dispatchers.IO) {
         val out = mutableListOf<String>()
         suspend fun check(name: String, work: suspend () -> String) {
             val t0 = System.currentTimeMillis()
@@ -3086,6 +3107,36 @@ class Engine private constructor(private val app: Context) {
             .map { LuaField(it[1], it[2], it[3], it[4]) }
     }
 
+    // ---- regiões deste jogo: onde os salvos estão e onde o jogo escreve ao carregar; a busca começa por elas ----
+
+    private fun learnedKey() = "regioes-" + (Session.process?.pkg ?: savedPkg ?: "")
+
+    fun learnedRegions(): Set<String> = prefs.getStringSet(learnedKey(), emptySet()).orEmpty().filter { it in REGION_CODES }.toSet()
+
+    fun setLearnedRegions(codes: Set<String>) {
+        prefs.edit().putStringSet(learnedKey(), codes.filter { it in REGION_CODES }.toSet()).apply()
+        Diag.add("Regiões deste jogo: ${codes.joinToString().ifEmpty { "esquecidas (a busca volta a olhar tudo)" }}")
+    }
+
+    /** As aprendidas mais as dos salvos deste jogo (região que o daemon informou ao salvar). */
+    fun focusRegions(): Set<String> = learnedRegions() + Session.saved.map { it.region }.filter { it in REGION_CODES }
+
+    suspend fun activityStart(): String = call { d ->
+        d.send("activity start")
+        Diag.add("Onde o jogo escreve: começou a marcar")
+        "Marcando. Agora carregue o jogo, uma fase ou faça a ação, e toque em Ver."
+    }
+
+    /** Quanto foi escrito por região desde activityStart (KB), do maior para o menor; how: soft (exato) ou smaps (páginas novas). */
+    suspend fun activityResult(): Pair<String, List<Triple<String, Long, Long>>> = call { d ->
+        val r = d.send("activity")
+        val rows = r.lines.filter { it.startsWith("act ") }.map { it.split(' ') }.filter { it.size == 4 }
+            .map { Triple(it[1], it[2].toLongOrNull() ?: 0, it[3].toLongOrNull() ?: 0) }.sortedByDescending { it.second }
+        val how = r.lines.firstOrNull { it.startsWith("how ") }?.substringAfter(' ').orEmpty()
+        Diag.add("Onde o jogo escreve ($how): " + rows.filter { it.second > 0 }.joinToString { "${it.first} ${it.second / 1024} MB" }.ifEmpty { "nada" })
+        how to rows
+    }
+
     /** Contador de chamadas: quantas vezes o código em addr roda em secs segundos, e de onde é chamado. */
     suspend fun traceCalls(addr: String, secs: Int = 10): Pair<Int, List<Triple<String, Int, String>>> = call { d ->
         val r = d.send("trace $addr ${secs.coerceIn(3, 30)}")
@@ -3240,7 +3291,7 @@ class Engine private constructor(private val app: Context) {
     }
 
     /** Volta ao resultado de antes do último refino; tocar de novo refaz. */
-    suspend fun undo(): String = call { d -> "${d.send("undo").status} resultados (desfeito; toque de novo para refazer)." }
+    suspend fun undo(): String = call { d -> Session.lastRefine = ""; "${d.send("undo").status} resultados (desfeito; toque de novo para refazer)." }
 
     suspend fun write(addr: String, type: String, value: String): String = call { d ->
         d.send("write $addr $type ${value.arg()}")
@@ -3325,7 +3376,9 @@ class Engine private constructor(private val app: Context) {
                 Session.saved.forEach { appendLine(savedLine(it)) }
                 neighborsText().takeIf { it.isNotBlank() }?.let { appendLine("\n=== Vizinhos dos salvos que mudaram (100 Dwords acima e abaixo, a cada 5 s) ===\n$it") }
             }
-            val log = Diag.export().lines()
+            // só desde que o Tinker abriu: o relatório inteiro do dia passava de 140 mil letras
+            val all = Diag.export().lines()
+            val log = all.drop(all.indexOfLast { " iniciado · " in it }.coerceAtLeast(0))
             val problems = log.filter { l ->
                 val msg = l.substringAfter(' ').substringAfter(' ')  // tira data e hora do registro
                 // linhas com "| " vêm do logcat (do jogo ou do Android), não são problemas do Tinker
@@ -3335,8 +3388,8 @@ class Engine private constructor(private val app: Context) {
             appendLine("=== Resumo de problemas (${problems.size}) ===")
             appendLine(if (problems.isEmpty()) "Nenhum erro registrado." else problems.takeLast(20).joinToString("\n"))
             appendLine()
-            appendLine("=== Registro do Tinker ===")
-            appendLine(Diag.export())
+            appendLine("=== Registro do Tinker (desde que o Tinker abriu; o anterior fica no aparelho) ===")
+            appendLine(log.joinToString("\n"))
             appendLine(crash)
             appendLine()
             appendLine(game)
@@ -3969,6 +4022,16 @@ internal fun readable(value: String, cipherType: String): String? {
 const val MEMORY_FILE = "tinker-memoria-ia.json"
 private val AI_ERRORS = listOf("Gemini respondeu", "Gemini recusou", "Groq respondeu", "O Groq recusou", "Sem conexão", "O limite grátis", "A cota grátis", "Sem resposta")
 private val GEMINI_KEY = Regex("""[A-Za-z0-9._-]{20,200}""")
+// regiões que a busca conhece (o V, vídeo, nunca entra)
+internal val REGION_CODES = setOf("Jh", "J", "Ch", "Ca", "Cd", "Cb", "A", "S", "As", "O")
+
+/** As regiões com pelo menos 5% do que foi escrito: as que valem a busca começar nelas. */
+internal fun busyRegions(rows: List<Triple<String, Long, Long>>): Set<String> {
+    val total = rows.sumOf { it.second }
+    if (total <= 0) return emptySet()
+    return rows.filter { it.first in REGION_CODES && it.second * 20 >= total }.map { it.first }.toSet()
+}
+
 private val WATCH_TYPES = setOf("i8", "i16", "i32", "i64", "f32", "f64", "xi32", "xf32", "li", "lf")
 private val PKG = Regex("""[A-Za-z0-9._]{1,120}""")  // nome de pacote que vira nome de arquivo
 
