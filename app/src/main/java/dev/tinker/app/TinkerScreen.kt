@@ -1518,7 +1518,8 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                             fontFamily = FontFamily.Monospace, modifier = Modifier.heightIn(max = 200.dp).verticalScroll(rememberScrollState()))
                     }
                     // backup: sozinho em Download/Tinker a cada coisa aprendida; volta sozinho numa instalação nova
-                    Text("Backup automático em Download/Tinker/$MEMORY_FILE" + if (engine.lastMemoryBackup.isEmpty()) "" else " (último: ${engine.lastMemoryBackup})",
+                    Text("Backup automático em Download/Tinker/$MEMORY_FILE" + (if (engine.lastMemoryBackup.isEmpty()) "" else " (último: ${engine.lastMemoryBackup})") +
+                        if (s.keySource.isNotBlank()) ". Também vai para a planilha do painel (aba Aprendizado), que junta o de todas as instâncias." else "",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         OutlinedButton(onClick = { keyInfo = if (engine.backupMemory()) "Backup feito em Download/Tinker." else "Backup não deu certo (veja o Registro)." }) { Text("Fazer backup") }
@@ -1532,6 +1533,8 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                             keyInfo = if (t.isBlank()) "Copie o conteúdo do arquivo $MEMORY_FILE e toque de novo." else engine.importMemory(t)
                         }) { Text("Importar (colar)") }
                         OutlinedButton(onClick = { keyInfo = engine.restoreMemory() }) { Text("Restaurar do backup") }
+                        // banco comum na planilha do painel: junta o que todas as instâncias aprenderam
+                        if (s.keySource.isNotBlank()) OutlinedButton(onClick = { keyInfo = "Juntando com a planilha…"; scope.launch { keyInfo = engine.cloudPull() } }) { Text("Juntar com a planilha") }
                         // backup de outro aparelho ou outra instância (copiado para cá): escolher o arquivo
                         openMemory?.let { l -> OutlinedButton(onClick = { l.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }) { Text("Abrir arquivo") } }
                     }

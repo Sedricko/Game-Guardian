@@ -23,6 +23,12 @@ do Tinker pegam sozinhas. O Tinker também avisa no painel qual chave ficou sem 
 - Copie o **Link para o Tinker** e cole no app: **Ajustes → Assistente (IA) → Painel de chaves → Colar**.
 - Chave desligada ou apagada no painel sai do Tinker na próxima atualização. As chaves que você pôs à mão no app continuam.
 
+## Aprendizado da IA
+
+O Tinker também manda o que a IA aprendeu (lições e a biblioteca de cada jogo) para esta planilha, e a planilha junta
+o que vem de todas as instâncias. A aba **Aprendizado** mostra tudo para ler; a aba escondida **MemoriaBruta** é a que o
+Tinker usa. Uma instância nova (ou reinstalada) pega o aprendizado de lá ao abrir.
+
 ## Segurança
 
 - A planilha continua privada. O link só devolve as chaves para quem tem o token que vai nele.

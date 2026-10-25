@@ -347,7 +347,7 @@ class Engine private constructor(private val app: Context) {
             prefs.edit().putBoolean("defaultSourceGiven", true).putString("keySource", Session.keySource).apply()
         }
         Session.sheetKeys = prefs.getString("sheetKeys", "").orEmpty().split('\n').filter { it.isNotBlank() }.toSet()
-        if (Session.keySource.isNotBlank()) scope.launch { Diag.add(syncKeys()) }
+        if (Session.keySource.isNotBlank()) scope.launch { Diag.add(syncKeys()); Diag.add(cloudPull()) }
         Session.watchFields = prefs.getBoolean("watchFields", true)
         prefs.getString("geminiUse", "").orEmpty().split(';').takeIf { it.size == 3 && it[0] == quotaDay() }?.let { (_, use, out) ->
             use.split(',').forEach { e -> e.split('=').takeIf { it.size == 2 }?.let { (k, n) -> k.toIntOrNull()?.let { Session.geminiUse[it] = n.toIntOrNull() ?: 0 } } }
@@ -1054,6 +1054,7 @@ class Engine private constructor(private val app: Context) {
 
     /** Grava o backup agora (sobrescreve o mesmo arquivo). */
     fun backupMemory(): Boolean = runCatching {
+        cloudPush()
         val uri = memoryUri(create = true) ?: return false
         app.contentResolver.openOutputStream(uri, "wt")!!.use { it.write(memoryJson().toByteArray()) }
         lastMemoryBackup = java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.US).format(java.util.Date())
@@ -1066,6 +1067,43 @@ class Engine private constructor(private val app: Context) {
     private fun backupMemorySoon() {
         if (backupJob?.isActive == true) return
         backupJob = scope.launch(Dispatchers.IO) { delay(3000); backupMemory() }
+    }
+
+    // Banco comum na planilha do painel: cada instância manda o que a IA aprendeu e a planilha junta tudo (aba Aprendizado).
+
+    private fun panelUrl(extra: String = "") = Session.keySource.trim().takeIf { it.startsWith("https://script.google.com/") }
+        ?.let { it + extra.takeIf { e -> e.isNotEmpty() }?.let { e -> (if ('?' in it) "&" else "?") + e }.orEmpty() }
+
+    /** Manda a memória para a planilha (lá ela é juntada, não substituída: nada que outra instância aprendeu se perde). */
+    private fun cloudPush() {
+        val url = panelUrl() ?: return
+        // "Fazer backup" chama da tela: rede nunca na linha principal
+        scope.launch(Dispatchers.IO) { runCatching {
+            (java.net.URL(url).openConnection() as java.net.HttpURLConnection).run {
+                connectTimeout = 15_000; readTimeout = 60_000; requestMethod = "POST"; doOutput = true
+                setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                outputStream.use { it.write(memoryJson().toByteArray()) }
+                val code = responseCode  // 302 também é certo: o Google responde redirecionando, depois de guardar
+                if (code >= 400) Diag.add("Aprendizado não foi para a planilha: código $code")
+                disconnect()
+            }
+        }.onFailure { Diag.add("Aprendizado não foi para a planilha: ${it.message}") } }
+    }
+
+    /** Traz o aprendizado de todas as instâncias da planilha e junta com o daqui (depois manda o resultado de volta). */
+    suspend fun cloudPull(): String = withContext(Dispatchers.IO) {
+        val url = panelUrl("memoria=1") ?: return@withContext "Sem painel de chaves: o aprendizado fica só neste aparelho e no backup."
+        val text = runCatching {
+            (java.net.URL(url).openConnection() as java.net.HttpURLConnection).run {
+                connectTimeout = 15_000; readTimeout = 60_000
+                try { inputStream.bufferedReader().use { it.readText() } } finally { disconnect() }
+            }
+        }.getOrElse { return@withContext "Não li o aprendizado da planilha: ${it.message}" }
+        if (runCatching { JSONObject(text).optString("tinker") }.getOrNull() != "memoria-ia") {
+            backupMemorySoon()  // planilha ainda vazia (ou script antigo): manda o daqui
+            return@withContext "Planilha sem aprendizado ainda: mandei o deste aparelho."
+        }
+        withContext(Dispatchers.Main) { "Planilha: " + importMemory(text) }
     }
 
     /** Lê o backup de Download/Tinker e junta com a memória de agora. */

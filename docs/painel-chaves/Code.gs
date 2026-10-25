@@ -149,12 +149,105 @@ function doGet(e) {
     }
     return json_({ ok: true });
   }
+  // aprendizado guardado (o de todas as instâncias juntas)
+  if (p.memoria) return json_(memoriaGuardada_() || {});
   const ativas = linhas_().filter(r => r.ativa);
   // "chaves" continua sendo o Gemini: o Tinker 2.19.0 lê só ela
   return json_({
     chaves: ativas.filter(r => r.provedor === 'gemini').map(r => r.chave),
     groq: ativas.filter(r => r.provedor === 'groq').map(r => r.chave),
   });
+}
+
+// ---- aprendizado da IA (o Tinker manda; a planilha junta o de todas as instâncias) ----
+
+const BRUTA = 'MemoriaBruta';
+const LEGIVEL = 'Aprendizado';
+
+function memoriaGuardada_() {
+  const s = SpreadsheetApp.getActive().getSheetByName(BRUTA);
+  if (!s || s.getLastRow() < 1) return null;
+  const t = s.getRange(1, 1, s.getLastRow(), 1).getValues().map(r => String(r[0])).join('');
+  try { return JSON.parse(t); } catch (e) { return null; }
+}
+
+function guardarMemoria_(m) {
+  const ss = SpreadsheetApp.getActive();
+  const s = ss.getSheetByName(BRUTA) || ss.insertSheet(BRUTA);
+  s.hideSheet();
+  s.clear();
+  const t = JSON.stringify(m);
+  const partes = [];
+  for (let i = 0; i < t.length; i += 45000) partes.push([t.slice(i, i + 45000)]);  // uma célula guarda até 50 mil letras
+  // como texto: um pedaço que comece com = ou + não vira fórmula
+  s.getRange(1, 1, partes.length, 1).setNumberFormat('@').setValues(partes);
+  legivel_(m);
+}
+
+// aba para ler: lições, notas, receitas e salvos de cada jogo (a fonte de verdade é a MemoriaBruta)
+function legivel_(m) {
+  const ss = SpreadsheetApp.getActive();
+  const s = ss.getSheetByName(LEGIVEL) || ss.insertSheet(LEGIVEL);
+  s.clear();
+  const rows = [['Jogo', 'Tipo', 'Texto']];
+  linhas2_(m.licoes).forEach(l => rows.push(['(todos os jogos)', 'lição', l]));
+  Object.keys(m.jogos || {}).forEach(pkg => {
+    const g = m.jogos[pkg] || {};
+    const nome = g.nome || pkg;
+    linhas2_(g.notas).forEach(l => rows.push([nome, 'nota', l]));
+    (g.receitas || []).forEach(r => rows.push([nome, 'receita', (r.name || '') + ' (' + ((r.steps || []).length) + ' passos)']));
+    (g.salvos || []).forEach(v => rows.push([nome, 'salvo', (v.name || v.il2 || v.addr || '') + ' · ' + (v.type || '')]));
+  });
+  s.getRange(1, 1, rows.length, 3).setNumberFormat('@').setValues(rows);
+  s.getRange(1, 1, 1, 3).setFontWeight('bold');
+  s.setFrozenRows(1);
+}
+
+function linhas2_(t) {
+  return String(t || '').split('\n').map(l => l.trim()).filter(l => l);
+}
+
+// junta sem repetir (a data no começo da linha não conta), como no app
+function juntarLinhas_(a, b) {
+  const tem = linhas2_(a);
+  const vistos = new Set(tem.map(l => l.replace(/^\S+\s/, '')));
+  linhas2_(b).forEach(l => { const k = l.replace(/^\S+\s/, ''); if (!vistos.has(k)) { vistos.add(k); tem.push(l); } });
+  return tem.length ? tem.join('\n') + '\n' : '';
+}
+
+function juntarMemoria_(velha, nova) {
+  const m = { tinker: 'memoria-ia', versao: 2, licoes: juntarLinhas_(velha.licoes, nova.licoes), jogos: {} };
+  const pkgs = new Set(Object.keys(velha.jogos || {}).concat(Object.keys(nova.jogos || {})));
+  pkgs.forEach(pkg => {
+    const a = (velha.jogos || {})[pkg] || {}, b = (nova.jogos || {})[pkg] || {};
+    const receitas = (a.receitas || []).slice();
+    (b.receitas || []).forEach(r => { if (!receitas.some(x => x.id === r.id || x.name === r.name)) receitas.push(r); });
+    const salvos = (a.salvos || []).slice();
+    (b.salvos || []).forEach(v => {
+      const igual = salvos.findIndex(x => x.id === v.id || (v.il2 && x.il2 === v.il2) || (v.name && x.name === v.name && x.type === v.type));
+      if (igual < 0) salvos.push(v); else salvos[igual] = v;  // o mais novo vale (ponteiros e assinatura melhores)
+    });
+    m.jogos[pkg] = { nome: b.nome || a.nome || pkg, notas: juntarLinhas_(a.notas, b.notas), receitas: receitas, salvos: salvos };
+  });
+  return m;
+}
+
+function doPost(e) {
+  const p = (e && e.parameter) || {};
+  if (p.token !== token_()) return json_({ erro: 'token' });
+  let nova;
+  try { nova = JSON.parse(e.postData.contents); } catch (err) { return json_({ erro: 'json' }); }
+  if (!nova || nova.tinker !== 'memoria-ia') return json_({ erro: 'nao e memoria do Tinker' });
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const m = juntarMemoria_(memoriaGuardada_() || { licoes: '', jogos: {} }, nova);
+    m.criado = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm');
+    guardarMemoria_(m);
+    return json_({ ok: true, jogos: Object.keys(m.jogos).length });
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function json_(o) {
