@@ -79,6 +79,46 @@ data class CodePatch(
     val enabled: Boolean = false, val suspect: Boolean = false, val note: String = "",
 )
 
+// Um método IL2CPP: endereço do código, tipo de retorno (código do Unity: 01 void, 02 bool, 08 int, 0a long, 0c float,
+// 0d double…), onde fica na lib e o nome.
+data class Il2Method(val code: String, val ret: Int, val where: String, val name: String)
+
+/** Tipos de retorno que dá para trocar por um valor fixo (MOV + RET). */
+internal val RET_NAMES = mapOf(0x01 to "void", 0x02 to "bool", 0x03 to "char", 0x04 to "sbyte", 0x05 to "byte", 0x06 to "short", 0x07 to "ushort",
+    0x08 to "int", 0x09 to "uint", 0x0a to "long", 0x0b to "ulong", 0x0c to "float", 0x0d to "double")
+
+/**
+ * Bytes (hex, como ficam na memória) de "o método sempre devolve value" em ARM64: carrega o valor em W0/X0 (ou S0/D0 para
+ * float/double) e volta. void: só volta (o método deixa de fazer qualquer coisa). null: tipo que não dá (objeto, texto).
+ */
+internal fun returnPatch(ret: Int, value: String): String? {
+    fun le(w: Int) = (0 until 4).joinToString("") { "%02x".format((w ushr (8 * it)) and 0xff) }
+    fun w32(n: Int): List<Int> = when {
+        n in 0..0xffff -> listOf(0x52800000 or (n shl 5))
+        n.inv() in 0..0xffff -> listOf(0x12800000 or (n.inv() shl 5))  // MOVN: números negativos pequenos
+        else -> listOf(0x52800000 or ((n and 0xffff) shl 5), 0x72a00000 or (((n ushr 16) and 0xffff) shl 5))
+    }
+    fun x64(n: Long): List<Int> {
+        val parts = (0 until 4).map { ((n ushr (16 * it)) and 0xffff).toInt() }
+        val out = mutableListOf(0xd2800000.toInt() or (parts[0] shl 5))
+        val movk = listOf(0, 0xf2a00000.toInt(), 0xf2c00000.toInt(), 0xf2e00000.toInt())
+        for (i in 1..3) if (parts[i] != 0) out += movk[i] or (parts[i] shl 5)
+        return out
+    }
+    val ret0 = 0xd65f03c0.toInt()
+    val v = value.trim().lowercase()
+    val words: List<Int> = when (ret) {
+        0x01 -> emptyList()
+        0x02 -> w32(if (v in setOf("true", "sim", "1", "verdadeiro")) 1 else if (v in setOf("false", "não", "nao", "0", "falso")) 0 else return null)
+        in 0x03..0x09 -> w32(v.toLongOrNull()?.toInt() ?: return null)
+        0x0a, 0x0b -> x64(v.toLongOrNull() ?: return null)
+        0x0c -> w32(java.lang.Float.floatToRawIntBits(v.toFloatOrNull() ?: return null)) + 0x1e270000  // FMOV S0, W0
+        0x0d -> x64(java.lang.Double.doubleToRawLongBits(v.toDoubleOrNull() ?: return null)) + 0x9e670000.toInt()  // FMOV D0, X0
+        else -> return null
+    }
+    return (words + ret0).joinToString("") { le(it) }
+}
+
 // Uma instrução na aba Código: endereço, onde fica na lib, os 4 bytes e o que ela faz.
 data class CodeRow(val addr: String, val where: String, val word: Int?, val text: String)
 
@@ -291,7 +331,8 @@ object Session {
     val aiProposals = mutableStateListOf<AiProposal>()
     val sheetRequests = mutableStateListOf<SheetRequest>()
     val patches = mutableStateListOf<CodePatch>()
-    var release by mutableStateOf<List<Pair<String, String>>>(emptyList())  // valores que liberaram a recompensa (Foto do jogo)
+    var release by mutableStateOf<List<Pair<String, String>>>(emptyList())
+    var traceHits by mutableStateOf<Pair<String, Pair<Int, List<Triple<String, Int, String>>>>?>(null)  // último contador de chamadas  // valores que liberaram a recompensa (Foto do jogo)
     var alwaysRequests by mutableStateOf(setOf<String>())
     var autoReports by mutableStateOf(true)  // relatório sozinho a cada 10 min de jogo (com atividade nova) e ao fechar o jogo pelo Tinker  // tipos que a pessoa mandou lembrar
     val aiUndo = mutableStateListOf<AiUndo>()
@@ -1286,18 +1327,18 @@ class Engine private constructor(private val app: Context) {
         return new.size
     }
 
-    private fun memoryUri(create: Boolean): android.net.Uri? {
+    private fun memoryUri(create: Boolean, name: String = MEMORY_FILE, mime: String = "application/json"): android.net.Uri? {
         if (android.os.Build.VERSION.SDK_INT < 29) return null
         val col = android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI
         app.contentResolver.query(
             col, arrayOf(android.provider.MediaStore.Downloads._ID),
             "${android.provider.MediaStore.Downloads.DISPLAY_NAME}=? AND ${android.provider.MediaStore.Downloads.RELATIVE_PATH} LIKE ?",
-            arrayOf(MEMORY_FILE, "Download/Tinker%"), null,
+            arrayOf(name, "Download/Tinker%"), null,
         )?.use { c -> if (c.moveToFirst()) return android.content.ContentUris.withAppendedId(col, c.getLong(0)) }
         if (!create) return null
         return app.contentResolver.insert(col, android.content.ContentValues().apply {
-            put(android.provider.MediaStore.Downloads.DISPLAY_NAME, MEMORY_FILE)
-            put(android.provider.MediaStore.Downloads.MIME_TYPE, "application/json")
+            put(android.provider.MediaStore.Downloads.DISPLAY_NAME, name)
+            put(android.provider.MediaStore.Downloads.MIME_TYPE, mime)
             put(android.provider.MediaStore.Downloads.RELATIVE_PATH, "Download/Tinker")
         })
     }
@@ -2842,6 +2883,68 @@ class Engine private constructor(private val app: Context) {
     }
 
     // ---- código: "o que escreve aqui", ver as instruções e patches ----
+
+    /** Métodos da classe do objeto (ou da classe, pelo endereço dela): nome, retorno e código. */
+    suspend fun il2Methods(addr: String): List<Il2Method> = call { d ->
+        d.send("il2methods $addr", quiet = true).lines.filter { it.startsWith("method ") }.map { it.split(' ', limit = 5) }.filter { it.size == 5 }
+            .map { Il2Method(it[1], it[2].toIntOrNull(16) ?: 0, it[3], it[4]) }
+    }
+
+    /**
+     * "Sempre devolve X": troca o começo do método por carregar o valor e voltar (vira um patch, com os bytes de antes guardados).
+     * Método curto demais para as instruções (um getter de 2 instruções com um número grande) é recusado: escreveria no próximo.
+     */
+    suspend fun patchReturn(m: Il2Method, cls: String, value: String): String {
+        require(Session.engine?.bits != 32) { "só jogos de 64 bits por enquanto" }
+        val hex = returnPatch(m.ret, value) ?: return "Esse método devolve ${RET_NAMES[m.ret] ?: "um objeto"}: não dá para fixar com \"$value\"."
+        val n = hex.length / 8
+        val orig = codeAt(m.code, 0, n)
+        if (orig.dropLast(1).any { it.word == 0xd65f03c0.toInt() }) return "O método ${m.name} é curto demais para esse valor (termina antes): use um número até 65535."
+        val label = if (m.ret == 0x01) "não faz nada" else "sempre $value"
+        return createPatch(m.code, hex, "$cls.${m.name} → $label", "${RET_NAMES[m.ret]} ${m.name}() passa a ${if (m.ret == 0x01) "voltar sem fazer nada" else "devolver $value"}", apply = false)
+    }
+
+    /** Contador de chamadas: quantas vezes o código em addr roda em secs segundos, e de onde é chamado. */
+    suspend fun traceCalls(addr: String, secs: Int = 10): Pair<Int, List<Triple<String, Int, String>>> = call { d ->
+        val r = d.send("trace $addr ${secs.coerceIn(3, 30)}")
+        val calls = r.lines.firstOrNull { it.startsWith("calls ") }?.substringAfter(' ')?.toIntOrNull() ?: 0
+        calls to r.lines.filter { it.startsWith("caller ") }.map { it.split(' ') }.filter { it.size >= 4 }.map { Triple(it[1], it[2].toIntOrNull() ?: 0, it[3]) }
+    }
+
+    /** Pela tela: o painel sai da frente e o resultado fica em Session.traceHits. */
+    fun traceLater(addr: String, label: String, secs: Int = 10) {
+        Session.status = "Contando chamadas de $label por $secs s: jogue normalmente…"
+        scope.launch {
+            val r = runCatching { traceCalls(addr, secs) }
+            withContext(Dispatchers.Main) {
+                r.onSuccess { Session.traceHits = label to it }
+                Session.status = r.fold({ "$label rodou ${it.first} vezes em $secs s." }, { "Não deu para contar: ${it.message}" })
+                Diag.add("Contador de chamadas de $label: " + r.fold({ "${it.first} vezes" }, { "erro ${it.message}" }))
+            }
+        }
+    }
+
+    /** Dump das classes do próprio jogo (campos e métodos com onde ficam), como o dump.cs: vai para Download/Tinker. */
+    suspend fun dumpIl2cpp(): Pair<String, File> {
+        val pkg = gamePkg()
+        val lines = call { d -> d.send("il2classes", quiet = true).lines }.filter { it.startsWith("class ") }.map { it.split(' ', limit = 5) }
+            .filter { it.size >= 4 && LIBS.none { l -> it[1].startsWith(l) } }.take(600)
+        val text = StringBuilder("// Dump do Tinker · $pkg · ${lines.size} classes do jogo\n")
+        for (c in lines) {
+            text.append("\nclass ${c[1]} {  // ${c[3]} campos\n")
+            c.getOrNull(4)?.split(',')?.filter { it.isNotEmpty() }?.forEach { text.append("    $it;\n") }
+            runCatching { il2Methods(c[2]) }.getOrDefault(emptyList()).forEach { m ->
+                text.append("    ${RET_NAMES[m.ret] ?: "object"} ${m.name}();  // ${m.where}\n")
+            }
+            text.append("}\n")
+        }
+        val name = "tinker-dump-$pkg.cs"
+        val file = File(File(app.cacheDir, "reports").apply { mkdirs() }, name).apply { writeText(text.toString()) }  // reports/: a pasta que dá para compartilhar
+        val uri = runCatching { memoryUri(true, name, "text/plain") }.getOrNull()
+        if (uri != null) app.contentResolver.openOutputStream(uri, "wt")?.use { it.write(file.readBytes()) }
+        Diag.add("Dump IL2CPP: ${lines.size} classes em Download/Tinker/$name")
+        return "Dump pronto: ${lines.size} classes" + (if (uri != null) " em Download/Tinker/$name" else "") to file
+    }
 
     /** "O que escreve aqui": observa o endereço por alguns segundos e devolve as instruções que escreveram nele (pc, vezes, lib+desloc.). */
     suspend fun watchWrites(addr: String, secs: Int = 15): List<Triple<String, Int, String>> = call { d ->

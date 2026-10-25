@@ -194,7 +194,7 @@ fun TinkerPanel(
                         Text("${gone.label} fechou. Reabrir o jogo?", color = MaterialTheme.colorScheme.onTertiaryContainer, style = MaterialTheme.typography.titleSmall)
                         Text(if (s.gameGoneByUser) "Ao reabrir, os salvos voltam sozinhos." else "O motivo da queda fica na aba Registro. Ao reabrir, os salvos voltam sozinhos.",
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onTertiaryContainer)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(shape = MaterialTheme.shapes.medium, onClick = { s.status = engine.relaunch(); if (overlay) onMinimize() }) { Text("Reabrir") }
                             TextButton(onClick = { s.gameGone = null }) { Text("Agora não") }
                             // queda: a IA lê o registro e explica
@@ -968,6 +968,21 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
                 }
             }
         }
+        s.traceHits?.let { (label, r) ->
+            item(key = "trace") {
+                Panel {
+                    Text("Contador de chamadas: $label rodou ${r.first} vezes", style = MaterialTheme.typography.titleSmall)
+                    if (r.first == 0) Text("Não rodou enquanto contava. Faça no jogo a ação que deveria chamar esse método.", style = MaterialTheme.typography.bodySmall)
+                    r.second.forEach { (pc, n, where) ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("chamado de $where · $n×", Modifier.weight(1f), fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                            TextButton(onClick = { s.view = pc to "i32"; s.fichaMode = false; s.codeMode = true; s.tab = TAB_MEMORY }) { Text("Ver código") }
+                        }
+                    }
+                    TextButton(onClick = { s.traceHits = null }) { Text("Fechar") }
+                }
+            }
+        }
         // pastas que a pessoa criou (Materiais, Status…): os sem pasta primeiro
         s.saved.groupBy { it.folder }.toSortedMap().forEach { (folder, group) ->
         if (folder.isNotEmpty()) item(key = "pasta-$folder") {
@@ -1424,6 +1439,15 @@ private fun ClassOpener(engine: Engine) {
             }
         }
     }, enabled = s.process != null) { Text((if (listing) "▾ " else "▸ ") + "Ver todas as classes do jogo") }
+    // dump.cs: todas as classes do jogo com campos e métodos, num arquivo para ler com calma ou mandar para a IA
+    TextButton(onClick = {
+        loading = true
+        info = "Montando o dump (classes, campos e métodos)… pode levar um minuto"
+        scope.launch {
+            runCatching { engine.dumpIl2cpp() }.onSuccess { (msg, file) -> info = msg; shareFile(context, file) }.onFailure { info = it.message }
+            loading = false
+        }
+    }, enabled = s.process != null && !loading) { Text("📄 Exportar dump das classes (.cs)") }
     if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
     info?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     val names = remember(all) { all?.map { it.name }?.toSet() ?: emptySet() }
@@ -1557,6 +1581,7 @@ private fun FichaBody(engine: Engine, center: String, run: (suspend () -> String
             OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { page++ }) { Text("▼ Depois") }
         }
     }
+    if (c != null) MethodsPanel(engine, c, run)
     if (c != null && c.fields.size > 6) {
         OutlinedTextField(filter, { filter = it }, label = { Text("Filtrar campo (ex.: gem)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
     }
@@ -1621,6 +1646,63 @@ private fun FichaBody(engine: Engine, center: String, run: (suspend () -> String
                 }
             }
         }
+    }
+}
+
+/**
+ * Métodos da classe da ficha: ver o código, contar quantas vezes rodam e fixar o retorno ("sempre devolve 999").
+ * O patch nasce desligado em Salvos → Patches de código: a pessoa liga quando quiser.
+ */
+@Composable
+private fun MethodsPanel(engine: Engine, c: Il2Class, run: (suspend () -> String) -> Unit) {
+    val s = Session
+    val scope = rememberCoroutineScope()
+    var shown by remember(c.start) { mutableStateOf(false) }
+    var methods by remember(c.start) { mutableStateOf<List<Il2Method>?>(null) }
+    var error by remember(c.start) { mutableStateOf<String?>(null) }
+    var open by remember(c.start) { mutableStateOf<String?>(null) }
+    var filter by remember(c.start) { mutableStateOf("") }
+    TextButton(onClick = {
+        shown = !shown
+        if (shown && methods == null) scope.launch {
+            runCatching { engine.il2Methods(c.start) }.onSuccess { methods = it; error = null }.onFailure { error = it.message }
+        }
+    }) { Text((if (shown) "▾ " else "▸ ") + "⚙ Métodos da classe" + (methods?.let { " (${it.size})" } ?: "")) }
+    if (!shown) return
+    error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+    val list = methods ?: return LinearProgressIndicator(Modifier.fillMaxWidth())
+    if (list.size > 8) OutlinedTextField(filter, { filter = it }, label = { Text("Filtrar método (ex.: get_)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+    Column(Modifier.fillMaxWidth().heightIn(max = 300.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        list.filter { filter.isBlank() || it.name.contains(filter.trim(), ignoreCase = true) }.take(200).forEach { m ->
+            val ret = RET_NAMES[m.ret] ?: "objeto"
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceContainerLow)
+                    .sizeIn(minHeight = 48.dp).clickable { open = if (open == m.code) null else m.code }.padding(horizontal = 12.dp, vertical = 6.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(ret, Modifier.width(56.dp), fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                    Text(m.name + "()", Modifier.weight(1f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                if (open == m.code) {
+                    Text(m.where, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        TextButton(onClick = { s.view = m.code to "i32"; s.fichaMode = false; s.codeMode = true }) { Text("Ver código") }
+                        TextButton(onClick = { engine.traceLater(m.code, "${c.name.substringAfterLast('.')}.${m.name}") }) { Text("Contar chamadas (10 s)") }
+                        when (m.ret) {
+                            0x01 -> OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { open = null; run { engine.patchReturn(m, c.name, "") } }) { Text("Não fazer nada") }
+                            0x02 -> {
+                                OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { open = null; run { engine.patchReturn(m, c.name, "true") } }) { Text("Sempre true") }
+                                OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { open = null; run { engine.patchReturn(m, c.name, "false") } }) { Text("Sempre false") }
+                            }
+                        }
+                    }
+                    if (m.ret in 0x03..0x0d) InlineEditor("", "Sempre devolver ($ret)", onSave = { v -> open = null; run { engine.patchReturn(m, c.name, v) } }, onCancel = { open = null })
+                    if (m.ret in 0x01..0x0d) Text("Vira um patch desligado em Salvos → Patches de código: ligue lá para valer.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    else Text("Devolve um objeto ou texto: dá para ver o código e contar chamadas, não para fixar o retorno.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+        if (list.isEmpty()) Text("A classe não tem métodos com código próprio.", style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -1789,7 +1871,7 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                             visualTransformation = PasswordVisualTransformation(), modifier = Modifier.weight(1f))
                         Button(shape = MaterialTheme.shapes.medium, onClick = { val t = clipText(); if (t.isEmpty()) keyInfo = noClip else { s.keySource = t; engine.saveSettings(); scope.launch { keyInfo = engine.syncKeys() } } }) { Text("Colar") }
                     }
-                    if (s.keySource.isNotBlank()) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (s.keySource.isNotBlank()) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { keyInfo = "Lendo o painel…"; scope.launch { keyInfo = engine.syncKeys() } }) { Text("Atualizar do painel") }
                         TextButton(onClick = { s.keySource = ""; engine.saveSettings() }) { Text("Desligar painel") }
                 }
@@ -2007,6 +2089,9 @@ private val HELP = listOf(
         "Aparece a instrução que muda o valor; \"Ver código\" abre Memória → Código, com as instruções traduzidas (SUB, STR…). Tocar numa " +
         "instrução deixa trocar por NOP (não faz nada) ou por outros bytes: vira um patch em Salvos → Patches de código, com liga/desliga. " +
         "Os bytes de antes ficam guardados; o patch volta sozinho quando o jogo reabre. Se o jogo fechar logo depois, o patch fica suspeito e desligado.",
+    "Métodos (IL2CPP)" to "Na Ficha de um objeto do jogo, \"⚙ Métodos da classe\" lista as funções com o tipo que devolvem. Toque numa: " +
+        "\"Contar chamadas\" mostra quantas vezes ela roda em 10 s e de onde (em Salvos); \"Sempre devolver\" (número, true/false ou \"Não fazer nada\") " +
+        "vira um patch desligado em Salvos → Patches de código. Em Memória → Ficha, onde se abre pela classe, \"Exportar dump\" gera um .cs com todas as classes, campos e métodos.",
     "Endereços mudaram" to "Quando o jogo reinicia, os endereços mudam. Para um salvo continuar valendo, use um ponteiro (abaixo).",
     "Ponteiros" to "Como no Cheat Engine, mas sozinho: ao salvar, o Tinker já busca os ponteiros e aprende a assinatura (bytes em volta). " +
         "Ao reabrir o jogo e escolher ele no Tinker, cada salvo volta sozinho (ponteiro → caminhos guardados → assinatura); os da mesma ficha " +

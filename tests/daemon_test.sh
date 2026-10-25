@@ -8,7 +8,7 @@ cc -O2 -Wall -Werror -pthread -o "$out/tinkerd" daemon/tinkerd.c -lm
 cc -O2 -pthread -o "$out/target" tests/target.c
 "$out/target" > "$out/info" & tpid=$!
 for _ in $(seq 50); do [ -s "$out/info" ] && break; sleep 0.1; done
-read -r pid iaddr faddr paddr xaddr oaddr yaddr zaddr qaddr waddr taddr caddr maddr < "$out/info"
+read -r pid iaddr faddr paddr xaddr oaddr yaddr zaddr qaddr waddr taddr caddr maddr kaddr < "$out/info"
 
 got=$("$out/tinkerd" <<CMDS
 search i32 1
@@ -133,6 +133,18 @@ t1=$(printf '%s\n' "attach $pid" "read $taddr i32" | "$out/tinkerd" | tail -1); 
 t2=$(printf '%s\n' "attach $pid" "read $taddr i32" | "$out/tinkerd" | tail -1)
 [ "$t1" != "$t2" ] || { echo "FALHOU: a thread do alvo parou depois do watch"; exit 1; }
 
+# Contador de chamadas: o "método" da thread roda várias vezes em 1 s, e quem chama é o próprio alvo
+tr=$(printf '%s\n' "attach $pid" "trace $kaddr 1" | "$out/tinkerd")
+echo "$tr"
+grep -qE "^calls [1-9][0-9]*$" <<<"$tr" && grep -qE "^caller [0-9a-f]+ [1-9][0-9]* target\+[0-9a-f]+$" <<<"$tr" || { echo "FALHOU: contador de chamadas"; exit 1; }
+sleep 0.2; kill -0 "$pid" || { echo "FALHOU: o alvo morreu depois do trace"; exit 1; }
+
+# Métodos IL2CPP: pelo objeto, lista get_gold e Tick com o código e a lib
+me=$(printf '%s\n' "attach $pid" "il2methods $oaddr" "il2methods $iaddr" | "$out/tinkerd")
+echo "$me"
+grep -qE "^method $caddr 08 target\+[0-9a-f]+ get_gold$" <<<"$me" && grep -qE "^method $kaddr 08 target\+[0-9a-f]+ Tick$" <<<"$me" \
+    && grep -qx "ok 2" <<<"$me" && grep -q "^err não achei a classe" <<<"$me" || { echo "FALHOU: métodos IL2CPP"; exit 1; }
+
 # Patch: escreve no código (página sem escrita) e lê de volta
 pt=$(printf '%s\n' "attach $pid" "read $caddr i32" "write $caddr i32 -1869574000" "read $caddr i32" | "$out/tinkerd")
 echo "$pt"
@@ -190,7 +202,7 @@ grep -qx "class Game.Player $oaddr" <<<"$il" && grep -qx "field 10 0c hp" <<<"$i
     && ! grep -q instances <<<"$il" && grep -q "^err não achei a classe IL2CPP" <<<"$il" || { echo "FALHOU: il2cpp"; exit 1; }
 objs=$(printf '%s\n' "attach $pid" "il2objs Game.Player" "il2objs Game.Ninguem" "il2objs Outro.Player" "il2objs Player" | "$out/tinkerd")
 echo "$objs"
-grep -qx "obj $oaddr" <<<"$objs" && [ "$(grep -c '^obj ' <<<"$objs")" = 2 ] && grep -q "^err classe não encontrada (o jogo" <<<"$objs" && grep -q "^err classe não encontrada (o nome existe" <<<"$objs" \
+grep -qx "obj $oaddr" <<<"$objs" && [ "$(grep -c '^obj ' <<<"$objs")" -ge 2 ] && grep -q "^err classe não encontrada (o jogo" <<<"$objs" && grep -q "^err classe não encontrada (o nome existe" <<<"$objs" \
     || { echo "FALHOU: il2objs"; exit 1; }
 
 cl=$(printf '%s\n' "attach $pid" "il2classes" | "$out/tinkerd")

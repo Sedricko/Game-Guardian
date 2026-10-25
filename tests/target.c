@@ -8,7 +8,10 @@
 // Imitação das estruturas do IL2CPP (Unity) que o daemon lê para dar nome aos campos
 struct ty { void *data; uint32_t bits; };  // bits: attrs (16) | tipo (8) << 16
 struct fi { const char *name; struct ty *type; void *parent; int32_t offset; uint32_t token; };
-struct klass { void *image, *gc; const char *name, *ns; void *pad[4]; struct fi *fields; };
+struct mi;
+struct klass { void *image, *gc; const char *name, *ns; void *pad[4]; struct fi *fields; struct mi **methods; };
+// MethodInfo do Unity 2018+: código, invoker, nome, classe dona, tipo de retorno
+struct mi { void *code, *invoker; const char *name; struct klass *klass; struct ty *ret; };
 static struct ty t_r4 = {0, 0x0cu << 16}, t_i4 = {0, 0x08u << 16}, t_static = {0, (0x08u << 16) | 0x10};
 static struct klass player;
 // nomes separados por \0, como no metadata do IL2CPP (o daemon procura \0Nome\0)
@@ -20,9 +23,11 @@ static void *volatile root = (void *)1;
 
 // "o que escreve aqui": uma thread muda o contador o tempo todo, como o jogo mudando a vida
 static volatile int ticks;
+// "método" chamado o tempo todo, para o contador de chamadas
+__attribute__((noinline)) void tick_once(void) { ticks++; __asm__ volatile("" ::: "memory"); }
 static void *ticker(void *arg) {
     (void)arg;
-    for (;;) { ticks++; usleep(20000); }
+    for (;;) { tick_once(); usleep(20000); }
     return NULL;
 }
 
@@ -54,6 +59,13 @@ int main(void) {
     player_fields[0] = (struct fi){"hp", &t_r4, &player, 0x10, 0};
     player_fields[1] = (struct fi){"gold", &t_i4, &player, 0x14, 0};
     player_fields[2] = (struct fi){"instances", &t_static, &player, 0, 0};
+    static struct mi m_gold, m_tick;
+    static struct mi *player_methods[3];
+    m_gold = (struct mi){(void *)never_called, 0, "get_gold", &player, &t_i4};
+    m_tick = (struct mi){(void *)tick_once, 0, "Tick", &player, &t_i4};
+    player_methods[0] = &m_gold;
+    player_methods[1] = &m_tick;
+    player.methods = player_methods;
     void **obj = malloc(64);
     obj[0] = &player;
     *(float *)((char *)obj + 0x10) = 99.5f;
@@ -75,8 +87,8 @@ int main(void) {
     volatile int *mail = malloc(64);
     mail[0] = 0;
     mail[1] = 12345;
-    printf("%d %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx\n", getpid(), (unsigned long)&i[7], (unsigned long)&f[3], (unsigned long)v, (unsigned long)x,
-           (unsigned long)obj, (unsigned long)y, (unsigned long)z, (unsigned long)q, (unsigned long)w, (unsigned long)&ticks, (unsigned long)never_called, (unsigned long)mail);
+    printf("%d %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx\n", getpid(), (unsigned long)&i[7], (unsigned long)&f[3], (unsigned long)v, (unsigned long)x,
+           (unsigned long)obj, (unsigned long)y, (unsigned long)z, (unsigned long)q, (unsigned long)w, (unsigned long)&ticks, (unsigned long)never_called, (unsigned long)mail, (unsigned long)tick_once);
     fflush(stdout);
     pause();
     return 0;

@@ -226,6 +226,19 @@ class ValuesTest {
     }
 
     @Test
+    fun returnPatchBytes() {
+        val ret = "c0035fd6"
+        assertEquals(ret, returnPatch(0x01, ""))                               // void: só RET
+        assertEquals("20008052$ret", returnPatch(0x02, "true"))                // MOVZ W0, #1
+        assertEquals("e07c8052$ret", returnPatch(0x08, "999"))
+        assertEquals("00008012$ret", returnPatch(0x08, "-1"))                  // MOVN W0, #0
+        assertEquals("0000805200f0a7720000271e$ret", returnPatch(0x0c, "1"))   // 1.0f: MOVZ+MOVK W0, FMOV S0, W0
+        assertEquals("MOVK W0, #16256, LSL #16", decodeArm64(0x72a7f000, 0))
+        assertEquals(null, returnPatch(0x08, "muito"))
+        assertEquals(null, returnPatch(0x0e, "1"))                             // string
+    }
+
+    @Test
     fun ggXorSyntax() {
         assertEquals("150" to 4, ggXor("150X4"))
         assertEquals("100~200" to -8, ggXor("100~200x-8"))
