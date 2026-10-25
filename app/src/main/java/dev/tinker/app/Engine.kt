@@ -534,7 +534,8 @@ class Engine private constructor(private val app: Context) {
         scope.launch { watchFields() }
         scope.launch { watchNeighbors() }
         // aberto por horas: confere de novo a cada 30 min (antes só ao abrir, e a versão nova passava despercebida)
-        scope.launch { while (true) { checkUpdate(); delay(30 * 60_000L) } }
+        // com "Atualizar e testar sozinho" confere a cada 5 min: o ciclo corrigir → publicar → testar fica rápido
+        scope.launch { while (true) { checkUpdate(); delay((if (Session.autoUpdate) 5 else 30) * 60_000L) } }
         // instalou sozinho: roda o autoteste (só leituras, no programa de teste do daemon) e o resultado vai para a planilha
         prefs.getString("testarApos", "").orEmpty().takeIf { it.isNotEmpty() && it == appVersion() }?.let { v ->
             prefs.edit().remove("testarApos").apply()
