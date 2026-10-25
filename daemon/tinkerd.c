@@ -850,8 +850,8 @@ static void read_thread_sps(void) {
         if (!f) continue;
         if (fgets(buf, sizeof buf, f)) {
             // "nr a1 a2 a3 a4 a5 a6 sp pc": o penúltimo é o SP (thread rodando mostra só "running")
-            char *t[9]; int n = 0;
-            for (char *q = strtok(buf, " \n"); q && n < 9; q = strtok(NULL, " \n")) t[n++] = q;
+            char *t[9], *sv = NULL; int n = 0;
+            for (char *q = strtok_r(buf, " \n", &sv); q && n < 9; q = strtok_r(NULL, " \n", &sv)) t[n++] = q;
             if (n == 9) stack_sp[nstack_sp++] = strtoull(t[7], NULL, 16);
         }
         fclose(f);
