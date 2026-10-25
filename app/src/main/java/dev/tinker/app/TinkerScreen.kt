@@ -453,7 +453,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                 }
                 // teclado de texto: o numérico não tem o ~ da faixa (100~200)
                 ValueField(s.value, "Valor", { s.value = it }, keyboard = KeyboardType.Ascii)
-                if (s.value.isEmpty()) Text("100 · faixa 100~200 · vários 100;250 · grupo 100;250::64", style = MaterialTheme.typography.labelSmall,
+                if (s.value.isEmpty()) Text("100 · faixa 100~200 · vários 100;250 · grupo 100;250::64 · cifrado 150X4", style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (s.history.isNotEmpty()) {
                     // últimas buscas: um toque repete valor e tipos

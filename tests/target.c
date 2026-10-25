@@ -44,8 +44,17 @@ int main(void) {
     obj[0] = &player;
     *(float *)((char *)obj + 0x10) = 99.5f;
     *(int *)((char *)obj + 0x14) = 4321;
-    printf("%d %lx %lx %lx %lx %lx\n", getpid(), (unsigned long)&i[7], (unsigned long)&f[3], (unsigned long)v, (unsigned long)x,
-           (unsigned long)obj);
+    // como o "X8" do GameGuardian: valor ^ chave, com a chave 8 bytes depois
+    volatile int *y = malloc(64);
+    y[2] = 0x3B7E11C5;
+    y[0] = 31337 ^ 0x3B7E11C5;
+    // inteiros em dobro, como no Dart (Flutter) e no JavaScript: 40404 fica 80808
+    volatile int *z = malloc(64);
+    z[0] = 40404 * 2;
+    volatile long long *q = malloc(64);
+    q[0] = 9000000000LL * 2;
+    printf("%d %lx %lx %lx %lx %lx %lx %lx %lx\n", getpid(), (unsigned long)&i[7], (unsigned long)&f[3], (unsigned long)v, (unsigned long)x,
+           (unsigned long)obj, (unsigned long)y, (unsigned long)z, (unsigned long)q);
     fflush(stdout);
     pause();
     return 0;

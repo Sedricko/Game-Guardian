@@ -8,7 +8,7 @@ cc -O2 -Wall -Werror -pthread -o "$out/tinkerd" daemon/tinkerd.c -lm
 cc -O2 -o "$out/target" tests/target.c
 "$out/target" > "$out/info" & tpid=$!
 for _ in $(seq 50); do [ -s "$out/info" ] && break; sleep 0.1; done
-read -r pid iaddr faddr paddr xaddr oaddr < "$out/info"
+read -r pid iaddr faddr paddr xaddr oaddr yaddr zaddr qaddr < "$out/info"
 
 got=$("$out/tinkerd" <<CMDS
 search i32 1
@@ -108,6 +108,15 @@ grep -qE "^$xaddr xi32 (Ch|A) 777777$" <<<"$xr" || { echo "FALHOU: busca cifrada
 mapfile -t x < <(grep -E '^(ok|err)' <<<"$xr")
 [ "${x[5]}" = "ok 888888" ] && [ "${x[6]}" = "ok $((0x5A3C9D21))" ] && [ "${x[7]}" = "ok 1" ] && [ "${x[9]}" = "ok 999999" ] \
     && [ "${x[10]}" = "err tipo inválido: xi32" ] && [ "${x[11]}" = "err tipo inválido: xi32" ] || { echo "FALHOU: edição cifrada"; exit 1; }
+
+# Como o "150X8" do GameGuardian (chave 8 bytes ao lado) e inteiros em dobro (Dart/JavaScript)
+gg=$(printf '%s\n' "attach $pid" "search xi32@8 31337" "list 5" "write $yaddr xi32@8 41414" "read $yaddr xi32@8" "read $yaddr i32" \
+    "search i32x2 40404" "list 5" "write $zaddr i32x2 50505" "read $zaddr i32" "search i64x2 9000000000" "list 5" "search xi32@3 1" "search xi32@0 1" "dump $zaddr i32x2 2" | "$out/tinkerd")
+echo "$gg"
+grep -qE "^$yaddr xi32@8 (Ch|A) 31337$" <<<"$gg" && grep -qx "ok 41414" <<<"$gg" && grep -qx "ok $((41414 ^ 0x3B7E11C5))" <<<"$gg" \
+    && grep -qE "^$zaddr i32x2 (Ch|A) 40404$" <<<"$gg" && grep -qx "ok 101010" <<<"$gg" && grep -qE "^$qaddr i64x2 (Ch|A) 9000000000$" <<<"$gg" \
+    && grep -qx "err tipo inválido: xi32@3" <<<"$gg" && grep -qx "err tipo inválido: xi32@0" <<<"$gg" && grep -qx "err tipo inválido: i32x2" <<<"$gg" \
+    || { echo "FALHOU: XOR com distância / dobro"; exit 1; }
 
 # Ponteiros: acha root → +10 → +20 e o caminho volta a dar no mesmo endereço
 ptr=$(printf '%s\n' "attach $pid" "pointers $paddr 256 3" | "$out/tinkerd")

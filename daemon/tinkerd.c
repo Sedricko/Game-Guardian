@@ -43,7 +43,7 @@ volatile char tinker_selftest_aob[] = "TINKER-AUTOTESTE-AOB";
 static int memfd = -1;
 
 // old: o valor na última busca/refino, para "aumentou/diminuiu/mudou"
-typedef struct { uint64_t addr, old; uint8_t type, region; } hit_t;
+typedef struct { uint64_t addr, old; uint16_t type; uint8_t region; } hit_t;
 // shortcut: resultados num vetor em RAM (24 bytes cada); acima de LIST_MAX a busca desconhecida fica no arquivo
 static size_t list_max = 2000000;  // TINKER_LIST_MAX muda (só para os testes passarem pelo caminho do arquivo)
 static hit_t *res;
@@ -70,18 +70,44 @@ static int write_mem(uint64_t addr, const void *buf, size_t len) {
 }
 
 // Cifrado (xi32/xf32): como no Anti-Cheat Toolkit do Unity, a chave fica em addr e valor^chave em addr+4.
-// O tipo guarda a marca XOR por cima do tipo base (Dword ou Float).
+// xi32@N / xf32@N: como o "150X4" do GameGuardian, valor^chave em addr e a chave N bytes ao lado (N de -64 a 64, de 4 em 4).
+// i32x2 / i64x2: inteiro guardado em dobro (Dart/Flutter e JavaScript: 100 fica 200 na memória).
+// O tipo guarda as marcas por cima do tipo base; a distância da chave vai nos bits de cima.
 #define XOR 0x40
-#define B(t) ((t) & ~XOR)
+#define TAG 0x20
+#define B(t) ((t) & 0x1f)
+static int xoff(int t) { return (t >> 8) ? ((t >> 8) - 17) * 4 : 0; }  // 0 = o cifrado de sempre (chave antes)
 
 static int find_type(const char *s) {
     if (!strcmp(s, "xi32")) return T_I32 | XOR;
     if (!strcmp(s, "xf32")) return T_F32 | XOR;
+    if (!strcmp(s, "i32x2")) return T_I32 | TAG;
+    if (!strcmp(s, "i64x2")) return T_I64 | TAG;
+    if ((!strncmp(s, "xi32@", 5) || !strncmp(s, "xf32@", 5)) && s[5]) {
+        char *end;
+        long n = strtol(s + 5, &end, 10);
+        if (*end || !n || n % 4 || n < -64 || n > 64) return -1;
+        return (s[1] == 'i' ? T_I32 : T_F32) | XOR | (int)((n / 4 + 17) << 8);
+    }
     for (int i = 0; i < NTYPES; i++) if (!strcmp(s, TYPES[i].name)) return i;
     return -1;
 }
 
-static const char *tname(int t) { return t & XOR ? (B(t) == T_I32 ? "xi32" : "xf32") : TYPES[t].name; }
+static const char *tname(int t) {
+    static char buf[16];
+    if (t & TAG) return B(t) == T_I32 ? "i32x2" : "i64x2";
+    if (!(t & XOR)) return TYPES[t].name;
+    if (!xoff(t)) return B(t) == T_I32 ? "xi32" : "xf32";
+    snprintf(buf, sizeof buf, "%s@%d", B(t) == T_I32 ? "xi32" : "xf32", xoff(t));
+    return buf;
+}
+
+// Em dobro: só vale número par (o bit de baixo marca "não é número" no Dart e no JavaScript).
+static int untag(int t, unsigned char *p) {
+    if (B(t) == T_I32) { int32_t x; memcpy(&x, p, 4); if (x & 1) return -1; x >>= 1; memcpy(p, &x, 4); }
+    else { int64_t x; memcpy(&x, p, 8); if (x & 1) return -1; x >>= 1; memcpy(p, &x, 8); }
+    return 0;
+}
 
 // chave de verdade é um número sorteado, grande; 0 ou números pequenos dariam pares falsos o tempo todo
 static int xor_key(int32_t k) { return k >= 0x10000 || k <= -0x10000; }
@@ -322,8 +348,15 @@ static int cread(uint64_t a, unsigned char *out, int sz) {
 
 // Lê o valor como o jogo vê (no cifrado: chave ^ valor guardado).
 static int load(uint64_t a, int t, unsigned char *out, int cached) {
+    if (t & TAG) return (cached ? cread(a, out, TYPES[B(t)].size) : read_mem(a, out, TYPES[B(t)].size)) || untag(t, out) ? -1 : 0;
     if (!(t & XOR)) return cached ? cread(a, out, TYPES[t].size) : read_mem(a, out, TYPES[t].size);
     uint32_t w[2];
+    if (xoff(t)) {
+        if (read_mem(a, &w[0], 4) || read_mem(a + xoff(t), &w[1], 4)) return -1;
+        w[0] ^= w[1];
+        memcpy(out, w, 4);
+        return 0;
+    }
     if (cached ? cread(a, (unsigned char *)w, 8) : read_mem(a, w, 8)) return -1;
     w[0] ^= w[1];
     memcpy(out, w, 4);
@@ -332,8 +365,21 @@ static int load(uint64_t a, int t, unsigned char *out, int cached) {
 
 // Escreve como o jogo escreveria: no cifrado, tranca o valor novo com a chave atual.
 static int store(uint64_t a, int t, const unsigned char *val) {
+    if (t & TAG) {
+        int64_t x = 0;
+        if (B(t) == T_I32) { int32_t y; memcpy(&y, val, 4); y = (int32_t)((uint32_t)y << 1); return write_mem(a, &y, 4); }
+        memcpy(&x, val, 8);
+        x = (int64_t)((uint64_t)x << 1);
+        return write_mem(a, &x, 8);
+    }
     if (!(t & XOR)) return write_mem(a, val, TYPES[t].size);
     uint32_t key, v;
+    if (xoff(t)) {
+        if (read_mem(a + xoff(t), &key, 4)) return -1;
+        memcpy(&v, val, 4);
+        v ^= key;
+        return write_mem(a, &v, 4);
+    }
     if (read_mem(a, &key, 4)) return -1;
     memcpy(&v, val, 4);
     v ^= key;
@@ -379,18 +425,25 @@ static void scan_chunk(size_t ci, unsigned char *buf, void *ctx) {
     // senão o Qword no mesmo lugar sobrescreveria os 4 bytes vizinhos ao editar
     for (size_t i = 0; i + sc->step <= c->len; i += sc->step)
         for (int k = 0; k < sc->ntypes; k++) {
-            int t = sc->types[k], sz = TYPES[B(t)].size;
-            if (i % sz || i + (t & XOR ? 8 : sz) > c->len) continue;
+            int t = sc->types[k], sz = TYPES[B(t)].size, o = xoff(t);
+            if (i % sz || i + (t & XOR && !o ? 8 : sz) > c->len) continue;
+            if (o && ((int64_t)i + o < 0 || i + o + 4 > c->len)) continue;
             const unsigned char *p = buf + i;
             uint32_t w[2];
+            unsigned char tg[8];
             if (t & XOR) {
-                memcpy(w, p, 8);
-                if (!xor_key((int32_t)w[0])) continue;
+                if (o) { memcpy(&w[0], p, 4); memcpy(&w[1], p + o, 4); }
+                else { memcpy(w, p, 8); uint32_t kk = w[0]; w[0] = w[1]; w[1] = kk; }  // chave antes: w[1] = chave
+                if (!xor_key((int32_t)w[1])) continue;
                 w[0] ^= w[1];
                 p = (const unsigned char *)w;
+            } else if (t & TAG) {
+                memcpy(tg, p, sz);
+                if (untag(t, tg)) continue;
+                p = tg;
             }
             if (matches_set(B(t), p, &sc->v[B(t)])) {
-                hpush(&sc->out[ci], (hit_t){c->addr + i, bits(p, sz), (uint8_t)t, c->region});
+                hpush(&sc->out[ci], (hit_t){c->addr + i, bits(p, sz), (uint16_t)t, c->region});
                 break;
             }
         }
@@ -430,7 +483,7 @@ static void snap_chunk(size_t ci, unsigned char *buf, void *ctx) {
 
 static void cmd_snapshot(const char *name) {
     int t = find_type(name);
-    if (t < 0 || (t & XOR)) { printf("err tipo inválido: %s\n", name); return; }
+    if (t < 0 || (t & (XOR | TAG))) { printf("err tipo inválido: %s\n", name); return; }
     drop_snap();
     nres = nprev = 0;
     snap.want = ranges;
@@ -613,7 +666,7 @@ static void snap_to_list(void) {
             if (!(m[k >> 3] & (1 << (k & 7)))) continue;
             if (!loaded && pread(snapfd, buf, c->len, (off_t)c->off) != (ssize_t)c->len) break;
             loaded = 1;
-            push((hit_t){c->addr + k * sz, bits(buf + k * sz, sz), (uint8_t)snapt, c->region});
+            push((hit_t){c->addr + k * sz, bits(buf + k * sz, sz), (uint16_t)snapt, c->region});
         }
     }
     free(buf);
@@ -685,7 +738,7 @@ static void cmd_read(const char *addr, const char *name) {
 // Lê COUNT valores seguidos a partir de ADDR: o visualizador de memória ("endereços próximos").
 static void cmd_dump(const char *addr, const char *name, const char *count) {
     int t = find_type(name);
-    if (t < 0 || (t & XOR)) { printf("err tipo inválido: %s\n", name); return; }
+    if (t < 0 || (t & (XOR | TAG))) { printf("err tipo inválido: %s\n", name); return; }
     size_t n = strtoul(count, NULL, 10), sz = TYPES[t].size;
     if (n < 1 || n > 20001) n = 64;  // até 10000 linhas para cada lado na busca perto
     uint64_t a = strtoull(addr, NULL, 16);
@@ -744,7 +797,7 @@ static void *freeze_thread(void *arg) {
             unsigned char cur[8];
             int len = TYPES[B(f->type)].size;
             // igual ao congelado: não escreve (menos mexida na memória do jogo); cifrado sempre reescreve (a chave muda)
-            if (!(f->type & XOR) && !read_mem(f->addr, cur, len) && !memcmp(cur, f->val, len)) f->fails = 0;
+            if (!(f->type & (XOR | TAG)) && !read_mem(f->addr, cur, len) && !memcmp(cur, f->val, len)) f->fails = 0;
             else if (store(f->addr, f->type, f->val)) f->fails++;
             else f->fails = 0;
             if (f->fails < FREEZE_FAILS) frz[k++] = *f;

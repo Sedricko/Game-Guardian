@@ -203,9 +203,25 @@ class ValuesTest {
     fun zeroResultsRetries() {
         val p = retryPlans("i32", "1250")
         assertEquals("i32,f32,i64,f64,xi32,xf32", p[0].first)
-        assertEquals(Triple("f32,f64", "1243.75~1256.25", "como número com casas decimais (1243.75~1256.25)"), p[1])
+        assertEquals(Triple("i32x2,i64x2", "1250", "como inteiro em dobro (jogos em Flutter ou JavaScript)"), p[1])
+        assertEquals(Triple("f32,f64", "1243.75~1256.25", "como número com casas decimais (1243.75~1256.25)"), p[2])
         assertEquals("12~13", retryPlans("i32,f32,i64,f64,xi32,xf32", "12.5").single().second)  // já tinha todos os tipos
         assertEquals(emptyList<Triple<String, String, String>>(), retryPlans("i32,f32,i64,f64,xi32,xf32", "100;200"))
+    }
+
+    @Test
+    fun ggXorSyntax() {
+        assertEquals("150" to 4, ggXor("150X4"))
+        assertEquals("100~200" to -8, ggXor("100~200x-8"))
+        assertEquals(null, ggXor("150X3"))   // a chave fica de 4 em 4 bytes
+        assertEquals(null, ggXor("0x8"))     // hexadecimal, não cifrado
+        assertEquals(null, ggXor("150"))
+        assertEquals("i32", plain("xi32@8"))
+        assertEquals("i64", plain("i64x2"))
+        assertEquals(4, TYPE_SIZES.getValue("xi32@-12"))
+        assertEquals("Dword 🔒 8", TYPE_NAMES["xi32@8"])
+        assertEquals("Qword ×2", TYPE_NAMES["i64x2"])
+        assertEquals(false, "xi32@7x" in TYPE_SIZES)
     }
 
     @Test

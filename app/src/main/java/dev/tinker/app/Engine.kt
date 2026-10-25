@@ -28,11 +28,30 @@ import java.io.IOException
 
 val TYPES = listOf("auto" to "Auto", "i32" to "Dword", "f32" to "Float", "i64" to "Qword", "f64" to "Double", "i16" to "Word", "i8" to "Byte")
 // xi32/xf32: valor cifrado com a chave do lado (Anti-Cheat Toolkit do Unity); o daemon decifra ao ler e cifra ao escrever
-val TYPE_NAMES = TYPES.toMap() + mapOf("xi32" to "Dword 🔒", "xf32" to "Float 🔒")
-val TYPE_SIZES = mapOf("i8" to 1, "i16" to 2, "i32" to 4, "i64" to 8, "f32" to 4, "f64" to 8, "xi32" to 4, "xf32" to 4)
+// i32x2/i64x2: inteiro guardado em dobro (Dart/Flutter e JavaScript: 100 fica 200)
+// xi32@N/xf32@N: cifrado com a chave N bytes ao lado, como o "150X4" do GameGuardian (N de -64 a 64, de 4 em 4)
+private val XOFF = Regex("""x[if]32@-?\d{1,2}""")
+private val BASE_NAMES = TYPES.toMap() + mapOf("xi32" to "Dword 🔒", "xf32" to "Float 🔒", "i32x2" to "Dword ×2", "i64x2" to "Qword ×2")
+private val BASE_SIZES = mapOf("i8" to 1, "i16" to 2, "i32" to 4, "i64" to 8, "f32" to 4, "f64" to 8, "xi32" to 4, "xf32" to 4, "i32x2" to 4, "i64x2" to 8)
+val TYPE_NAMES: Map<String, String> = object : Map<String, String> by BASE_NAMES {
+    override fun get(key: String) = BASE_NAMES[key] ?: if (XOFF.matches(key)) BASE_NAMES[key.substringBefore('@')] + " " + key.substringAfter('@') else null
+    override fun containsKey(key: String) = get(key) != null
+}
+val TYPE_SIZES: Map<String, Int> = object : Map<String, Int> by BASE_SIZES {
+    override fun get(key: String) = BASE_SIZES[key] ?: if (XOFF.matches(key)) 4 else null
+    override fun containsKey(key: String) = get(key) != null
+}
 
 /** Tipo base: Dword 🔒 → Dword (a aba Memória mostra os bytes como estão). */
-fun plain(type: String) = type.removePrefix("x")
+fun plain(type: String) = type.removePrefix("x").substringBefore('@').removeSuffix("x2")
+
+/** "150X4" (GameGuardian): valor 150 cifrado com a chave 4 bytes ao lado → (150, 4); null se não é desse jeito. */
+internal fun ggXor(value: String): Pair<String, Int>? {
+    val m = Regex("""^(.+?)[xX](-?\d{1,2})$""").matchEntire(value.trim()) ?: return null
+    val n = m.groupValues[2].toInt()
+    // "0x8" é número em hexadecimal, não cifrado
+    return if (n != 0 && n % 4 == 0 && n in -64..64 && m.groupValues[1].trimStart('-') != "0") m.groupValues[1] to n else null
+}
 /** Chave do Gemini que já vem no app (repositório privado, só para uso próprio). */
 // a chave que vinha fixa no app (versões até 2.19): sai da lista de quem ainda tem; só o hash fica, para reconhecer
 private const val OLD_FIXED_KEY_SHA256 = "55c7b7cfa2a2f58d5da503db4b2d1188f423212cc586a53e75172c9720fc2e31"
@@ -185,6 +204,8 @@ internal fun retryPlans(types: String, value: String): List<Triple<String, Strin
     val all = "i32,f32,i64,f64,xi32,xf32"
     val plans = mutableListOf<Triple<String, String, String>>()
     if (types != all) plans += Triple(all, value, "procurando em todos os tipos e nos cifrados")
+    // Flutter (Dart) e jogos em JavaScript guardam inteiro em dobro: 100 fica 200
+    if (value.toLongOrNull() != null) plans += Triple("i32x2,i64x2", value, "como inteiro em dobro (jogos em Flutter ou JavaScript)")
     val v = value.toDoubleOrNull()
     if (v != null) {
         val d = maxOf(0.5, kotlin.math.abs(v) * 0.005)
@@ -645,19 +666,23 @@ class Engine private constructor(private val app: Context) {
     suspend fun search(types: Set<String>, value: String): String = call { d ->
         val base = TYPES.map { it.first }.filter { it in types }.ifEmpty { listOf("i32", "f32", "i64", "f64") }
         // cifrados junto, sem o usuário precisar saber: Dword 🔒 quando busca Dword, Float 🔒 quando busca Float
-        val list = (base + if (Session.findEncrypted) base.filter { it == "i32" || it == "f32" }.map { "x$it" } else emptyList()).joinToString(",")
+        // "150X4" (como no GameGuardian): só o cifrado com a chave nessa distância
+        val gg = ggXor(value)
+        val list = if (gg != null) base.filter { it == "i32" || it == "f32" }.ifEmpty { listOf("i32", "f32") }.joinToString(",") { "x$it@${gg.second}" }
+            else (base + if (Session.findEncrypted) base.filter { it == "i32" || it == "f32" }.map { "x$it" } else emptyList()).joinToString(",")
+        val term = gg?.first ?: value
         // "100;250::64": busca em grupo, os valores todos a até 64 bytes um do outro (como no GameGuardian)
-        val group = value.substringAfter("::", "").trim()
-        if ("::" in value) require(Regex("""\d{1,5}""").matches(group) && ';' in value.substringBefore("::")) {
+        val group = term.substringAfter("::", "").trim()
+        if ("::" in term) require(Regex("""\d{1,5}""").matches(group) && ';' in term.substringBefore("::")) {
             "Busca em grupo: valores separados por ; e a distância em bytes depois de ::, ex.: 100;250::64"
         }
         val n = d.frozenGame {
-            if ("::" in value) d.send("group $list ${value.substringBefore("::").arg()} $group") else d.send("search $list ${value.arg()}")
+            if ("::" in term) d.send("group $list ${term.substringBefore("::").arg()} $group") else d.send("search $list ${term.arg()}")
         }.status
         // nada: tenta sozinho do jeito que a pessoa tentaria (todos os tipos, cifrados, número arredondado na tela)
         var found = n
         var how = ""
-        if (n == "0" && "::" !in value) for ((l, v, why) in retryPlans(list, normalizeNumbers(value))) {
+        if (n == "0" && "::" !in value && gg == null) for ((l, v, why) in retryPlans(list, normalizeNumbers(value))) {
             found = d.frozenGame { d.send("search $l $v") }.status
             if (found != "0") { how = why; break }
         }
@@ -2568,7 +2593,7 @@ class Engine private constructor(private val app: Context) {
 
     /** Aprende a assinatura enquanto o jogo roda: bytes em volta que mudaram viram ??. */
     private fun Daemon.learnSig(item: SavedItem) {
-        val vlen = if (item.type.startsWith("x")) 8 else TYPE_SIZES.getValue(item.type)  // cifrado: chave + valor
+        val vlen = if (item.type.startsWith("x") && '@' !in item.type) 8 else TYPE_SIZES.getValue(item.type)  // cifrado: chave + valor
         val a = item.addr.toLong(16)
         val start = (a - SIG_SIDE).coerceAtLeast(0) / 8 * 8
         val words = ((a + vlen + SIG_SIDE - start + 7) / 8).toInt()

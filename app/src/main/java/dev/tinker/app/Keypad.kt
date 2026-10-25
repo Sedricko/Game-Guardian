@@ -22,13 +22,13 @@ private val KEYS = listOf(
     listOf("7", "8", "9", "⌫"),
     listOf("4", "5", "6", "~"),
     listOf("1", "2", "3", ";"),
-    listOf("-", "0", ".", "::", "OK"),
+    listOf("-", "0", ".", "::", "X", "OK"),  // X: cifrado como no GameGuardian (150X4)
 )
 
 // deitado: as mesmas teclas em 2 linhas largas (4 linhas de 48 dp tomavam a altura toda da tela)
 private val KEYS_WIDE = listOf(
     listOf("7", "8", "9", "4", "5", "6", "⌫", "~"),
-    listOf("1", "2", "3", "0", "-", ".", ";", "::", "OK"),
+    listOf("1", "2", "3", "0", "-", ".", ";", "::", "X", "OK"),
 )
 
 // endereço (hexadecimal): letras a–f e o + para "7a0010+8"; o campo de endereço usava o teclado do telefone
