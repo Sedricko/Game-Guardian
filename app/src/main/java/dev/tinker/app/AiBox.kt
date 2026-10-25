@@ -118,6 +118,12 @@ fun AiBox(
             // a IA lê os números na tela do jogo e já busca: nada para digitar
             AssistChip(onClick = { ask("Veja a tela do jogo (ver_tela), leia os valores de recursos que aparecem, busque e ache os campos certos.", fresh = !going) },
                 enabled = !loading && s.process != null, label = { Text("📷 Ler a tela e achar", maxLines = 1) })
+            // missão num toque: o nome do recurso vai no campo de pergunta; ela faz o ciclo inteiro sem perguntar
+            AssistChip(onClick = {
+                ask("Missão: ache e salve \"${question.trim()}\" sozinha, do começo ao fim, sem me perguntar nada: ver_tela, buscar_valor, fazer o valor mudar " +
+                    "(tocar no jogo se puder, senão esperar_mudanca), refinar até sobrar poucos, testar_valor, propor_edicao com congelar só se eu pedir, " +
+                    "criar_assinatura se não tiver classe IL2CPP, propor_receita e anotar. Só pare quando estiver salvo ou for impossível (diga por quê).", fresh = !going)
+            }, enabled = !loading && s.process != null && question.isNotBlank(), label = { Text(if (question.isBlank()) "🎯 Missão (escreva o recurso)" else "🎯 Achar e salvar: ${question.trim().take(20)}", maxLines = 1) })
             presets.forEach { p -> AssistChip(onClick = { ask(p, fresh = true) }, enabled = !loading, label = { Text(p, maxLines = 1) }) }
         }
         // a conversa rola dentro da própria caixa: em telas sem rolagem (Memória → Ficha) o texto ficava cortado

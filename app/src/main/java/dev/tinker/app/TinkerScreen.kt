@@ -723,6 +723,16 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
             }
             info?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 4.dp)) }
             if (s.restoreInfo.isNotEmpty()) Text(s.restoreInfo, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 4.dp))
+            // jogo atualizado e algum salvo não voltou: a IA conserta sozinha, uma vez
+            LaunchedEffect(s.gameUpdated, s.restoreInfo) {
+                if (!s.gameUpdated || s.process == null || !Assistant.ready()) return@LaunchedEffect
+                delay(8000)  // a restauração automática vai primeiro
+                if (s.saved.any(engine::stale)) {
+                    s.gameUpdated = false
+                    s.aiAsk = "salvos" to "O jogo atualizou e alguns salvos (⚠) não voltaram. Use as notas e a classe de cada um para achar de novo e proponha as edições."
+                }
+            }
+            KnownFields(engine)
             if (s.process != null && s.saved.any(engine::stale)) {
                 TextButton(onClick = { run { engine.retryNow() } }, enabled = !s.busy) { Text("↻ Procurar os salvos ⚠ agora") }
                 if (Assistant.ready()) TextButton(onClick = {
@@ -1418,7 +1428,8 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                     Text("Chaves (quando a cota de uma acaba, o Tinker passa para a próxima):", style = MaterialTheme.typography.bodySmall)
                     s.geminiKeys.forEachIndexed { i, k ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("${i + 1}. ${k.take(4)}…${k.takeLast(4)}" + if (i == s.geminiKeyIndex) "  · em uso" else "", Modifier.weight(1f),
+                            Text("${i + 1}. ${k.take(4)}…${k.takeLast(4)}" + (if (i == s.geminiKeyIndex) "  · em uso" else "") +
+                                "  · ${s.geminiUse[i] ?: 0} pedidos hoje" + (s.geminiOut[i]?.let { "  · cota acabou às $it" } ?: ""), Modifier.weight(1f),
                                 fontFamily = FontFamily.Monospace, color = if (i == s.geminiKeyIndex) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
                             if (i != s.geminiKeyIndex) TextButton(onClick = { s.geminiKeyIndex = i; engine.saveSettings() }) { Text("Usar") }
                             TextButton(onClick = { engine.removeGeminiKey(i) }) { Text("✕") }
@@ -1686,8 +1697,42 @@ private fun GeminiModels(engine: Engine) {
                 label = { Text(m + (s.geminiSpeed[m]?.let { " · ${it / 1000} s" } ?: ""), maxLines = 1) })
         }
     }
+    Toggle("Mapa de campos enquanto joga", "A cada minuto o Tinker olha as classes que você já salvou ou abriu e anota sozinho os campos que mudam " +
+        "jogando (velocidade, distância, vida). Sem IA e sem gastar cota.", s.watchFields) { s.watchFields = it; engine.saveSettings() }
     Toggle("Escolher sozinho o modelo mais rápido", "A cada conversa nova usa, entre os 3 melhores (sem Lite), o que respondeu mais rápido. " +
         "O tempo de cada um aparece ao lado do nome.", s.geminiAutoModel) { s.geminiAutoModel = it; engine.saveSettings() }
+}
+
+/**
+ * Atalhos sem IA: cada salvo com classe IL2CPP mostra os objetos vivos dessa classe e o valor do campo em cada um;
+ * tocar passa o salvo (e o congelamento) para aquele objeto. Ex.: corrida nova, RunData novo.
+ */
+@Composable
+private fun KnownFields(engine: Engine) {
+    val s = Session
+    val known = s.saved.filter { it.il2.isNotEmpty() && !it.temp }
+    if (s.process == null || known.isEmpty()) return
+    val scope = rememberCoroutineScope()
+    var open by remember { mutableStateOf<String?>(null) }
+    var values by remember { mutableStateOf(listOf<Pair<String, String>>()) }
+    var msg by remember { mutableStateOf<String?>(null) }
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        known.forEach { item ->
+            AssistChip(onClick = {
+                if (open == item.id) { open = null; return@AssistChip }
+                open = item.id; values = emptyList(); msg = "Lendo os objetos…"
+                scope.launch { values = runCatching { engine.liveValues(item) }.getOrDefault(emptyList()); msg = if (values.isEmpty()) "Nenhum objeto vivo dessa classe agora." else null }
+            }, label = { Text("🎯 ${item.name.ifEmpty { item.il2 }}", maxLines = 1) })
+        }
+    }
+    val item = known.firstOrNull { it.id == open } ?: return
+    msg?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
+    // os com valor diferente de zero primeiro: o objeto da corrida atual costuma ser o que tem número
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        values.sortedBy { it.second == "0" }.take(16).forEach { (addr, v) ->
+            FilterChip(selected = addr == item.addr, onClick = { msg = engine.retarget(item, addr); open = null }, label = { Text(v, maxLines = 1) })
+        }
+    }
 }
 
 /** Linha de ajuste: título, explicação curta e o interruptor. */

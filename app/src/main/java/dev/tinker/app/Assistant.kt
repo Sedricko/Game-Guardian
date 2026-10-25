@@ -54,6 +54,7 @@ Regras para acertar (siga sempre):
   refine de novo (peça para gastar/ganhar e diga o valor) ou teste cada um. Nunca proponha com vários candidatos sem confirmar.
 - esperar_mudanca serve para quando a pessoa não sabe dizer o número; se ela sabe, peça o número e use refinar.
 - Já sabe a classe mas não o campo (velocidade, tempo, vida)? Use o_que_muda no objeto enquanto a pessoa joga: mostra só os campos que mudaram.
+- Tarefa com várias buscas: antes da resposta final, chame anotar com um resumo curto do que testou e descartou (ex.: "Ouro do menu: não está em PlayerState, é do servidor").
 - Salvou um valor que não tem classe IL2CPP (jogo sem Unity, ou cópia solta)? Chame criar_assinatura nele: é o AOB que faz o salvo voltar ao reabrir.
 - Diga com quantos candidatos e qual evidência você chegou à resposta.
 - Não busque números pequenos e comuns (0 a 100, como 10) sozinhos: dão dezenas de milhares de resultados. Prefira o nome da
@@ -437,6 +438,12 @@ jogo abrir, use propor_receita com os salvos."""
             }
             val code = c.responseCode
             val text = (if (code < 400) c.inputStream else c.errorStream)?.bufferedReader()?.use { it.readText() }.orEmpty()
+            // contador de cota por chave: quantos pedidos hoje e quando acabou
+            if (body != null) Session.geminiKeys.indexOf(key).takeIf { it >= 0 }?.let { k ->
+                if (Session.geminiUseDay != quotaDay()) { Session.geminiUse.clear(); Session.geminiOut.clear(); Session.geminiUseDay = quotaDay() }
+                Session.geminiUse[k] = (Session.geminiUse[k] ?: 0) + 1
+                if (code == 429 && geminiWait(code, text) == null) Session.geminiOut[k] = java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date())
+            }
             return code to text
         } finally {
             c.disconnect()
@@ -480,3 +487,6 @@ internal fun pickGemini(ranked: List<String>, speed: Map<String, Long>, skip: Se
     ranked.filter { "-lite" !in it && it !in skip }.take(3).minByOrNull { speed[it] ?: 30_000L }
 
 private const val CLAUDE_BAD_KEY = "Chave da API inválida. Confira em Ajustes → Assistente (IA)."
+
+/** Dia da cota do Gemini: vira à meia-noite do horário do Pacífico. */
+internal fun quotaDay(): String = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).apply { timeZone = java.util.TimeZone.getTimeZone("America/Los_Angeles") }.format(java.util.Date())

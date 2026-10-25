@@ -236,6 +236,11 @@ object Session {
     var aiCanTest by mutableStateOf(false)  // a IA pode escrever um valor de teste (e voltar o original) para saber se é o verdadeiro
     var aiAuto by mutableStateOf(false)  // modo autônomo 1: a IA aplica, congela, testa e cria receitas sem esperar o toque
     var aiControl by mutableStateOf(false)  // modo autônomo 2: a IA toca e arrasta na tela do jogo para fazer o valor mudar
+    var watchFields by mutableStateOf(true)  // enquanto joga, anota sozinho os campos das classes conhecidas que mudam
+    var gameUpdated by mutableStateOf(false)  // o jogo mudou de versão desde a última vez: a IA conserta os salvos que não voltarem
+    val geminiUse = mutableStateMapOf<Int, Int>()  // pedidos de hoje por chave (índice); o dia vira à meia-noite do Pacífico, como a cota
+    val geminiOut = mutableStateMapOf<Int, String>()  // chave → hora em que a cota acabou hoje
+    var geminiUseDay = quotaDay()
     var aiHidePanel by mutableStateOf(false)  // a IA vai tocar no jogo: o painel se minimiza para os toques chegarem nele
     var geminiKeys by mutableStateOf(listOf<String>())  // em ordem: a cota de uma acabou, o Tinker passa para a próxima
     var geminiKeyIndex by mutableIntStateOf(0)
@@ -280,7 +285,8 @@ class Engine private constructor(private val app: Context) {
             .putBoolean("autoOverlay", Session.autoOverlay).putBoolean("ownKeypad", Session.ownKeypad).putFloat("alpha", Session.alpha).putInt("panelSize2", Session.panelSize)
             .putString("aiKey", Session.aiKey).putString("aiProvider", Session.aiProvider).putBoolean("aiCanTest", Session.aiCanTest).putBoolean("aiAuto", Session.aiAuto).putBoolean("aiControl", Session.aiControl)
             .putString("geminiKeys", Session.geminiKeys.joinToString("\n")).putInt("geminiKeyIndex", Session.geminiKeyIndex)
-            .putString("geminiModel", Session.geminiModel).putBoolean("geminiAuto", Session.geminiAutoModel)
+            .putString("geminiModel", Session.geminiModel).putBoolean("geminiAuto", Session.geminiAutoModel).putBoolean("watchFields", Session.watchFields)
+            .putString("geminiUse", quotaDay() + ";" + Session.geminiUse.entries.joinToString(",") { "${it.key}=${it.value}" } + ";" + Session.geminiOut.entries.joinToString(",") { "${it.key}=${it.value}" })
             .putString("geminiSpeed", Session.geminiSpeed.entries.joinToString("\n") { "${it.key}=${it.value}" }).apply()
     }
 
@@ -309,6 +315,11 @@ class Engine private constructor(private val app: Context) {
         }
         Session.geminiModel = prefs.getString("geminiModel", Session.geminiModel).orEmpty().ifBlank { "gemini-2.5-flash" }
         Session.geminiAutoModel = prefs.getBoolean("geminiAuto", true)
+        Session.watchFields = prefs.getBoolean("watchFields", true)
+        prefs.getString("geminiUse", "").orEmpty().split(';').takeIf { it.size == 3 && it[0] == quotaDay() }?.let { (_, use, out) ->
+            use.split(',').forEach { e -> e.split('=').takeIf { it.size == 2 }?.let { (k, n) -> k.toIntOrNull()?.let { Session.geminiUse[it] = n.toIntOrNull() ?: 0 } } }
+            out.split(',').forEach { e -> e.split('=', limit = 2).takeIf { it.size == 2 }?.let { (k, t) -> k.toIntOrNull()?.let { Session.geminiOut[it] = t } } }
+        }
         prefs.getString("geminiSpeed", "").orEmpty().lines().forEach { l -> l.split('=').takeIf { it.size == 2 }?.let { (m, ms) -> ms.toLongOrNull()?.let { Session.geminiSpeed[m] = it } } }
         Session.alpha = prefs.getFloat("alpha", Session.alpha)
         Session.panelSize = prefs.getInt("panelSize2", Session.panelSize).coerceIn(0, PANEL_SIZES.lastIndex)  // chave nova: quem já usava volta uma vez para tela cheia, o novo padrão
@@ -320,6 +331,7 @@ class Engine private constructor(private val app: Context) {
             if (r.startsWith("Memória importada")) Diag.add("Memória da IA restaurada do backup: $r")
         }
         scope.launch { freezeLoop() }
+        scope.launch { watchFields() }
         scope.launch { checkUpdate() }
         // o jogo reabriu (PID novo): escolhe de novo sozinho e os salvos voltam pela restauração
         scope.launch {
@@ -764,6 +776,48 @@ class Engine private constructor(private val app: Context) {
 
     private var classRefresh: kotlinx.coroutines.Job? = null
 
+    /** Atalho sem IA: cada objeto vivo da classe do salvo e o valor do campo nele (ex.: o jogo cria um RunData novo a cada corrida). */
+    suspend fun liveValues(item: SavedItem): List<Pair<String, String>> = call { d ->
+        val cls = item.il2.substringBeforeLast('+')
+        val off = item.il2.substringAfterLast('+').toLongOrNull(16) ?: return@call emptyList()
+        runCatching { d.send("il2objs $cls", quiet = true).lines }.getOrDefault(emptyList()).mapNotNull { it.removePrefix("obj ").toLongOrNull(16) }
+            .take(100).map { (it + off).toString(16) }
+            .map { a -> a to runCatching { d.send("read $a ${item.type}", quiet = true).status }.getOrDefault("?") }
+            .filter { it.second != "?" }
+    }
+
+    /** Passa o salvo para outro objeto da mesma classe; o congelamento continua nele. */
+    fun retarget(item: SavedItem, addr: String): String {
+        val moved = moveTo(item, addr, "Atalho")
+        return if (moved.addr == addr) "${label(item)} agora no objeto 0x$addr" else "Outro salvo já está nesse endereço."
+    }
+
+    /**
+     * Mapa de campos: com o jogo aberto, a cada minuto lê duas vezes (3 s) um objeto das classes conhecidas (dos salvos e das
+     * abertas) e anota o campo que mudou em 3 olhadas. Sem IA, sem cota; a próxima conversa já sabe o que mexe jogando.
+     */
+    private suspend fun watchFields() {
+        val seen = HashMap<String, Int>()
+        while (true) {
+            delay(60_000)
+            if (!Session.watchFields || Session.process == null || Session.busy || Session.engine?.il2cpp != true) continue
+            val head = Session.engine?.header ?: 0x10L
+            val classes = (Session.saved.filter { it.il2.isNotEmpty() && !stale(it) }.map { it.il2.substringBeforeLast('+') } + Session.classes).distinct().take(4)
+            for (cls in classes) runCatching {
+                if (!CLASS_NAME.matches(cls)) return@runCatching
+                val obj = call { d -> d.send("il2objs $cls", quiet = true).lines }.firstNotNullOfOrNull { it.removePrefix("obj ").toLongOrNull(16) } ?: return@runCatching
+                val (c, center, before) = objectRows((obj + head).toString(16))
+                if (c == null) return@runCatching
+                delay(3000)
+                val old = before.associateBy { it.addr }
+                objectRows(center).third.filter { r -> r.type in WATCH_TYPES && old[r.addr]?.let { it.value != r.value } == true }.forEach { r ->
+                    val key = "${c.name.substringAfterLast('.')}.${r.label.substringBefore(" · ").removePrefix("<").substringBefore(">k__BackingField")}"
+                    if (seen.merge(key, 1, Int::plus) == 3) notesFile?.let { appendNote(it, "Muda enquanto joga: $key (+${r.off.toString(16)}, ${r.type})", 8000) }
+                }
+            }
+        }
+    }
+
     private val classesFile get() = savedPkg?.let { File(app.filesDir, "classes-$it.txt") }
     private fun gameVersion() = savedPkg?.let { p -> runCatching { app.packageManager.getPackageInfo(p, 0).longVersionCode }.getOrNull() }
 
@@ -1098,6 +1152,8 @@ class Engine private constructor(private val app: Context) {
             val all = listClasses()
             val hit = all.mapNotNull { c -> classMatch(c, words)?.let { c to it } }
                 .sortedBy { (c, f) -> (if (LIBS.any { c.name.startsWith(it) }) 2 else 0) + (if (f.isEmpty()) 1 else 0) }
+            // palavra que não existe neste jogo vira nota: a IA não procura de novo em outra conversa (gastou 8 rodadas assim)
+            if (hit.isEmpty() && words.isNotEmpty()) notesFile?.let { appendNote(it, "Não existe classe nem campo com: ${words.joinToString(" ")}", 8000) }
             "${hit.size} de ${all.size} classes" + hit.take(80).joinToString("") { (c, f) ->
                 "\n${c.name} (${c.fields} campos)" + if (f.isEmpty()) "" else ": " + f.take(8).joinToString()
             }
@@ -2349,6 +2405,13 @@ class Engine private constructor(private val app: Context) {
             loadSaved()
         }
         loadRecipes()
+        // jogo atualizado: classes e offsets podem ter mudado; os salvos que não voltarem vão para a IA consertar
+        gameVersion()?.let { v ->
+            val last = prefs.getLong("ver-$pkg", -1L)
+            Session.gameUpdated = last != -1L && last != v && Session.saved.isNotEmpty()
+            if (Session.gameUpdated) Diag.add("Jogo $pkg atualizou (versão $last → $v): os salvos que não voltarem vão para a IA")
+            prefs.edit().putLong("ver-$pkg", v).apply()
+        }
         Diag.add("Salvos do jogo $pkg: ${Session.saved.size}${if (adopt) " (lista anterior adotada)" else ""} · receitas: ${Session.recipes.size}")
     }
 
@@ -2641,6 +2704,7 @@ internal fun readable(value: String, cipherType: String): String? {
 }
 
 const val MEMORY_FILE = "tinker-memoria-ia.json"
+private val WATCH_TYPES = setOf("i8", "i16", "i32", "i64", "f32", "f64", "xi32", "xf32")
 private val PKG = Regex("""[A-Za-z0-9._]{1,120}""")  // nome de pacote que vira nome de arquivo
 
 /** Linhas de memória: as de agora mais as novas que ainda não estavam (a data do começo não conta). */
