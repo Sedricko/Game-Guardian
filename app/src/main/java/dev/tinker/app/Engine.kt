@@ -1231,6 +1231,11 @@ class Engine private constructor(private val app: Context) {
             .build())
     }
 
+    /** Pelo toque no painel: roda no escopo do app, e não no da tela (fechar o painel no meio cancelava o autoteste e a resposta não voltava). */
+    fun answerRequestLater(r: SheetRequest, apply: Boolean) {
+        scope.launch { val res = answerRequest(r, apply); if (apply) withContext(Dispatchers.Main) { Session.status = res } }
+    }
+
     /** A pessoa tocou em Aplicar (ou Ignorar) num pedido da planilha: faz e devolve a resposta para a aba Pedidos. */
     suspend fun answerRequest(r: SheetRequest, apply: Boolean, remembered: Boolean = false): String {
         withContext(Dispatchers.Main) { Session.sheetRequests.remove(r) }
@@ -1249,7 +1254,11 @@ class Engine private constructor(private val app: Context) {
         }.getOrElse { "não deu: ${it.message}" }
         Diag.add("Pedido da planilha (${REQUEST_TYPES[r.tipo]}${if (remembered) ", sempre permitido" else ""}): $result")
         withContext(Dispatchers.IO) {
-            panelUrl("feito=${enc(r.id)}&situacao=${if (!apply) "ignorado" else if (remembered) "automático" else "aplicado"}&resposta=${enc(result.take(300))}")?.let { panelGet(it) }
+            panelUrl("feito=${enc(r.id)}&situacao=${if (!apply) "ignorado" else if (remembered) "automático" else "aplicado"}&resposta=${enc(result.take(300))}")?.let { u ->
+                val back = panelGet(u)
+                // a resposta precisa aparecer na aba Pedidos; se não foi, o motivo fica no registro
+                if (back.getOrNull()?.contains("\"ok\":true") != true) Diag.add("Pedido da planilha: a resposta não voltou para a aba Pedidos (${back.exceptionOrNull()?.message ?: back.getOrNull()?.take(120)})")
+            }
         }
         return result
     }

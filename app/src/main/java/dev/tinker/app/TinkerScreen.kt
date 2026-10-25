@@ -149,7 +149,6 @@ fun TinkerPanel(
             } else Header(overlay, onPick = { picking = true }, onMinimize = onMinimize, onOpenOverlay = onOpenOverlay, onExit = onExit, run = run, onQuickBar = onQuickBar)
             error?.let { Banner(it) { error = null } }
             // pedido da aba Pedidos da planilha: aparece aqui e só acontece com o toque em Aplicar
-            val reqScope = rememberCoroutineScope()  // fora do cartão: ele some ao tocar e o pedido precisa terminar
             s.sheetRequests.firstOrNull()?.let { r ->
                 Card(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
@@ -169,17 +168,16 @@ fun TinkerPanel(
                         }
                         if (s.sheetRequests.size > 5) Text("… e mais ${s.sheetRequests.size - 5}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(shape = MaterialTheme.shapes.medium, onClick = { reqScope.launch { s.status = engine.answerRequest(r, true) } }) { Text("Permitir só desta vez") }
+                            Button(shape = MaterialTheme.shapes.medium, onClick = { engine.answerRequestLater(r, true) }) { Text("Permitir só desta vez") }
                             if (s.sheetRequests.size > 1) Button(shape = MaterialTheme.shapes.medium, onClick = {
-                                val all = s.sheetRequests.toList()
-                                reqScope.launch { all.forEach { s.status = engine.answerRequest(it, true) }; s.status = "Pedidos da planilha: ${all.size} permitidos" }
+                                s.sheetRequests.toList().forEach { engine.answerRequestLater(it, true) }
                             }) { Text("Permitir todos (${s.sheetRequests.size})") }
                             if (r.tipo in TRUSTABLE_REQUESTS) OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = {
                                 s.alwaysRequests = s.alwaysRequests + r.tipo
                                 engine.saveSettings()
-                                reqScope.launch { s.status = engine.answerRequest(r, true) }
+                                engine.answerRequestLater(r, true)
                             }) { Text("Sempre permitir") }
-                            TextButton(onClick = { reqScope.launch { engine.answerRequest(r, false) } }) { Text("Ignorar") }
+                            TextButton(onClick = { engine.answerRequestLater(r, false) }) { Text("Ignorar") }
                         }
                     }
                 }
