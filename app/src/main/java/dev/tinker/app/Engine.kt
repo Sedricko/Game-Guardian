@@ -1861,7 +1861,7 @@ class Engine private constructor(private val app: Context) {
                 throw e
             } catch (e: Exception) {
                 say("Parou: ${e.message}")
-                Diag.add("Achar sozinho parou: ${e.message}")
+                Diag.add("Achar sozinho parou: ${e.javaClass.simpleName}: ${e.message} em ${e.stackTrace.take(3).joinToString(" < ")}")
             }
         }
     }
