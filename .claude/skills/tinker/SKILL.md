@@ -24,7 +24,7 @@ Responder sempre em **português do Brasil**, curto e direto. O usuário testa n
 | Planilha | `docs/painel-chaves/Code.gs`, `Painel.html`, `LEIAME.md` | App da Web: chaves, Pedidos, Aparelhos, Buscas, Relatórios, Problemas, Salvos, Receitas, Patches |
 
 Versões: `app/build.gradle.kts` (`versionCode`/`versionName`), `VERSAO` no Code.gs, `SCRIPT_VERSION` no Engine.kt (versão **mínima** do script que o app exige).
-Estado em 2026-10: app **2.36.2** (code 109; Groq troca de chave pelos cabeçalhos x-ratelimit, Gemini aprende o limite diário por modelo em `geminiLimit`), script **v15**, app exige v14.
+Estado em 2026-10: app **2.37.0** (code 110; Lua: tipos `li`/`lf` e comando `luatable` no daemon, LuaPanel na Ficha; Groq troca de chave pelos cabeçalhos x-ratelimit, Gemini aprende o limite diário por modelo em `geminiLimit`), script **v15**, app exige v14.
 
 ## Armadilhas já resolvidas (não repetir)
 - `Engine.call { d -> }` **não é suspend dentro do bloco**: nada de `delay`/`withContext` lá dentro; divida em várias chamadas.
@@ -62,6 +62,11 @@ Estado em 2026-10: app **2.36.2** (code 109; Groq troca de chave pelos cabeçalh
 ## Descobertas no DYSMANTLE (IL2CPP arm64)
 - Materiais são objetos de slot do inventário: Dword quantidade em +0, cópia em +4, +8 = 4 (máx. por slot?), Floats em +0x28/+0x2C, depois cor RGB, 0.75, 1.0f.
 - Sobras de Madeira: ponteiro `split_config.arm64_v8a.apk@4000+e49148 28 0 8` (confirmado ao reabrir). Mudar +0 para 20 deu 20 itens.
+
+## Lua (xLua/ToLua, 5.3 e 5.4)
+- TValue: valor 8 bytes + tipo em +8 (5.4: 0x03 int, 0x13 float; 5.3 ao contrário). Nó 5.4 = 24 bytes (tipo da chave em +9, chave em +16); 5.3 = 32 (chave em +16, tipo em +24). Table: tt 5 em +8, lsizenode +11, lista +16, nós +24. TString: texto em +24.
+- Abrindo por um campo, o daemon anda pelos nós vizinhos (pode pegar nó de tabela colada; chaves que não são texto/número são puladas). LuaJIT não é suportado.
+- Last Garden: Survival (com.bravo.plants) usa HybridCLR + xLua 5.4, é ONLINE: só leitura/estudo, sem edição.
 
 ## Próximos passos
 - Testar no aparelho: métodos da classe (Ver código / Contar chamadas / Sempre devolver), dump .cs, foto do jogo, backup do save, "O que escreve aqui?", e se algum menu corta em pé/deitado.
