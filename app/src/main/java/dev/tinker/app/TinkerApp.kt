@@ -44,9 +44,15 @@ object Diag {
         Thread.setDefaultUncaughtExceptionHandler { t, e ->
             // grava direto no arquivo: o processo vai morrer antes de qualquer post na UI
             runCatching { file.appendText("${clock.format(Date())} FALHA DO TINKER (thread ${t.name}):\n${e.stackTraceToString()}\n") }
+            runCatching { crashFlag.writeText("1") }  // na próxima abertura o relatório vai para a planilha
             previous?.uncaughtException(t, e)
         }
     }
+
+    private val crashFlag get() = File(file.parentFile, "falha-pendente")
+
+    /** O Tinker fechou com erro na última vez? (responde uma vez só) */
+    fun takeCrashFlag(): Boolean = runCatching { crashFlag.exists().also { if (it) crashFlag.delete() } }.getOrDefault(false)
 
     /** Vigia a thread da tela: se ela não responder em 700 ms, registra por quanto tempo ficou travada. */
     private fun watchUi() = Thread({

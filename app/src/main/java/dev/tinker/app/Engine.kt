@@ -347,7 +347,11 @@ class Engine private constructor(private val app: Context) {
             prefs.edit().putBoolean("defaultSourceGiven", true).putString("keySource", Session.keySource).apply()
         }
         Session.sheetKeys = prefs.getString("sheetKeys", "").orEmpty().split('\n').filter { it.isNotBlank() }.toSet()
-        if (Session.keySource.isNotBlank()) scope.launch { Diag.add(syncKeys()); Diag.add(cloudPull()) }
+        if (Session.keySource.isNotBlank()) scope.launch {
+            Diag.add(syncKeys()); Diag.add(cloudPull())
+            // o Tinker fechou com erro da última vez: o relatório (com a falha no registro) vai para a planilha
+            if (Diag.takeCrashFlag()) sendReport("o Tinker fechou com erro na última vez")
+        }
         Session.watchFields = prefs.getBoolean("watchFields", true)
         prefs.getString("geminiUse", "").orEmpty().split(';').takeIf { it.size == 3 && it[0] == quotaDay() }?.let { (_, use, out) ->
             use.split(',').forEach { e -> e.split('=').takeIf { it.size == 2 }?.let { (k, n) -> k.toIntOrNull()?.let { Session.geminiUse[it] = n.toIntOrNull() ?: 0 } } }
@@ -926,6 +930,8 @@ class Engine private constructor(private val app: Context) {
         }.also {
             saveSettings()  // o Gemini pode ter trocado de modelo sozinho
             Diag.add("Assistente respondeu: ${it.take(600).replace('\n', ' ')}")
+            // a IA parou por erro (cota, servidor, chave, conexão): relatório na planilha, no máximo um a cada 10 min
+            if (Assistant.lastLimitFail || AI_ERRORS.any { e -> it.startsWith(e) }) sendReport("a IA deu erro: ${it.take(100).replace('\n', ' ')}", auto = true)
         }
     }
 
@@ -1110,7 +1116,7 @@ class Engine private constructor(private val app: Context) {
                 val problems = text.substringAfter("=== Resumo de problemas", "").substringBefore("=== Registro do Tinker").take(5000)
                 val body = JSONObject().put("jogo", p?.let { "${it.label} (${it.pkg})" } ?: "nenhum")
                     .put("versao", runCatching { app.packageManager.getPackageInfo(app.packageName, 0).versionName }.getOrNull().orEmpty())
-                    .put("motivo", reason).put("problemas", problems).put("texto", text.take(45_000)).toString()
+                    .put("motivo", reason).put("problemas", problems).put("texto", text.take(400_000)).toString()  // a planilha guarda até 405 mil letras
                 (java.net.URL(url).openConnection() as java.net.HttpURLConnection).run {
                     connectTimeout = 15_000; readTimeout = 60_000; requestMethod = "POST"; doOutput = true
                     setRequestProperty("Content-Type", "application/json; charset=utf-8")
@@ -2890,6 +2896,7 @@ internal fun readable(value: String, cipherType: String): String? {
 }
 
 const val MEMORY_FILE = "tinker-memoria-ia.json"
+private val AI_ERRORS = listOf("Gemini respondeu", "Gemini recusou", "Groq respondeu", "O Groq recusou", "Sem conexão", "O limite grátis", "A cota grátis", "Sem resposta")
 private val GEMINI_KEY = Regex("""[A-Za-z0-9._-]{20,200}""")
 private val WATCH_TYPES = setOf("i8", "i16", "i32", "i64", "f32", "f64", "xi32", "xf32")
 private val PKG = Regex("""[A-Za-z0-9._]{1,120}""")  // nome de pacote que vira nome de arquivo

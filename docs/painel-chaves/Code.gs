@@ -201,22 +201,36 @@ function guardarMemoria_(m) {
   legivel_(m);
 }
 
-// aba para ler: lições, notas, receitas e salvos de cada jogo (a fonte de verdade é a MemoriaBruta)
+// abas para ler (a fonte de verdade é a MemoriaBruta): Aprendizado (lições e notas), Salvos (com ponteiro e AOB) e Receitas
 function legivel_(m) {
-  const ss = SpreadsheetApp.getActive();
-  const s = ss.getSheetByName(LEGIVEL) || ss.insertSheet(LEGIVEL);
-  s.clear();
-  const rows = [['Jogo', 'Tipo', 'Texto']];
-  linhas2_(m.licoes).forEach(l => rows.push(['(todos os jogos)', 'lição', l]));
-  Object.keys(m.jogos || {}).forEach(pkg => {
-    const g = m.jogos[pkg] || {};
-    const nome = g.nome || pkg;
-    linhas2_(g.notas).forEach(l => rows.push([nome, 'nota', l]));
-    (g.receitas || []).forEach(r => rows.push([nome, 'receita', (r.name || '') + ' (' + ((r.steps || []).length) + ' passos)']));
-    (g.salvos || []).forEach(v => rows.push([nome, 'salvo', (v.name || v.il2 || v.addr || '') + ' · ' + (v.type || '')]));
+  const jogos = m.jogos || {};
+  const nome = pkg => (jogos[pkg] && jogos[pkg].nome) || pkg;
+  const aprendizado = [['Jogo', 'Tipo', 'Texto']];
+  linhas2_(m.licoes).forEach(l => aprendizado.push(['(todos os jogos)', 'lição', l]));
+  const salvos = [['Jogo', 'Nome', 'Tipo', 'Classe IL2CPP', 'Ponteiro', 'Assinatura AOB', 'Último valor', 'Reservas']];
+  const receitas = [['Jogo', 'Receita', 'Ao abrir', 'Passos']];
+  Object.keys(jogos).forEach(pkg => {
+    const g = jogos[pkg] || {};
+    linhas2_(g.notas).forEach(l => aprendizado.push([nome(pkg), 'nota', l]));
+    (g.salvos || []).forEach(v => salvos.push([nome(pkg), v.name || '', v.type || '', v.il2 || '', v.pointer || '',
+      v.sig ? (v.sig.match(/.{1,2}/g) || []).join(' ') + ' (valor em +' + (v.sigOff || 0) + ')' : '', String(v.value || ''), (v.chains || []).length]));
+    (g.receitas || []).forEach(r => receitas.push([nome(pkg), r.name || '', r.auto ? 'sim' : 'não',
+      (r.steps || []).map(st => (st.label || st.cls || st.ptr || 'AOB') + ' = ' + st.value + (st.freeze ? ' ❄' : '') +
+        (st.cls ? ' [' + st.cls + '+' + Number(st.off || 0).toString(16) + ']' : st.ptr ? ' [' + st.ptr + ']' : st.sig ? ' [AOB]' : '')).join('; ')]));
   });
-  s.getRange(1, 1, rows.length, 3).setNumberFormat('@').setValues(rows);
-  s.getRange(1, 1, 1, 3).setFontWeight('bold');
+  tabela_(LEGIVEL, aprendizado);
+  tabela_('Salvos', salvos);
+  tabela_('Receitas', receitas);
+}
+
+function tabela_(nome, rows) {
+  const ss = SpreadsheetApp.getActive();
+  const s = ss.getSheetByName(nome) || ss.insertSheet(nome);
+  s.clear();
+  const cols = rows[0].length;
+  if (s.getMaxColumns() < cols) s.insertColumnsAfter(s.getMaxColumns(), cols - s.getMaxColumns());
+  s.getRange(1, 1, rows.length, cols).setNumberFormat('@').setValues(rows);
+  s.getRange(1, 1, 1, cols).setFontWeight('bold');
   s.setFrozenRows(1);
 }
 
@@ -252,19 +266,21 @@ function juntarMemoria_(velha, nova) {
 // ---- relatórios (o Tinker manda sozinho quando algo dá errado, e quando você compartilha) ----
 
 const RELS = 'Relatórios';
-const RCOLS = ['Quando', 'Jogo', 'Versão', 'Motivo', 'Problemas', 'Relatório'];
+const PEDACOS = 9;  // relatório inteiro em até 9 células de 45 mil letras (uma célula guarda até 50 mil)
+const RCOLS = ['Quando', 'Jogo', 'Versão', 'Motivo', 'Problemas', 'Relatório'].concat([2, 3, 4, 5, 6, 7, 8, 9].map(i => 'Relatório (parte ' + i + ')'));
 
 function guardarRelatorio_(r) {
   const ss = SpreadsheetApp.getActive();
-  let s = ss.getSheetByName(RELS);
-  if (!s) {
-    s = ss.insertSheet(RELS);
-    s.getRange(1, 1, 1, RCOLS.length).setValues([RCOLS]).setFontWeight('bold');
-    s.setFrozenRows(1);
-  }
-  const row = [new Date(), String(r.jogo || ''), String(r.versao || ''), String(r.motivo || ''), String(r.problemas || '').slice(0, 5000), String(r.texto || '').slice(0, 45000)];
+  const s = ss.getSheetByName(RELS) || ss.insertSheet(RELS);
+  if (s.getMaxColumns() < RCOLS.length) s.insertColumnsAfter(s.getMaxColumns(), RCOLS.length - s.getMaxColumns());
+  const head = s.getRange(1, 1, 1, RCOLS.length);
+  if (head.getValues()[0].join('|') !== RCOLS.join('|')) { head.setValues([RCOLS]).setFontWeight('bold'); s.setFrozenRows(1); }
+  const texto = String(r.texto || '');
+  const partes = [];
+  for (let i = 0; i < PEDACOS; i++) partes.push(texto.slice(i * 45000, (i + 1) * 45000));
+  const row = [new Date(), String(r.jogo || ''), String(r.versao || ''), String(r.motivo || ''), String(r.problemas || '').slice(0, 5000)].concat(partes);
   s.insertRowAfter(1);  // o mais novo em cima
-  s.getRange(2, 2, 1, 5).setNumberFormat('@');
+  s.getRange(2, 2, 1, RCOLS.length - 1).setNumberFormat('@');
   s.getRange(2, 1, 1, RCOLS.length).setValues([row]);
   if (s.getLastRow() > 201) s.deleteRows(202, s.getLastRow() - 201);  // guarda os 200 últimos
 }
@@ -275,7 +291,7 @@ function relatorios_(n) {
   const tz = Session.getScriptTimeZone();
   return s.getRange(2, 1, Math.min(n, s.getLastRow() - 1), RCOLS.length).getValues().map(r => ({
     quando: r[0] instanceof Date ? Utilities.formatDate(r[0], tz, 'dd/MM/yyyy HH:mm') : String(r[0]),
-    jogo: r[1], versao: r[2], motivo: r[3], problemas: r[4], texto: r[5],
+    jogo: r[1], versao: r[2], motivo: r[3], problemas: r[4], texto: r.slice(5).join(''),
   }));
 }
 
