@@ -481,6 +481,15 @@ function ligarAnalise() {
 function doPost(e) {
   const p = (e && e.parameter) || {};
   if (p.token !== token_()) return json_({ erro: 'token' });
+  // busca mandada pelo app (a pessoa tocou em "Mandar para a planilha"): só guarda para análise
+  if (p.busca) {
+    let r;
+    try { r = JSON.parse(e.postData.contents); } catch (err) { return json_({ erro: 'json' }); }
+    const lock = LockService.getScriptLock();
+    lock.waitLock(20000);
+    try { guardarBusca_(r); marcarAparelho_(r.aparelho, r.versao); } finally { lock.releaseLock(); }
+    return json_({ ok: true });
+  }
   if (p.relatorio) {
     let r;
     try { r = JSON.parse(e.postData.contents); } catch (err) { return json_({ erro: 'json' }); }
@@ -589,4 +598,25 @@ function consertarRelatorios() {
   let n = 0;
   f.forEach((row, i) => row.forEach((x, j) => { if (x) { s.getRange(i + 2, j + 1).setValue("'" + x); n++; } }));
   SpreadsheetApp.getUi().alert(n + ' célula(s) consertada(s).');
+}
+
+// ---- buscas mandadas pelo app (aba Buscas): etapas, resultados e o que há em volta, para análise ----
+
+const BCOLS = ['Quando', 'Jogo', 'Motor', 'Versão', 'Etapas', 'Total', 'Resultados', 'Em volta', 'Análise'];
+
+function guardarBusca_(r) {
+  const ss = SpreadsheetApp.getActive();
+  let s = ss.getSheetByName('Buscas');
+  if (!s) {
+    s = ss.insertSheet('Buscas');
+    s.getRange(1, 1, 1, BCOLS.length).setValues([BCOLS]).setFontWeight('bold');
+    s.setFrozenRows(1);
+  }
+  const row = [new Date(), String(r.jogo || ''), String(r.motor || ''), String(r.versao || ''), String(r.etapas || '').slice(0, 5000),
+    String(r.total || ''), String(r.resultados || '').slice(0, 20000), String(r.emVolta || '').slice(0, 45000), ''];
+  s.insertRowAfter(1);
+  s.getRange(2, 2, 1, BCOLS.length - 1).setNumberFormat('@');
+  s.getRange(2, 1, 1, BCOLS.length).setValues([row.map(texto_)]);
+  linhaFina_(s, 2, 1, BCOLS.length);
+  if (s.getLastRow() > 201) s.deleteRows(202, s.getLastRow() - 201);
 }

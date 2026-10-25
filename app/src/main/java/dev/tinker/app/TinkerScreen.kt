@@ -522,6 +522,8 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                     FilledTonalButton(shape = MaterialTheme.shapes.medium, onClick = { engine.addSaved(targets, frozen = true); s.status = "${targets.size} congelados (veja Salvos)." }) { Text("Congelar $label") }
                     OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { editingAll = !editingAll }, enabled = !s.busy) { Text("Editar $label") }
                     OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { nearOpen = !nearOpen }, enabled = !s.busy) { Text("Buscar perto (${targets.size})") }
+                    // para análise na planilha (aba Buscas): quem toca é a pessoa, e só vai o que está na tela
+                    if (s.keySource.isNotBlank()) OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { run { engine.sendSearch() } }, enabled = !s.busy) { Text("Mandar para a planilha") }
                 }
             }
         }

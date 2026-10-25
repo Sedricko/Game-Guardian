@@ -307,6 +307,7 @@ class Engine private constructor(private val app: Context) {
     private val lastGameFile get() = File(app.filesDir, "last-game.txt")
     private var inFile = false  // busca desconhecida ainda no arquivo do daemon
     private var steps = 0  // etapas da busca atual, para o registro
+    private val stepLog = mutableListOf<String>()  // as mesmas etapas, para mandar a busca à planilha
 
     private val prefs = app.getSharedPreferences("tinker", Context.MODE_PRIVATE)
 
@@ -704,6 +705,8 @@ class Engine private constructor(private val app: Context) {
 
     private fun step(new: Boolean, what: String, n: String) {
         steps = if (new) 1 else steps + 1
+        if (new) stepLog.clear()
+        stepLog += "$what → $n"
         if (steps > 1) Diag.add("Etapa $steps da busca: $what → $n")
     }
 
@@ -1209,6 +1212,29 @@ class Engine private constructor(private val app: Context) {
 
     private fun enc(v: String) = java.net.URLEncoder.encode(v, "UTF-8")
     private fun appVersion() = runCatching { app.packageManager.getPackageInfo(app.packageName, 0).versionName }.getOrNull().orEmpty()
+
+    /**
+     * A pessoa tocou em "Mandar para a planilha" nos resultados: etapas da busca, os primeiros resultados e o que há em volta
+     * dos 5 primeiros vão para a aba Buscas, para análise (só leitura do que já está na tela; nada é escrito no jogo).
+     */
+    suspend fun sendSearch(): String {
+        val url = panelUrl("busca=1") ?: return "Sem painel de chaves: ligue o link da planilha em Ajustes."
+        val p = Session.process ?: return "Escolha o jogo primeiro."
+        val hits = Session.results.take(30)
+        if (hits.isEmpty()) return "Sem resultados para mandar."
+        val around = JSONObject()
+        hits.take(5).forEach { h -> runCatching { objectText(h.addr) }.getOrNull()?.let { around.put(h.addr, it.take(1500)) } }
+        val body = JSONObject().put("jogo", "${p.label} (${p.pkg})").put("motor", Session.engine?.toString() ?: "?")
+            .put("versao", appVersion()).put("aparelho", android.os.Build.MODEL)
+            .put("etapas", stepLog.joinToString(" | ")).put("total", Session.count ?: hits.size)
+            .put("resultados", hits.joinToString("\n") { "${it.addr} ${it.type} ${it.region} = ${it.value}" + if (it.base.isNotEmpty()) " · ${it.base}" else "" })
+            .put("emVolta", around.keys().asSequence().joinToString("\n\n") { "[$it]\n" + around.getString(it) })
+        return withContext(Dispatchers.IO) {
+            runCatching { panelPost(url, body.toString()) }.fold(
+                { code -> if (code < 400) "Busca mandada para a planilha (aba Buscas): ${hits.size} resultados, ${around.length()} com o que há em volta.".also(Diag::add) else "A planilha recusou a busca: código $code" },
+                { "A busca não foi para a planilha: ${it.message}" })
+        }
+    }
 
     /** Lê os pedidos pendentes da aba Pedidos (e a planilha marca este aparelho na aba Aparelhos). Nada roda aqui. */
     suspend fun fetchRequests(): String = withContext(Dispatchers.IO) {
