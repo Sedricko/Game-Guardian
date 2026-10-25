@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 // Imitação das estruturas do IL2CPP (Unity) que o daemon lê para dar nome aos campos
@@ -87,8 +88,30 @@ int main(void) {
     volatile int *mail = malloc(64);
     mail[0] = 0;
     mail[1] = 12345;
-    printf("%d %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx\n", getpid(), (unsigned long)&i[7], (unsigned long)&f[3], (unsigned long)v, (unsigned long)x,
-           (unsigned long)obj, (unsigned long)y, (unsigned long)z, (unsigned long)q, (unsigned long)w, (unsigned long)&ticks, (unsigned long)never_called, (unsigned long)mail, (unsigned long)tick_once);
+    // tabela do Lua 5.4 (xLua): { gold = 31415 (inteiro), leaf = 2.5 (decimal), name = "hero", bag = {} }
+    // TString: tt 4 em +8, tamanho em +11, texto em +24; nó: valor, tipo em +8, tipo da chave em +9, chave em +16
+    static const char *keys[] = {"gold", "leaf", "name", "bag"};
+    unsigned char *str[4], *heroname = calloc(1, 64), *lt = calloc(1, 64), *sub = calloc(1, 64);
+    for (int k = 0; k < 4; k++) {
+        str[k] = calloc(1, 64);
+        str[k][8] = 0x04;
+        str[k][11] = (unsigned char)strlen(keys[k]);
+        memcpy(str[k] + 24, keys[k], strlen(keys[k]));
+    }
+    heroname[8] = 0x04; heroname[11] = 4; memcpy(heroname + 24, "hero", 4);
+    unsigned char *nodes = calloc(8, 24);
+    long long gold = 31415; double leaf = 2.5;
+    memcpy(nodes + 0, &gold, 8); nodes[8] = 0x03;
+    memcpy(nodes + 24, &leaf, 8); nodes[24 + 8] = 0x13;
+    memcpy(nodes + 48, &heroname, 8); nodes[48 + 8] = 0x44;
+    sub[8] = 0x05;  // tabela vazia
+    memcpy(nodes + 72, &sub, 8); nodes[72 + 8] = 0x45;
+    for (int k = 0; k < 4; k++) { nodes[k * 24 + 9] = 0x44; memcpy(nodes + k * 24 + 16, &str[k], 8); }
+    lt[8] = 0x05; lt[11] = 3;  // 2^3 = 8 nós
+    memcpy(lt + 24, &nodes, 8);
+    printf("%d %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx\n", getpid(), (unsigned long)&i[7], (unsigned long)&f[3], (unsigned long)v, (unsigned long)x,
+           (unsigned long)obj, (unsigned long)y, (unsigned long)z, (unsigned long)q, (unsigned long)w, (unsigned long)&ticks, (unsigned long)never_called, (unsigned long)mail, (unsigned long)tick_once,
+           (unsigned long)lt, (unsigned long)nodes);
     fflush(stdout);
     pause();
     return 0;

@@ -31,8 +31,8 @@ val TYPES = listOf("auto" to "Auto", "i32" to "Dword", "f32" to "Float", "i64" t
 // i32x2/i64x2: inteiro guardado em dobro (Dart/Flutter e JavaScript: 100 fica 200)
 // xi32@N/xf32@N: cifrado com a chave N bytes ao lado, como o "150X4" do GameGuardian (N de -64 a 64, de 4 em 4)
 private val XOFF = Regex("""x[if]32@-?\d{1,2}""")
-private val BASE_NAMES = TYPES.toMap() + mapOf("xi32" to "Dword 🔒", "xf32" to "Float 🔒", "xi64" to "Qword 🔒", "xf64" to "Double 🔒", "i32x2" to "Dword ×2", "i64x2" to "Qword ×2")
-private val BASE_SIZES = mapOf("i8" to 1, "i16" to 2, "i32" to 4, "i64" to 8, "f32" to 4, "f64" to 8, "xi32" to 4, "xf32" to 4, "xi64" to 8, "xf64" to 8, "i32x2" to 4, "i64x2" to 8)
+private val BASE_NAMES = TYPES.toMap() + mapOf("xi32" to "Dword 🔒", "xf32" to "Float 🔒", "xi64" to "Qword 🔒", "xf64" to "Double 🔒", "i32x2" to "Dword ×2", "i64x2" to "Qword ×2", "li" to "Lua inteiro", "lf" to "Lua decimal")
+private val BASE_SIZES = mapOf("i8" to 1, "i16" to 2, "i32" to 4, "i64" to 8, "f32" to 4, "f64" to 8, "xi32" to 4, "xf32" to 4, "xi64" to 8, "xf64" to 8, "i32x2" to 4, "i64x2" to 8, "li" to 8, "lf" to 8)
 val TYPE_NAMES: Map<String, String> = object : Map<String, String> by BASE_NAMES {
     override fun get(key: String) = BASE_NAMES[key] ?: if (XOFF.matches(key)) BASE_NAMES[key.substringBefore('@')] + " " + key.substringAfter('@') else null
     override fun containsKey(key: String) = get(key) != null
@@ -43,7 +43,11 @@ val TYPE_SIZES: Map<String, Int> = object : Map<String, Int> by BASE_SIZES {
 }
 
 /** Tipo base: Dword 🔒 → Dword (a aba Memória mostra os bytes como estão). */
-fun plain(type: String) = type.removePrefix("x").substringBefore('@').removeSuffix("x2")
+fun plain(type: String) = when (type) {
+    "li" -> "i64"  // número do Lua: 8 bytes, o tipo do Lua fica no byte seguinte
+    "lf" -> "f64"
+    else -> type.removePrefix("x").substringBefore('@').removeSuffix("x2")
+}
 
 /** "150X4" (GameGuardian): valor 150 cifrado com a chave 4 bytes ao lado → (150, 4); null se não é desse jeito. */
 internal fun ggXor(value: String): Pair<String, Int>? {
@@ -81,6 +85,8 @@ data class CodePatch(
 
 // Um método IL2CPP: endereço do código, tipo de retorno (código do Unity: 01 void, 02 bool, 08 int, 0a long, 0c float,
 // 0d double…), onde fica na lib e o nome.
+// Campo de uma tabela do Lua: endereço do valor, tipo (int, num, str, table, bool, func, udata), nome e valor
+data class LuaField(val addr: String, val kind: String, val key: String, val value: String)
 data class Il2Method(val code: String, val ret: Int, val where: String, val name: String)
 
 /** Tipos de retorno que dá para trocar por um valor fixo (MOV + RET). */
@@ -214,10 +220,10 @@ data class Step(
 )
 
 /** Motor do jogo, reconhecido pelas bibliotecas do APK; bits do processo (32 ou 64). */
-data class GameEngine(val name: String, val bits: Int) {
+data class GameEngine(val name: String, val bits: Int, val lua: Boolean = false) {
     val il2cpp get() = name == "Unity IL2CPP"
     val header get() = if (bits == 32) 0x8L else 0x10L  // onde começam os campos de um objeto IL2CPP
-    override fun toString() = "$name · $bits bits"
+    override fun toString() = "$name · $bits bits" + if (lua) " · Lua" else ""
 }
 /** Pedido escrito na aba Pedidos da planilha: só vira ação depois que a pessoa toca em Aplicar no aparelho. */
 data class SheetRequest(val id: String, val tipo: String, val jogo: String, val texto: String)
@@ -656,7 +662,8 @@ class Engine private constructor(private val app: Context) {
             libs.none { it.endsWith(".so") } -> "Java/Kotlin"
             else -> "motor próprio"
         }
-        return GameEngine(name, bits)
+        // Lua 5.3/5.4 (xLua, ToLua, SLua): a Ficha Lua lê as tabelas; LuaJIT guarda diferente e fica de fora
+        return GameEngine(name, bits, has("libxlua", "libtolua", "libslua", "libulua", "liblua5", "liblua.so"))
     }
 
     suspend fun followGame(startDaemon: Boolean): String? {
@@ -741,12 +748,13 @@ class Engine private constructor(private val app: Context) {
 
     /** types vazio = Auto. */
     suspend fun search(types: Set<String>, value: String): String = call { d ->
-        val base = TYPES.map { it.first }.filter { it in types }.ifEmpty { listOf("i32", "f32", "i64", "f64") }
+        val lua = if ("li" in types) listOf("li", "lf") else emptyList()  // número do Lua (inteiro e decimal juntos)
+        val base = TYPES.map { it.first }.filter { it in types }.ifEmpty { if (lua.isEmpty()) listOf("i32", "f32", "i64", "f64") else emptyList() }
         // cifrados junto, sem o usuário precisar saber: Dword 🔒 quando busca Dword, Float 🔒 quando busca Float
         // "150X4" (como no GameGuardian): só o cifrado com a chave nessa distância
         val gg = ggXor(value)
         val list = if (gg != null) base.filter { it == "i32" || it == "f32" }.ifEmpty { listOf("i32", "f32") }.joinToString(",") { "x$it@${gg.second}" }
-            else (base + if (Session.findEncrypted) base.filter { it != "i8" && it != "i16" }.map { "x$it" } else emptyList()).joinToString(",")
+            else (base + (if (Session.findEncrypted) base.filter { it != "i8" && it != "i16" }.map { "x$it" } else emptyList()) + lua).joinToString(",")
         val term = gg?.first ?: value
         // "100;250::64": busca em grupo, os valores todos a até 64 bytes um do outro (como no GameGuardian)
         val group = term.substringAfter("::", "").trim()
@@ -1864,6 +1872,15 @@ class Engine private constructor(private val app: Context) {
             val addr = parseAddress(a.optString("endereco")) ?: return@AiTool "Endereço inválido."
             codeAt(addr, 8, 24).joinToString("\n") { r -> "${if (r.addr == addr) "→" else " "} 0x${r.addr} ${r.where} ${r.word?.let { "%08x".format(it) } ?: "????????"} ${r.text}" }
         },
+        AiTool("ler_tabela_lua", "Jogos com Lua (xLua/ToLua): lê a tabela do Lua em volta de um endereço (um resultado da busca) ou a própria " +
+            "tabela (o valor de um campo do tipo table), com o nome de cada campo. Mostra o endereço de cada valor, para salvar ou mudar.",
+            mapOf("endereco" to "endereço em hexadecimal"), listOf("endereco")) { a ->
+            val addr = parseAddress(a.optString("endereco")) ?: return@AiTool "Endereço inválido."
+            val (ver, fields) = luaTable(addr)
+            if (fields.isEmpty()) "Nenhum campo do Lua nesse endereço." else "Lua $ver, ${fields.size} campos:\n" +
+                fields.take(150).joinToString("\n") { "0x${it.addr} ${it.kind} ${it.key} = ${it.value}" } +
+                "\n(int: mude com o tipo li; num: tipo lf; table: abra com este mesmo comando no endereço do valor)"
+        },
         AiTool("propor_patch", "Propõe trocar instruções do jogo (ex.: o SUB que tira 1 do recurso vira NOP 1f2003d5). O patch fica guardado " +
             "DESLIGADO em Salvos → Patches de código; só a pessoa liga. Explique em uma frase o que muda no jogo.",
             mapOf("endereco" to "endereço da primeira instrução", "bytes" to "bytes novos em hex, 8 dígitos por instrução, como na memória (NOP = 1f2003d5)",
@@ -2912,6 +2929,17 @@ class Engine private constructor(private val app: Context) {
         return createPatch(m.code, hex, "$cls.${m.name} → $label", "${RET_NAMES[m.ret]} ${m.name}() passa a ${if (m.ret == 0x01) "voltar sem fazer nada" else "devolver $value"}", apply = false)
     }
 
+    /**
+     * Tabela do Lua (xLua, ToLua) em volta de um número, ou a própria tabela: os campos com nome, como estão no jogo.
+     * Cabeçalho: "table ADDR lua54" (abriu pela tabela) ou "nodes ADDR lua54" (abriu por um campo).
+     */
+    suspend fun luaTable(addr: String): Pair<String, List<LuaField>> = call { d ->
+        val r = d.send("luatable $addr", quiet = true)
+        val head = r.lines.firstOrNull { it.startsWith("table ") || it.startsWith("nodes ") }.orEmpty()
+        head.substringAfterLast(' ') to r.lines.filter { it.startsWith("lua ") }.map { it.split(' ', limit = 5) }.filter { it.size == 5 }
+            .map { LuaField(it[1], it[2], it[3], it[4]) }
+    }
+
     /** Contador de chamadas: quantas vezes o código em addr roda em secs segundos, e de onde é chamado. */
     suspend fun traceCalls(addr: String, secs: Int = 10): Pair<Int, List<Triple<String, Int, String>>> = call { d ->
         val r = d.send("trace $addr ${secs.coerceIn(3, 30)}")
@@ -3255,12 +3283,12 @@ class Engine private constructor(private val app: Context) {
     }
 
     /** Salva vários de uma vez; com frozen=true já entram congelados no valor atual. */
-    fun addSaved(hits: List<Hit>, frozen: Boolean = false) {
+    fun addSaved(hits: List<Hit>, frozen: Boolean = false, name: String = "") {
         val added = mutableListOf<SavedItem>()
         hits.forEach { hit ->
             val i = Session.saved.indexOfFirst { it.addr == hit.addr && it.type == hit.type }
             when {
-                i < 0 -> recordValue(SavedItem(hit.addr, hit.type, hit.region, hit.value, frozen, pid = currentPid), hit.value, System.currentTimeMillis())
+                i < 0 -> recordValue(SavedItem(hit.addr, hit.type, hit.region, hit.value, frozen, pid = currentPid, name = name), hit.value, System.currentTimeMillis())
                     .also { Session.saved.add(it); added += it }
                 // o salvo antigo está de novo nesse endereço: passa a valer nesta vez do jogo
                 stale(Session.saved[i]) -> Session.saved[i] = Session.saved[i].copy(pid = currentPid, value = hit.value, frozen = frozen || Session.saved[i].frozen, trusted = true)
@@ -3795,7 +3823,7 @@ internal fun readable(value: String, cipherType: String): String? {
 const val MEMORY_FILE = "tinker-memoria-ia.json"
 private val AI_ERRORS = listOf("Gemini respondeu", "Gemini recusou", "Groq respondeu", "O Groq recusou", "Sem conexão", "O limite grátis", "A cota grátis", "Sem resposta")
 private val GEMINI_KEY = Regex("""[A-Za-z0-9._-]{20,200}""")
-private val WATCH_TYPES = setOf("i8", "i16", "i32", "i64", "f32", "f64", "xi32", "xf32")
+private val WATCH_TYPES = setOf("i8", "i16", "i32", "i64", "f32", "f64", "xi32", "xf32", "li", "lf")
 private val PKG = Regex("""[A-Za-z0-9._]{1,120}""")  // nome de pacote que vira nome de arquivo
 
 /** Linhas de memória: as de agora mais as novas que ainda não estavam (a data do começo não conta). */

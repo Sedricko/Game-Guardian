@@ -450,6 +450,10 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                             }
                         }, label = { Text(label) })
                     }
+                    // jogo com Lua (xLua, ToLua): número do Lua, que tem o tipo do Lua logo depois (bem menos resultados falsos)
+                    if (s.engine?.lua == true) FilterChip(selected = "li" in s.types, onClick = {
+                        s.types = if ("li" in s.types) s.types - "li" else s.types + "li"
+                    }, label = { Text("🌙 Lua") })
                 }
                 // teclado de texto: o numérico não tem o ~ da faixa (100~200)
                 ValueField(s.value, "Valor", { s.value = it }, keyboard = KeyboardType.Ascii)
@@ -1582,6 +1586,7 @@ private fun FichaBody(engine: Engine, center: String, run: (suspend () -> String
         }
     }
     if (c != null) MethodsPanel(engine, c, run)
+    if (looked && c == null && (s.engine?.lua == true || s.view?.second in setOf("li", "lf"))) LuaPanel(engine, center, run)
     if (c != null && c.fields.size > 6) {
         OutlinedTextField(filter, { filter = it }, label = { Text("Filtrar campo (ex.: gem)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
     }
@@ -1703,6 +1708,54 @@ private fun MethodsPanel(engine: Engine, c: Il2Class, run: (suspend () -> String
             }
         }
         if (list.isEmpty()) Text("A classe não tem métodos com código próprio.", style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+/**
+ * Tabela do Lua (xLua, ToLua) em volta do endereço: cada campo com o nome que o jogo usa, ao vivo. Número dá para mudar e
+ * salvar (tipo Lua, que confere a marca do Lua ao reabrir); campo que é outra tabela abre com um toque.
+ */
+@Composable
+private fun LuaPanel(engine: Engine, center: String, run: (suspend () -> String) -> Unit) {
+    val s = Session
+    var ver by remember(center) { mutableStateOf("") }
+    var fields by remember(center) { mutableStateOf<List<LuaField>?>(null) }
+    var error by remember(center) { mutableStateOf<String?>(null) }
+    var open by remember(center) { mutableStateOf<String?>(null) }
+    LaunchedEffect(center) {
+        while (true) {
+            runCatching { engine.luaTable(center) }.onSuccess { (v, f) -> ver = v; fields = f; error = null }.onFailure { error = it.message; fields = emptyList() }
+            delay(1500)
+        }
+    }
+    val list = fields ?: return LinearProgressIndicator(Modifier.fillMaxWidth())
+    Text(if (list.isEmpty()) "🌙 Lua: ${error ?: "nenhum campo de tabela do Lua aqui"}" else "🌙 Tabela do Lua ($ver) · ${list.size} campos",
+        style = MaterialTheme.typography.labelLarge, color = if (list.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary)
+    if (list.isEmpty()) return
+    Column(Modifier.fillMaxWidth().heightIn(max = 320.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        list.forEach { f ->
+            val number = f.kind == "int" || f.kind == "num"
+            val type = if (f.kind == "int") "li" else "lf"
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                    .background(if (f.addr == center) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLow)
+                    .sizeIn(minHeight = 48.dp).clickable { if (f.kind == "table") s.view = f.value to "li" else open = if (open == f.addr) null else f.addr }
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(f.key, Modifier.weight(1f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(if (f.kind == "table") "tabela ›" else if (number || f.kind == "str" || f.kind == "bool") f.value else f.kind,
+                        fontFamily = FontFamily.Monospace, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (f.kind == "table") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                }
+                if (open == f.addr && number) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        FilledTonalButton(shape = MaterialTheme.shapes.medium, onClick = { engine.addSaved(listOf(Hit(f.addr, type, "?", f.value)), name = f.key); s.status = "Salvo: ${f.key}"; open = null }) { Text("Salvar") }
+                        OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { engine.addSaved(listOf(Hit(f.addr, type, "?", f.value)), frozen = true, name = f.key); s.status = "Congelado: ${f.key}"; open = null }) { Text("Congelar") }
+                    }
+                    InlineEditor(f.value, "Novo valor (${TYPE_NAMES[type]})", onSave = { v -> open = null; run { engine.write(f.addr, type, v) } }, onCancel = { open = null })
+                }
+            }
+        }
     }
 }
 
@@ -2089,6 +2142,9 @@ private val HELP = listOf(
         "Aparece a instrução que muda o valor; \"Ver código\" abre Memória → Código, com as instruções traduzidas (SUB, STR…). Tocar numa " +
         "instrução deixa trocar por NOP (não faz nada) ou por outros bytes: vira um patch em Salvos → Patches de código, com liga/desliga. " +
         "Os bytes de antes ficam guardados; o patch volta sozinho quando o jogo reabre. Se o jogo fechar logo depois, o patch fica suspeito e desligado.",
+    "Lua (xLua)" to "Jogos com Lua (o motor mostra \"· Lua\"): na Busca, o tipo 🌙 Lua acha só números do Lua (o Lua guarda o tipo ao lado " +
+        "do número), com bem menos resultados. Abra um resultado na Ficha: aparece a tabela do Lua com o nome de cada campo (gold, level…), " +
+        "ao vivo. Número dá para mudar, salvar e congelar; campo \"tabela ›\" abre a outra tabela. Edite só em jogo offline.",
     "Métodos (IL2CPP)" to "Na Ficha de um objeto do jogo, \"⚙ Métodos da classe\" lista as funções com o tipo que devolvem. Toque numa: " +
         "\"Contar chamadas\" mostra quantas vezes ela roda em 10 s e de onde (em Salvos); \"Sempre devolver\" (número, true/false ou \"Não fazer nada\") " +
         "vira um patch desligado em Salvos → Patches de código. Em Memória → Ficha, onde se abre pela classe, \"Exportar dump\" gera um .cs com todas as classes, campos e métodos.",

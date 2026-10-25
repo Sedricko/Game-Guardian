@@ -8,7 +8,7 @@ cc -O2 -Wall -Werror -pthread -o "$out/tinkerd" daemon/tinkerd.c -lm
 cc -O2 -pthread -o "$out/target" tests/target.c
 "$out/target" > "$out/info" & tpid=$!
 for _ in $(seq 50); do [ -s "$out/info" ] && break; sleep 0.1; done
-read -r pid iaddr faddr paddr xaddr oaddr yaddr zaddr qaddr waddr taddr caddr maddr kaddr < "$out/info"
+read -r pid iaddr faddr paddr xaddr oaddr yaddr zaddr qaddr waddr taddr caddr maddr kaddr ltaddr lnaddr < "$out/info"
 
 got=$("$out/tinkerd" <<CMDS
 search i32 1
@@ -254,6 +254,14 @@ echo "$frz"
 mapfile -t fz < <(grep -E '^(ok|err)' <<<"$frz")
 [ "${fz[2]}" = "ok" ] && [ "${fz[3]}" = "ok 1" ] && grep -qE "^$iaddr i32 0$" <<<"$frz" && [ "${fz[5]}" = "ok 424242" ] \
     && [ "${fz[8]}" = "ok 5" ] && [ "${fz[9]}" = "ok 0" ] && [ "${fz[10]}" = "err valor inválido: 1.5" ] || { echo "FALHOU: congelar no daemon"; exit 1; }
+
+# Lua (xLua): busca do inteiro Lua (valor + tipo ao lado), tabela pelo valor e pela própria tabela, editar
+lu=$(printf '%s\n' "attach $pid" "search li 31415" "list 5" "luatable $lnaddr" "luatable $ltaddr" "write $lnaddr li 999" "read $lnaddr li" "search i64 31415" | "$out/tinkerd")
+echo "$lu"
+mapfile -t lo < <(grep -E '^(ok|err)' <<<"$lu")
+[ "${lo[2]}" = "ok 1" ] && grep -q "^$lnaddr li " <<<"$lu" && grep -q "^lua $lnaddr int gold 31415$" <<<"$lu" \
+    && grep -q " num leaf 2.5$" <<<"$lu" && grep -q " str name hero$" <<<"$lu" && grep -q " table bag " <<<"$lu" \
+    && [ "$(grep -c '^lua ' <<<"$lu")" = 8 ] && [ "${lo[7]}" = "ok 999" ] || { echo "FALHOU: Lua"; exit 1; }
 
 # Autoteste do app: o daemon se liga a ele mesmo e acha os próprios valores de teste (não toca em outro processo)
 sp="$out/self.fifo"; mkfifo "$sp"

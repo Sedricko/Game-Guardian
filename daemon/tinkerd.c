@@ -92,6 +92,10 @@ static int write_mem(uint64_t addr, const void *buf, size_t len) {
 // O tipo guarda as marcas por cima do tipo base; a distância da chave vai nos bits de cima.
 #define XOR 0x40
 #define TAG 0x20
+// li / lf: número do Lua (xLua, ToLua): 8 bytes do valor e o byte do tipo logo depois (3 ou 0x13: inteiro e decimal,
+// trocados entre o Lua 5.3 e o 5.4). A busca só aceita o número com essa marca; ler e escrever mexem só nos 8 bytes.
+#define LUA 0x80
+static int lua_tag(int x) { return x == 0x03 || x == 0x13; }
 #define B(t) ((t) & 0x1f)
 static int xoff(int t) { return (t >> 8) ? ((t >> 8) - 17) * 4 : 0; }  // 0 = o cifrado de sempre (chave antes)
 
@@ -101,6 +105,8 @@ static int find_type(const char *s) {
     if (!strcmp(s, "xi64")) return T_I64 | XOR;  // ObscuredLong/ObscuredDouble: chave de 8 bytes em addr, valor^chave em addr+8
     if (!strcmp(s, "xf64")) return T_F64 | XOR;
     if (!strcmp(s, "i32x2")) return T_I32 | TAG;
+    if (!strcmp(s, "li")) return T_I64 | LUA;
+    if (!strcmp(s, "lf")) return T_F64 | LUA;
     if (!strcmp(s, "i64x2")) return T_I64 | TAG;
     if ((!strncmp(s, "xi32@", 5) || !strncmp(s, "xf32@", 5)) && s[5]) {
         char *end;
@@ -115,6 +121,7 @@ static int find_type(const char *s) {
 static const char *tname(int t) {
     static char buf[16];
     if (t & TAG) return B(t) == T_I32 ? "i32x2" : "i64x2";
+    if (t & LUA) return B(t) == T_I64 ? "li" : "lf";
     if (!(t & XOR)) return TYPES[t].name;
     if (!xoff(t)) return B(t) == T_I32 ? "xi32" : B(t) == T_F32 ? "xf32" : B(t) == T_I64 ? "xi64" : "xf64";
     snprintf(buf, sizeof buf, "%s@%d", B(t) == T_I32 ? "xi32" : "xf32", xoff(t));
@@ -367,6 +374,13 @@ static int cread(uint64_t a, unsigned char *out, int sz) {
 
 // Lê o valor como o jogo vê (no cifrado: chave ^ valor guardado).
 static int load(uint64_t a, int t, unsigned char *out, int cached) {
+    if (t & LUA) {
+        unsigned char p[9];
+        if (cached ? cread(a, p, 9) : read_mem(a, p, 9)) return -1;
+        if (!lua_tag(p[8])) return -1;  // o lugar deixou de ser um número do Lua
+        memcpy(out, p, 8);
+        return 0;
+    }
     if (t & TAG) return (cached ? cread(a, out, TYPES[B(t)].size) : read_mem(a, out, TYPES[B(t)].size)) || untag(t, out) ? -1 : 0;
     if (!(t & XOR)) return cached ? cread(a, out, TYPES[t].size) : read_mem(a, out, TYPES[t].size);
     if (TYPES[B(t)].size == 8) {  // 8 bytes: chave e depois o valor trancado
@@ -391,6 +405,7 @@ static int load(uint64_t a, int t, unsigned char *out, int cached) {
 
 // Escreve como o jogo escreveria: no cifrado, tranca o valor novo com a chave atual.
 static int store(uint64_t a, int t, const unsigned char *val) {
+    if (t & LUA) return write_mem(a, val, 8);
     if (t & TAG) {
         int64_t x = 0;
         if (B(t) == T_I32) { int32_t y; memcpy(&y, val, 4); y = (int32_t)((uint32_t)y << 1); return write_mem(a, &y, 4); }
@@ -459,7 +474,8 @@ static void scan_chunk(size_t ci, unsigned char *buf, void *ctx) {
     for (size_t i = 0; i + sc->step <= c->len; i += sc->step)
         for (int k = 0; k < sc->ntypes; k++) {
             int t = sc->types[k], sz = TYPES[B(t)].size, o = xoff(t);
-            if (i % sz || i + (t & XOR && !o ? 2 * sz : sz) > c->len) continue;
+            if (i % sz || i + (t & LUA ? 9 : t & XOR && !o ? 2 * sz : sz) > c->len) continue;
+            if (t & LUA && !lua_tag(buf[i + 8])) continue;
             if (o && ((int64_t)i + o < 0 || i + o + 4 > c->len)) continue;
             const unsigned char *p = buf + i;
             uint32_t w[2];
@@ -522,7 +538,7 @@ static void snap_chunk(size_t ci, unsigned char *buf, void *ctx) {
 
 static void cmd_snapshot(const char *name) {
     int t = find_type(name);
-    if (t < 0 || (t & (XOR | TAG))) { printf("err tipo inválido: %s\n", name); return; }
+    if (t < 0 || (t & (XOR | TAG | LUA))) { printf("err tipo inválido: %s\n", name); return; }
     drop_snap();
     nres = nprev = 0;
     snap.want = ranges;
@@ -928,7 +944,7 @@ static void cmd_read(const char *addr, const char *name) {
 // Lê COUNT valores seguidos a partir de ADDR: o visualizador de memória ("endereços próximos").
 static void cmd_dump(const char *addr, const char *name, const char *count) {
     int t = find_type(name);
-    if (t < 0 || (t & (XOR | TAG))) { printf("err tipo inválido: %s\n", name); return; }
+    if (t < 0 || (t & (XOR | TAG | LUA))) { printf("err tipo inválido: %s\n", name); return; }
     size_t n = strtoul(count, NULL, 10), sz = TYPES[t].size;
     if (n < 1 || n > 20001) n = 64;  // até 10000 linhas para cada lado na busca perto
     uint64_t a = strtoull(addr, NULL, 16);
@@ -1364,6 +1380,148 @@ static void cmd_il2methods(const char *addr) {
         printf("method %" PRIx64 " %02x %s %s\n", code, (bits >> 16) & 0xff, w, nm);
         n++;
     }
+    printf("ok %d\n", n);
+}
+
+// ---- Lua 5.3/5.4 (xLua, ToLua, SLua): a tabela em volta de um número, com o nome de cada campo ----
+// Table: tt 5 em +8, lsizenode em +11, tamanho da lista em +12, lista em +16, nós em +24 (igual nas duas versões).
+// Nó: 5.4 = 24 bytes (tipo do valor em +8, tipo da chave em +9, chave em +16); 5.3 = 32 bytes (chave em +16, tipo dela em +24).
+// TString: tt 4 (curta) ou 0x14 (longa) em +8, tamanho em +11 (curta) ou +16 (longa), texto em +24.
+static int luaver = 54;  // a última versão reconhecida (decide se 3 é inteiro ou decimal)
+
+static int lua_vt(int x) {  // tipos de valor que existem nas duas versões (0x10/0x20: vazio do 5.4)
+    static const unsigned char ok[] = {0x00, 0x01, 0x11, 0x02, 0x03, 0x13, 0x10, 0x20, 0x44, 0x54, 0x45, 0x46, 0x16, 0x66, 0x47, 0x48};
+    for (size_t i = 0; i < sizeof ok; i++) if (ok[i] == x) return 1;
+    return 0;
+}
+
+static uint64_t lua_ptr(uint64_t v) { return v & TAGMASK; }
+
+// lê o nó (layout 54 ou 53): tipo do valor, tipo da chave e a chave
+static int lua_node(uint64_t n, int ver, int *vt, int *kt, uint64_t *key) {
+    unsigned char b[32];
+    if (read_mem(n, b, ver == 54 ? 24 : 32)) return -1;
+    uint32_t t53, k53;
+    memcpy(&t53, b + 8, 4); memcpy(&k53, b + 24, 4);
+    *vt = ver == 54 ? b[8] : (t53 < 0x100 ? (int)t53 : -1);
+    *kt = ver == 54 ? b[9] : (k53 < 0x100 ? (int)k53 : -1);
+    memcpy(key, b + 16, 8);
+    if (!lua_vt(*vt) || !(lua_vt(*kt) || *kt == 0x0a || *kt == 0x0b)) return -1;
+    return 0;
+}
+
+// texto de uma TString: só letras visíveis (espaço vira _), até 60
+static int lua_str(uint64_t p, char *out, size_t n) {
+    unsigned char h[24];
+    p = lua_ptr(p);
+    if (p < 0x10000 || read_mem(p, h, 24) || (h[8] != 0x04 && h[8] != 0x14)) return -1;
+    uint64_t len = h[11];
+    if (h[8] == 0x14) memcpy(&len, h + 16, 8);
+    if (len > n - 1) len = n - 1;
+    if (len > 60) len = 60;
+    if (read_mem(p + 24, out, len)) return -1;
+    out[len] = 0;
+    for (char *c = out; *c; c++) if ((unsigned char)*c <= ' ' || *c == 0x7f) *c = '_';
+    return 0;
+}
+
+// um campo: "lua <endereço do valor> <tipo> <nome> <valor>"
+static void lua_print(uint64_t va, int vt, const char *key) {
+    unsigned char b[8];
+    if (read_mem(va, b, 8)) return;
+    int64_t i; double d; uint64_t p;
+    memcpy(&i, b, 8); memcpy(&d, b, 8); memcpy(&p, b, 8);
+    int isint = luaver == 54 ? vt == 0x03 : vt == 0x13;
+    char txt[64];
+    if (vt == 0x03 || vt == 0x13) { if (isint) printf("lua %" PRIx64 " int %s %" PRId64 "\n", va, key, i); else printf("lua %" PRIx64 " num %s %.15g\n", va, key, d); }
+    else if (vt == 0x44 || vt == 0x54) printf("lua %" PRIx64 " str %s %s\n", va, key, lua_str(p, txt, sizeof txt) ? "?" : txt);
+    else if (vt == 0x45) printf("lua %" PRIx64 " table %s %" PRIx64 "\n", va, key, lua_ptr(p));
+    else if (vt == 0x01 || vt == 0x11) printf("lua %" PRIx64 " bool %s %s\n", va, key, (luaver == 54 ? vt == 0x11 : i != 0) ? "true" : "false");
+    else if (vt == 0x46 || vt == 0x16 || vt == 0x66) printf("lua %" PRIx64 " func %s %" PRIx64 "\n", va, key, lua_ptr(p));
+    else if (vt == 0x47 || vt == 0x02) printf("lua %" PRIx64 " udata %s %" PRIx64 "\n", va, key, lua_ptr(p));
+}
+
+// nome da chave: texto, número inteiro ([3]) ou ? para outros tipos
+static void lua_keyname(int kt, uint64_t key, char *out, size_t n) {
+    char t[64];
+    int64_t i; memcpy(&i, &key, 8);
+    if ((kt == 0x44 || kt == 0x54) && !lua_str(key, t, sizeof t)) snprintf(out, n, "%s", t);
+    else if (kt == (luaver == 54 ? 0x03 : 0x13)) snprintf(out, n, "[%" PRId64 "]", i);
+    else snprintf(out, n, "?");
+}
+
+// conta nós válidos com chave de texto a partir de n (para escolher entre 5.3 e 5.4)
+static int lua_score(uint64_t n, int ver, int count) {
+    int sc = 0, vt, kt;
+    uint64_t key;
+    char t[64];
+    for (int k = 0; k < count; k++) {
+        if (lua_node(n + (uint64_t)k * (ver == 54 ? 24 : 32), ver, &vt, &kt, &key)) return k ? sc : -1;
+        if ((kt == 0x44 || kt == 0x54) && !lua_str(key, t, sizeof t)) sc++;
+    }
+    return sc;
+}
+
+static int lua_nodes(uint64_t n, int ver, size_t count) {
+    int shown = 0, vt, kt;
+    uint64_t key;
+    char name[80];
+    size_t step = ver == 54 ? 24 : 32;
+    for (size_t k = 0; k < count && shown < 500; k++) {
+        if (lua_node(n + k * step, ver, &vt, &kt, &key)) continue;
+        if (kt == 0 || kt == 0x0a || kt == 0x0b || vt == 0 || vt == 0x10 || vt == 0x20) continue;  // vazio ou apagado
+        lua_keyname(kt, key, name, sizeof name);
+        if (!strcmp(name, "?")) continue;  // chave que não é texto nem número: quase sempre memória vizinha que só parece um nó
+        lua_print(n + k * step, vt, name);
+        shown++;
+    }
+    return shown;
+}
+
+// luatable ADDR: ADDR é a própria tabela (tt 5) ou o endereço de um valor dentro dela (um resultado da busca li/lf)
+static void cmd_luatable(const char *addr) {
+    uint64_t a = strtoull(addr, NULL, 16);
+    unsigned char h[32];
+    int n = 0;
+    if (!read_mem(a, h, 32) && h[8] == 0x05 && h[11] <= 24) {
+        uint64_t arr, node;
+        uint32_t asize;
+        memcpy(&asize, h + 12, 4); memcpy(&arr, h + 16, 8); memcpy(&node, h + 24, 8);
+        node = lua_ptr(node); arr = lua_ptr(arr);
+        size_t cnt = (size_t)1 << h[11];
+        if (cnt > 4096) cnt = 4096;
+        int s54 = lua_score(node, 54, (int)cnt), s53 = lua_score(node, 53, (int)cnt);
+        if (s54 < 0 && s53 < 0 && !asize) { puts("err não parece uma tabela do Lua"); return; }
+        luaver = s53 > s54 ? 53 : 54;
+        printf("table %" PRIx64 " lua%d\n", a, luaver);
+        // parte de lista (chaves 1, 2, 3…): TValue de 16 bytes
+        for (uint32_t k = 0; k < asize && k < 200 && arr >= 0x10000; k++) {
+            unsigned char t[9];
+            char name[24];
+            if (read_mem(arr + k * 16ULL, t, 9)) break;
+            if (!lua_vt(t[8]) || t[8] == 0 || t[8] == 0x10) continue;
+            snprintf(name, sizeof name, "[%u]", k + 1);
+            lua_print(arr + k * 16ULL, t[8], name);
+            n++;
+        }
+        if (s54 >= 0 || s53 >= 0) n += lua_nodes(node, luaver, cnt);
+        printf("ok %d\n", n);
+        return;
+    }
+    // dentro da tabela: o nó do valor; anda para os lados enquanto os nós fazem sentido
+    // shortcut: sem achar o começo exato da tabela, pode pegar nós de uma vizinha colada; achar a Table pelo ponteiro quando incomodar
+    int best = 0, bsc = -1;
+    for (int ver = 54; ver >= 53; ver--) { int sc = lua_score(a, ver, 1); if (sc > bsc) { bsc = sc; best = ver; } }
+    if (bsc < 0) { puts("err não é um campo de tabela do Lua (ou está numa lista)"); return; }
+    luaver = best;
+    size_t step = best == 54 ? 24 : 32;
+    uint64_t lo = a, hi = a;
+    int vt, kt;
+    uint64_t key;
+    for (int k = 0; k < 2048 && !lua_node(lo - step, best, &vt, &kt, &key); k++) lo -= step;
+    for (int k = 0; k < 2048 && !lua_node(hi + step, best, &vt, &kt, &key); k++) hi += step;
+    printf("nodes %" PRIx64 " lua%d\n", lo, luaver);
+    n = lua_nodes(lo, best, (hi - lo) / step + 1);
     printf("ok %d\n", n);
 }
 
@@ -2090,6 +2248,7 @@ int main(void) {
         else if (!strcmp(cmd, "watch")) cmd_watch(a1, a2);
         else if (!strcmp(cmd, "trace")) cmd_trace(a1, a2);
         else if (!strcmp(cmd, "il2methods")) cmd_il2methods(a1);
+        else if (!strcmp(cmd, "luatable")) cmd_luatable(a1);
         else if (!strcmp(cmd, "list")) cmd_list(strtoul(a1, NULL, 10));
         else if (!strcmp(cmd, "read")) cmd_read(a1, a2);
         else if (!strcmp(cmd, "dump")) cmd_dump(a1, a2, a3);
