@@ -253,5 +253,6 @@ class ValuesTest {
         assertEquals("gemini-3.8-flash", pickGemini(ranked, mapOf("gemini-3.8-flash" to 20_000L, "gemini-3.5-flash" to 25_000L)))
         assertEquals("gemini-3.8-pro", pickGemini(ranked, mapOf("gemini-3.8-flash" to 60_000L, "gemini-3.5-flash" to 50_000L)))
         assertEquals("gemini-3.5-flash", pickGemini(listOf("gemini-3.8-flash-lite", "gemini-3.5-flash"), emptyMap()))  // Lite fica de fora
+        assertEquals("gemini-3.5-flash", pickGemini(ranked, emptyMap(), setOf("gemini-3.8-flash")))  // cota do dia acabou nele
     }
 }

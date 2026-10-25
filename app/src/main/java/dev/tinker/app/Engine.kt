@@ -99,7 +99,7 @@ internal fun classMatch(c: GameClass, words: List<String>): List<String>? {
     // "RunData" e "Cameras.CameraController" acham as palavras em sequência (antes davam 0 e a IA rodava em círculo)
     val queries = words.flatMap { listOf(listOf(it.lowercase()), nameWords(it).map(String::lowercase)) }.filter { it.isNotEmpty() }.distinct()
     fun hit(name: String): Boolean {
-        val ws = nameWords(name).map(String::lowercase)
+        val ws = wordsMemo.getOrPut(name) { nameWords(name).map(String::lowercase) }
         return queries.any { q -> (0..ws.size - q.size).any { i -> q.indices.all { k -> if (k == q.lastIndex) ws[i + k].startsWith(q[k]) else ws[i + k] == q[k] } } }
     }
     val fields = c.fieldNames.filter(::hit)
@@ -109,6 +109,9 @@ internal fun classMatch(c: GameClass, words: List<String>): List<String>? {
         else -> null
     }
 }
+
+// cada procura passava o regex em todos os campos de 18 mil classes (2,5 s); os nomes se repetem a cada procura
+private val wordsMemo = java.util.concurrent.ConcurrentHashMap<String, List<String>>()
 
 /** Palavras de um nome de código: PlayerData.m_ringCount → Player, Data, m, ring, Count. */
 internal fun nameWords(name: String): List<String> = Regex("""[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+""").findAll(name).map { it.value }.toList()
@@ -698,14 +701,17 @@ class Engine private constructor(private val app: Context) {
         }
         val off = item.addr.toLong(16) - c.start.toLong(16)
         val f = c.fields.firstOrNull { it.offset.toLong() == off } ?: c.fields.lastOrNull { it.offset <= off && off < it.offset + 8 } ?: return
-        val name = "${c.name.substringAfterLast('.')}.${f.name}"
+        val name = "${c.name.substringAfterLast('.')}.${f.name.removePrefix("<").substringBefore(">k__BackingField")}"
         val tag = "${c.name}+${off.toString(16)}"
         if (!IL2.matches(tag)) return
         if (item.name.isEmpty()) Diag.add("Salvo 0x${item.addr} é o campo $name (IL2CPP)")
         replace(item) { it.copy(name = it.name.ifEmpty { name }, il2 = tag) }
-        // a IA fica sabendo nas próximas conversas, sem depender dela lembrar de anotar
-        val field = "${c.name.substringAfterLast('.')}.${f.name.removePrefix("<").substringBefore(">k__BackingField")}"
-        notesFile?.let { appendNote(it, "Salvo ${item.name.ifEmpty { field }} = $field (${item.type})", 8000) }
+        // a IA fica sabendo nas próximas conversas, sem depender dela lembrar de anotar (se ainda não sabe desse campo)
+        notesFile?.let { nf ->
+            val known = nf.takeIf { it.exists() }?.readText().orEmpty()
+            if (name !in known && "${c.name.substringAfterLast('.')}.${f.name}" !in known)
+                appendNote(nf, if (item.name.isEmpty()) "Campo salvo: $name (${item.type})" else "${item.name} = $name (${item.type})", 8000)
+        }
     }
 
     /**
@@ -744,11 +750,19 @@ class Engine private constructor(private val app: Context) {
      * (o jogo carrega classes novas ao trocar de tela).
      */
     suspend fun listClasses(): List<GameClass> {
-        classCache?.takeIf { it.first == currentPid && System.currentTimeMillis() - it.second < 600_000 }?.let { return it.third }
+        // mesma vez do jogo: responde na hora com a lista que tem; passou de 10 min, relê por trás (classes novas carregadas)
+        classCache?.takeIf { it.first == currentPid }?.let { c ->
+            if (System.currentTimeMillis() - c.second > 600_000 && classRefresh?.isActive != true) classRefresh = scope.launch {
+                runCatching { readClasses() }.onSuccess { if (currentPid == c.first) { classCache = Triple(c.first, System.currentTimeMillis(), it); classesToDisk(it) } }
+            }
+            return c.third
+        }
         // primeira vez nesta abertura do jogo: vale a lista guardada da mesma versão do jogo (ler da memória leva 8 a 33 s)
         if (classCache?.first != currentPid) classesFromDisk()?.let { classCache = Triple(currentPid, System.currentTimeMillis(), it); return it }
         return readClasses().also { classCache = Triple(currentPid, System.currentTimeMillis(), it); classesToDisk(it) }
     }
+
+    private var classRefresh: kotlinx.coroutines.Job? = null
 
     private val classesFile get() = savedPkg?.let { File(app.filesDir, "classes-$it.txt") }
     private fun gameVersion() = savedPkg?.let { p -> runCatching { app.packageManager.getPackageInfo(p, 0).longVersionCode }.getOrNull() }
@@ -1375,7 +1389,8 @@ class Engine private constructor(private val app: Context) {
         addSaved(listOf(Hit(p.addr, p.type, "?", p.value)), frozen = p.freeze)
         val i = Session.saved.indexOfFirst { it.addr == p.addr && it.type == p.type }
         // salvo que já existia: o valor novo entra nele, senão o congelamento voltaria o valor antigo em 200 ms
-        if (i >= 0) Session.saved[i] = Session.saved[i].copy(value = p.value, name = Session.saved[i].name.ifEmpty { p.label })
+        // salvo novo fica com o nome da IA ("Anéis na corrida"), não com o do campo que o IL2CPP pôs um instante antes
+        if (i >= 0) Session.saved[i] = Session.saved[i].copy(value = p.value, name = if (before == null && p.label.isNotEmpty()) p.label else Session.saved[i].name.ifEmpty { p.label })
         if (old != "?") Session.aiUndo.add(0, AiUndo(p.addr, p.type, old, p.label.ifEmpty { "0x" + p.addr },
             if (before == null) Session.saved.getOrNull(i)?.id else null, currentPid, before))
         while (Session.aiUndo.size > 10) Session.aiUndo.removeAt(Session.aiUndo.lastIndex)

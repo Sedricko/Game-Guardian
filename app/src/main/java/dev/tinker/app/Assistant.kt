@@ -99,6 +99,10 @@ jogo abrir, use propor_receita com os salvos."""
 
     @Volatile private var lowThinking = true
 
+    /** Modelos cuja cota do dia acabou em todas as chaves (a cota é por modelo): até quando ficam de fora. */
+    private val tired = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private fun tiredModels() = tired.filterValues { it > System.currentTimeMillis() }.keys
+
     // gasto da última pergunta, para a caixa mostrar (consultas, tempo, tokens)
     @Volatile private var statRounds = 0
     @Volatile private var statIn = 0L
@@ -119,11 +123,14 @@ jogo abrir, use propor_receita com os salvos."""
 
     /** Na primeira mensagem vai o contexto da tela; nas seguintes (Continuar), só o que a pessoa disse. */
     suspend fun ask(chat: AiChat, context: suspend () -> String, question: String, tools: List<AiTool>, onStep: (String) -> Unit): String {
+        // Claude sem chave e Gemini com chave: vai pelo Gemini em vez de só responder "chave inválida"
+        if (Session.aiProvider == "claude" && Session.aiKey.isBlank() && Session.geminiKeys.isNotEmpty()) Session.aiProvider = "gemini"
         if (chat.provider != Session.aiProvider) { chat.reset(); chat.provider = Session.aiProvider }
-        // conversa nova: o modelo mais rápido entre os bons (no meio da conversa não troca, o Gemini perderia o fio)
-        if (Session.aiProvider == "gemini" && Session.geminiAutoModel && !chat.started) {
+        // a cada pergunta (começo de um turno): o modelo mais rápido entre os bons. Só no começo da conversa nunca trocava:
+        // a pessoa segue "continuando" por horas. No meio de um turno não troca (o Gemini confere o pensamento do turno atual).
+        if (Session.aiProvider == "gemini" && Session.geminiAutoModel) {
             if (Session.geminiModels.isEmpty()) Session.geminiModels = geminiModels(Session.geminiKey)
-            pickGemini(Session.geminiModels, Session.geminiSpeed)?.takeIf { it != Session.geminiModel.trim() }?.let { m ->
+            pickGemini(Session.geminiModels, Session.geminiSpeed, tiredModels())?.takeIf { it != Session.geminiModel.trim() }?.let { m ->
                 Diag.ai("Gemini: usando $m nesta conversa (rodada média: ${Session.geminiSpeed.entries.joinToString { "${it.key} ${it.value / 1000} s" }.ifEmpty { "sem medidas ainda" }})")
                 Session.geminiModel = m
             }
@@ -134,7 +141,11 @@ jogo abrir, use propor_receita com os salvos."""
         val t0 = System.currentTimeMillis()
         statRounds = 0; statIn = 0; statOut = 0
         val answer = if (Session.aiProvider == "gemini") askGemini(Session.geminiKey, chat, prompt, tools, onStep)
-        else askClaude(Session.aiKey, chat, prompt, tools, onStep)
+        else askClaude(Session.aiKey, chat, prompt, tools, onStep).let { a ->
+            // chave do Claude recusada e há Gemini: troca sozinho e pergunta de novo
+            if (a != CLAUDE_BAD_KEY || Session.geminiKeys.isEmpty()) a
+            else { Diag.add("Chave do Claude recusada: usando o Gemini"); onStep("🔁 Chave do Claude recusada: usando o Gemini"); Session.aiProvider = "gemini"; return ask(chat, context, question, tools, onStep) }
+        }
         lastStats = "$statRounds consultas · ${(System.currentTimeMillis() - t0) / 1000} s · ${(statIn + statOut + 500) / 1000} mil tokens"
         Diag.ai("==== RESPOSTA ($lastStats):\n$answer")
         return answer
@@ -214,7 +225,7 @@ jogo abrir, use propor_receita com os salvos."""
             "Parei depois de ${rounds()} consultas sem chegar a uma resposta. Tente uma pergunta mais específica."
         } catch (e: UnauthorizedException) {
             while (messages.size > before) messages.removeAt(messages.lastIndex)  // a pergunta que falhou não fica na conversa
-            "Chave da API inválida. Confira em Ajustes → Assistente (IA)."
+            CLAUDE_BAD_KEY
         } catch (e: RateLimitException) {
             while (messages.size > before) messages.removeAt(messages.lastIndex)
             "Limite de uso da API atingido. Espere um pouco e tente de novo."
@@ -294,6 +305,20 @@ jogo abrir, use propor_receita com os salvos."""
                 while (spare-- > 0 && keyProblem(code, reply) && nextGeminiKey("código $code")) {
                     http("models/${Session.geminiModel.trim()}:generateContent", Session.geminiKey, body).let { code = it.first; reply = it.second }
                 }
+                // cota do dia acabou neste modelo em todas as chaves: cada modelo tem a sua, segue no próximo bom
+                var swaps = 0
+                while (code == 429 && geminiWait(code, reply) == null && swaps++ < 3) {
+                    tired[Session.geminiModel.trim()] = System.currentTimeMillis() + 3_600_000L
+                    val m = pickGemini(Session.geminiModels, Session.geminiSpeed, tiredModels()) ?: break
+                    Diag.ai("Gemini: cota do dia de ${Session.geminiModel} acabou; seguindo com $m")
+                    onStep("🔁 Cota do ${Session.geminiModel} acabou: seguindo com $m")
+                    Session.geminiModel = m
+                    http("models/$m:generateContent", Session.geminiKey, body).let { code = it.first; reply = it.second }
+                    var left = Session.geminiKeys.size - 1
+                    while (left-- > 0 && keyProblem(code, reply) && nextGeminiKey("código $code")) {
+                        http("models/$m:generateContent", Session.geminiKey, body).let { code = it.first; reply = it.second }
+                    }
+                }
                 // todas as chaves no limite por minuto, ou servidor cheio: espera e segue sozinho, sem precisar de Continuar
                 var waits = 0
                 while (waits++ < 5) {
@@ -310,7 +335,7 @@ jogo abrir, use propor_receita com os salvos."""
                 val j = runCatching { JSONObject(reply) }.getOrNull() ?: return fail("Gemini respondeu $code sem conteúdo.").also { Diag.ai("API Gemini: código $code sem JSON: ${reply.take(500)}") }
                 statRounds++
                 j.optJSONObject("usageMetadata")?.let { u -> statIn += u.optInt("promptTokenCount"); statOut += u.optInt("candidatesTokenCount") }
-                Diag.ai("API Gemini rodada ${it + 1} (${Session.geminiModel}): código $code, tokens ${j.optJSONObject("usageMetadata")?.let { u -> "entrada ${u.optInt("promptTokenCount")}, saída ${u.optInt("candidatesTokenCount")}" } ?: "?"}" +
+                Diag.ai("API Gemini rodada ${it + 1} (${Session.geminiModel}): código $code, tokens ${j.optJSONObject("usageMetadata")?.let { u -> "entrada ${u.optInt("promptTokenCount")}, saída ${u.optInt("candidatesTokenCount")}, pensamento ${u.optInt("thoughtsTokenCount")}" } ?: "?"}" +
                     (j.optJSONObject("error")?.let { e -> ", erro ${e.optString("status")}: ${e.optString("message").take(300)}" } ?: "") +
                     (j.optJSONArray("candidates")?.optJSONObject(0)?.optString("finishReason")?.let { f -> ", fim $f" } ?: ""))
                 j.optJSONObject("error")?.let { e ->
@@ -450,5 +475,7 @@ internal fun geminiWait(code: Int, reply: String): Int? = when {
  * Modelo para uma conversa nova: entre os 3 melhores da conta (sem Lite, que erra mais), o de rodada mais rápida.
  * Sem medida conta como 30 s: um modelo ainda não usado é experimentado quando o atual está mais lento que isso.
  */
-internal fun pickGemini(ranked: List<String>, speed: Map<String, Long>): String? =
-    ranked.filter { "-lite" !in it }.take(3).minByOrNull { speed[it] ?: 30_000L }
+internal fun pickGemini(ranked: List<String>, speed: Map<String, Long>, skip: Set<String> = emptySet()): String? =
+    ranked.filter { "-lite" !in it && it !in skip }.take(3).minByOrNull { speed[it] ?: 30_000L }
+
+private const val CLAUDE_BAD_KEY = "Chave da API inválida. Confira em Ajustes → Assistente (IA)."
