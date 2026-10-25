@@ -63,9 +63,8 @@ internal fun ggXor(value: String): Pair<String, Int>? {
 // a chave que vinha fixa no app (versões até 2.19): sai da lista de quem ainda tem; só o hash fica, para reconhecer
 private const val OLD_FIXED_KEY_SHA256 = "55c7b7cfa2a2f58d5da503db4b2d1188f423212cc586a53e75172c9720fc2e31"
 
-// painel de chaves da pessoa (repositório privado, uso pessoal): entra uma vez; desligou em Ajustes, não volta
-private const val DEFAULT_KEY_SOURCE =
-    "https://script.google.com/macros/s/AKfycbzD_EN1Uo_t1_uqwhzT3WwXMrUdjO-TAYQlXwjmyYhNk0wq4ZESn4yH3cUeyDlAMedo/exec?token=f0a0f8a4099e4dbe9618bb34226909465c7fb944b34040bf93a704f7d7388086"
+// sem link embutido: o repositório é público e o token dá acesso às chaves; a pessoa cola o link em Ajustes
+private const val DEFAULT_KEY_SOURCE = ""
 
 private fun sha256(text: String) = java.security.MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
 
@@ -1799,7 +1798,9 @@ class Engine private constructor(private val app: Context) {
                 "ok"
             }
             check("jogo de teste: ponteiros") {
-                val chain = t.call("pointers $paddr 256 3").lines.firstOrNull { Regex("""\S+\+[0-9a-f]+ 10 20""").matches(it) } ?: error("não achou o caminho")
+                // o caminho que sai da lib do jogo de teste (root fica no .data dele); outros podem passar por memória que muda
+                val paths = t.call("pointers $paddr 256 3").lines.filter { Regex("""\S+\+[0-9a-f]+ 10 20""").matches(it) }
+                val chain = paths.firstOrNull { it.startsWith("libtinkertarget.so+") } ?: paths.firstOrNull() ?: error("não achou o caminho")
                 require(t.call("resolve $chain").status == paddr) { "o caminho $chain não volta ao endereço" }
                 "ok ($chain)"
             }
@@ -1854,7 +1855,7 @@ class Engine private constructor(private val app: Context) {
         check("app em primeiro plano") { call { d -> d.send("focus", quiet = true).lines.firstOrNull()?.removePrefix("| ")?.trim()?.take(120) ?: "?" } }
         // sem internet, os testes de rede diziam OK com a mensagem de erro dentro (visto no relatório de 25/10 05:03)
         check("internet") { java.net.InetAddress.getByName("script.google.com").hostAddress?.let { "ok" } ?: error("sem resposta do DNS") }
-        check("painel de chaves") { syncKeys().also { require(it.startsWith("Painel de chaves")) { it } } }
+        check("painel de chaves") { if (Session.keySource.isBlank()) "sem link (cole em Ajustes → Assistente)" else syncKeys().also { require(it.startsWith("Painel de chaves")) { it } } }
         check("planilha (aprendizado)") { cloudPull().also { require(it.startsWith("Planilha")) { it } } }
         // uma pergunta curtinha de verdade em cada IA (1 pedido da cota de cada): responde e quanto demora
         check("Gemini") { if (Session.geminiKeys.isEmpty()) "sem chave" else Assistant.pingGemini() }

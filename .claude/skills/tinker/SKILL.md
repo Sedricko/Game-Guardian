@@ -8,7 +8,7 @@ description: Continua o projeto Tinker, editor de memória para Android (estilo 
 Responder sempre em **português do Brasil**, curto e direto. O usuário testa no celular e manda prints/relatórios.
 
 ## Onde está tudo
-- Repositório `Sedricko/Game-Guardian` (privado), branch de trabalho `ccr-92c99132-2ne91y`.
+- Repositório `Sedricko/Game-Guardian` (**público**: nunca pôr token do painel no código), branch de trabalho `ccr-92c99132-2ne91y`.
 - Cada push compila no GitHub Actions e publica `v<versionName>` em Releases (`Tinker-X.Y.Z.apk`, arm64).
   Download: `https://github.com/Sedricko/Game-Guardian/releases/download/vX.Y.Z/Tinker-X.Y.Z.apk`.
 - Aparelho: Pixel 6 Pro com **vPhoneOS** (Android 12, root). O relógio do emulador fica ~54 min diferente: não mexer no fuso da planilha.
