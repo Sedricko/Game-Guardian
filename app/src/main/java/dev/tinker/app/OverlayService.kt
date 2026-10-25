@@ -251,13 +251,16 @@ class OverlayService : Service() {
         val right = b?.right ?: 0
         Session.panelWide = w > h && f < 1f
         // deitado, a barra de navegação fica de lado: antes o painel ia até a borda e a barra cobria a aba Ajustes e os botões
-        val usable = w - left - right
+        // deitado, o vPhoneOS diz que a barra está à esquerda (esq=135) mas ela aparece à direita: sem saber o lado certo,
+        // a mesma folga fica dos dois lados e o painel nunca entra embaixo dela
+        val side = if (w > h) maxOf(left, right) else 0
+        val usable = if (w > h) w - 2 * side else w - left - right
         val info = "Painel: tela ${w}x$h, barras esq=$left dir=$right baixo=${b?.bottom ?: 0}"
         if (info != lastPlace) { lastPlace = info; Diag.add(info) }
         if (w > h) {
             p.width = (usable * f).toInt(); p.height = LayoutParams.MATCH_PARENT
             p.gravity = Gravity.TOP or if (Session.panelLeft) Gravity.START else Gravity.END
-            p.x = if (Session.panelLeft) left else right
+            p.x = side
         } else {
             p.width = usable; p.height = ((h - (b?.bottom ?: 0)) * f).toInt()
             p.gravity = Gravity.TOP or Gravity.START
