@@ -2769,12 +2769,12 @@ class Engine private constructor(private val app: Context) {
     // ---- foto do jogo: antes/depois de uma ação (ex.: pegar a recompensa do correio) e voltar como estava ----
 
     /** Tira a foto (a memória toda vai para um arquivo) e, parado 4 s, marca o que muda sozinho para não confundir depois. */
-    suspend fun photoTake(): String = call { d ->
-        val mb = d.send("photo").status
-        delay(4000)
-        val noise = d.send("photonoise").status
+    suspend fun photoTake(): String {
+        val mb = call { d -> d.send("photo").status }
+        delay(4000)  // fora do call: o daemon fica livre enquanto espera
+        val noise = call { d -> d.send("photonoise").status }
         Diag.add("Foto do jogo: $mb MB; $noise Dwords mudam sozinhos (ficam fora)")
-        "Foto tirada ($mb MB). Agora faça a ação no jogo (ex.: pegue a recompensa) e toque em Ver o que mudou."
+        return "Foto tirada ($mb MB). Agora faça a ação no jogo (ex.: pegue a recompensa) e toque em Ver o que mudou."
     }
 
     /** O que mudou desde a foto (fora o que muda sozinho e os ponteiros): vai para a lista da Busca, onde dá para refinar. */
@@ -2791,7 +2791,13 @@ class Engine private constructor(private val app: Context) {
      * (except: o contador de presentes fica, o resto volta, e a recompensa fica para pegar de novo sem perder o que ganhou).
      * O que voltou fica guardado em Session.release: "Liberar de novo" escreve os mesmos valores outra vez.
      */
-    suspend fun photoRestore(addrs: List<String>?, except: Boolean = false): String = call { d ->
+    suspend fun photoRestore(addrs: List<String>?, except: Boolean = false): String {
+        val (msg, values) = call { d -> photoRestoreIn(d, addrs, except) }
+        withContext(Dispatchers.Main) { Session.release = values }
+        return msg
+    }
+
+    private fun photoRestoreIn(d: Daemon, addrs: List<String>?, except: Boolean): Pair<String, List<Pair<String, String>>> {
         val (ok, fail) = when {
             addrs == null -> d.send("photorestore all").status
             except -> d.send("photorestore except ${addrs.joinToString(",")}").status
@@ -2800,9 +2806,8 @@ class Engine private constructor(private val app: Context) {
         // o que voltou (lido agora, já com o valor da foto): para liberar de novo sem tirar foto
         val back = if (addrs != null && !except) addrs else d.send("list 2000", quiet = true).lines.map { it.substringBefore(' ') }.filter { a -> addrs?.contains(a) != true }
         val values = back.take(500).mapNotNull { a -> runCatching { a to d.send("read $a i32", quiet = true).status }.getOrNull() }
-        withContext(Dispatchers.Main) { Session.release = values }
         Diag.add("Foto do jogo: voltaram $ok valores ($fail falharam)" + if (except) ", menos ${addrs?.size} escolhidos" else "")
-        "$ok valores voltaram como estavam na foto" + (if (fail != "0") " ($fail não deu)" else "") + ". Se a recompensa reapareceu, pegue e use Liberar de novo."
+        return ("$ok valores voltaram como estavam na foto" + (if (fail != "0") " ($fail não deu)" else "") + ". Se a recompensa reapareceu, pegue e use Liberar de novo.") to values
     }
 
     /** Escreve outra vez os valores que liberaram a recompensa (sem tirar foto de novo). Vale nesta vez do jogo. */
