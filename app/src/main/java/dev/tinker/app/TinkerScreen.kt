@@ -1548,6 +1548,9 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                     Toggle("Trocar de provedor sozinho", "Sem cota ou com o servidor cheio, segue no outro provedor (Gemini ↔ Groq), se ele tiver chave.", s.aiReserve) {
                         s.aiReserve = it; engine.saveSettings()
                 }
+                    if (s.keySource.isNotBlank()) Toggle("Mandar relatório sozinho", "Enquanto joga, a cada 10 min (só se algo mudou) e quando você fecha o jogo pelo Tinker: o registro vai para a aba Relatórios da planilha.", s.autoReports) {
+                        s.autoReports = it; engine.saveSettings()
+                    }
                 }
                 Section("Autonomia", listOfNotNull("testa".takeIf { s.aiCanTest }, "aplica sozinha".takeIf { s.aiAuto }, "controla o jogo".takeIf { s.aiControl }).joinToString(" · ").ifEmpty { "só sugere" }) {
                     Toggle("IA pode testar valores", "Para saber se um resultado é o verdadeiro, ela escreve um valor de teste por 2 segundos e depois volta o original. " +

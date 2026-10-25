@@ -68,8 +68,12 @@ object Diag {
         }
     }, "tinker-vigia").apply { isDaemon = true }.start()
 
+    /** Quantas coisas aconteceram (fora as do próprio envio do relatório): o envio a cada 10 min só vai se mudou. */
+    @Volatile var activity = 0L
+
     @Synchronized
     fun add(msg: String) {
+        if (!msg.startsWith("Relatório ")) activity++
         val line = "${clock.format(Date())} $msg"
         runCatching { file.appendText(line + "\n") }
         main.post {

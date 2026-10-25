@@ -249,7 +249,8 @@ object Session {
     val recipes = mutableStateListOf<Recipe>()
     val aiProposals = mutableStateListOf<AiProposal>()
     val sheetRequests = mutableStateListOf<SheetRequest>()
-    var alwaysRequests by mutableStateOf(setOf<String>())  // tipos que a pessoa mandou lembrar
+    var alwaysRequests by mutableStateOf(setOf<String>())
+    var autoReports by mutableStateOf(true)  // relatório sozinho a cada 10 min de jogo (com atividade nova) e ao fechar o jogo pelo Tinker  // tipos que a pessoa mandou lembrar
     val aiUndo = mutableStateListOf<AiUndo>()
     val aiClasses = mutableStateListOf<GameClass>()  // classes que a IA recomendou: aparecem no topo da lista de classes
     var aiAsk by mutableStateOf<Pair<String, String>?>(null)  // pedido automático: (onde, pergunta) — a caixa ✨ daquela tela pergunta sozinha
@@ -322,7 +323,7 @@ class Engine private constructor(private val app: Context) {
             .putString("geminiKeys", Session.geminiKeys.joinToString("\n")).putInt("geminiKeyIndex", Session.geminiKeyIndex)
             .putString("keySource", Session.keySource).putString("sheetKeys", Session.sheetKeys.joinToString("\n"))
             .putString("geminiModel", Session.geminiModel).putBoolean("geminiAuto", Session.geminiAutoModel).putBoolean("watchFields", Session.watchFields)
-            .putString("alwaysRequests", Session.alwaysRequests.joinToString(","))
+            .putString("alwaysRequests", Session.alwaysRequests.joinToString(",")).putBoolean("autoReports", Session.autoReports)
             .putString("geminiUse", quotaDay() + ";" + Session.geminiUse.entries.joinToString(",") { "${it.key}=${it.value}" } + ";" + Session.geminiOut.entries.joinToString(",") { "${it.key}=${it.value}" })
             .putString("geminiSpeed", Session.geminiSpeed.entries.joinToString("\n") { "${it.key}=${it.value}" }).apply()
     }
@@ -370,10 +371,21 @@ class Engine private constructor(private val app: Context) {
             Diag.add(syncKeys()); Diag.add(cloudPull())
             // o Tinker fechou com erro da última vez: o relatório (com a falha no registro) vai para a planilha
             if (Diag.takeCrashFlag()) sendReport("o Tinker fechou com erro na última vez")
+            // jogando: o relatório vai sozinho a cada 10 min, se aconteceu algo novo (a análise na planilha fica em dia)
+            launch {
+                var sent = Diag.activity
+                while (true) {
+                    delay(600_000)
+                    if (!Session.autoReports || Session.process == null || Diag.activity == sent) continue
+                    sent = Diag.activity
+                    sendReport("a cada 10 min de jogo")
+                }
+            }
             // a aba Pedidos é lida a cada 3 min; o que chega só aparece no painel, esperando o toque da pessoa
             while (true) { fetchRequests().takeIf { it.isNotEmpty() }?.let(Diag::add); delay(180_000) }
         }
         Session.watchFields = prefs.getBoolean("watchFields", true)
+        Session.autoReports = prefs.getBoolean("autoReports", true)
         Session.alwaysRequests = prefs.getString("alwaysRequests", "").orEmpty().split(',').filter { it in TRUSTABLE_REQUESTS }.toSet()
         prefs.getString("geminiUse", "").orEmpty().split(';').takeIf { it.size == 3 && it[0] == quotaDay() }?.let { (_, use, out) ->
             use.split(',').forEach { e -> e.split('=').takeIf { it.size == 2 }?.let { (k, n) -> k.toIntOrNull()?.let { Session.geminiUse[it] = n.toIntOrNull() ?: 0 } } }
@@ -2516,6 +2528,7 @@ class Engine private constructor(private val app: Context) {
         Session.paused = false
         Session.gameGoneByUser = true
         Session.gameGone = Session.process  // oferece "Reabrir" (o GameGuardian também oferece reiniciar)
+        if (Session.autoReports) sendReport("você fechou o jogo pelo Tinker")
         "Jogo fechado."
     }
 
