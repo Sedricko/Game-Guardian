@@ -146,7 +146,10 @@ function Test-Version {
         return
     }
     Say "=== Tinker $v ==="
-    Get-Apk ($rel.assets | Where-Object name -like "*.apk" | Select-Object -First 1) "$env:TEMP\Tinker.apk"
+    Get-Apk ($rel.assets | Where-Object name -like "Tinker-*.apk" | Select-Object -First 1) "$env:TEMP\Tinker.apk"
+    # jogo de teste com tela (vem no mesmo release): fica instalado para os testes de tela
+    $jt = $rel.assets | Where-Object name -eq "JogoTeste.apk" | Select-Object -First 1
+    if ($jt) { Get-Apk $jt "$env:TEMP\JogoTeste.apk"; Say ("jogo de teste: " + ((& $adb install -r "$env:TEMP\JogoTeste.apk") -join " ")) }
     $inst = (& $adb install -r "$env:TEMP\Tinker.apk") -join " "
     Say "instalado: $inst"
     & $adb shell appops set $app SYSTEM_ALERT_WINDOW allow | Out-Null

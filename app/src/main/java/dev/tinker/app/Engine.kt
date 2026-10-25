@@ -648,7 +648,7 @@ class Engine private constructor(private val app: Context) {
         val latest = json.getString("tag_name").removePrefix("v")
         val mine = app.packageManager.getPackageInfo(app.packageName, 0).versionName.orEmpty()
         val assets = json.optJSONArray("assets")
-        val apkAsset = (0 until (assets?.length() ?: 0)).map { assets!!.getJSONObject(it) }.firstOrNull { it.optString("name").endsWith(".apk") }
+        val apkAsset = (0 until (assets?.length() ?: 0)).map { assets!!.getJSONObject(it) }.firstOrNull { it.optString("name").startsWith("Tinker-") && it.optString("name").endsWith(".apk") }  // o release também leva o JogoTeste.apk
         val apk = apkAsset?.optString("browser_download_url") ?: json.getString("html_url")
         apkApiUrl = apkAsset?.optString("url").orEmpty()
         // a mesma versão avisa uma vez só: se a pessoa fechou o aviso, ele não volta a cada 30 min

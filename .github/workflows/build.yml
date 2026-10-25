@@ -60,9 +60,10 @@ jobs:
         run: |
           v=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
           cp app/build/outputs/apk/release/app-release.apk "Tinker-$v.apk"
+          cp testgame/build/outputs/apk/release/testgame-release.apk JogoTeste.apk
           if gh release view "v$v" >/dev/null 2>&1; then
-            gh release upload "v$v" "Tinker-$v.apk" --clobber
+            gh release upload "v$v" "Tinker-$v.apk" JogoTeste.apk --clobber
           else
-            gh release create "v$v" "Tinker-$v.apk" --target "$GITHUB_SHA" --title "Tinker $v" \
+            gh release create "v$v" "Tinker-$v.apk" JogoTeste.apk --target "$GITHUB_SHA" --title "Tinker $v" \
               --notes "APK do Tinker $v (arm64). Instala por cima da versão anterior, sem perder os salvos."
           fi
