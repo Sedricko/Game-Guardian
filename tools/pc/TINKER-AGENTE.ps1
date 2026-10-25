@@ -20,6 +20,8 @@ function Say($t) { $l = "$(Get-Date -Format 'HH:mm:ss') $t"; Write-Host $l; Add-
 function Hdr($extra) {
     $h = @{ "User-Agent" = "Tinker"; "Cache-Control" = "no-cache" }
     $t = (Get-Content $tok -ErrorAction SilentlyContinue | Select-Object -First 1)
+    # sem token salvo: usa o login do GitHub CLI (gh auth login), o mesmo do outro agente
+    if (-not $t -and (Get-Command gh -ErrorAction SilentlyContinue)) { $t = (& gh auth token 2>$null | Select-Object -First 1) }
     if ($t) { $h["Authorization"] = "Bearer $($t.Trim())" }
     if ($extra) { $extra.Keys | ForEach-Object { $h[$_] = $extra[$_] } }
     $h
@@ -130,7 +132,7 @@ if (-not (Test-Path $cfg)) {
     Write-Host "Ele fica so neste PC, em $cfg. Enter vazio = sem planilha (resultado so no log)."
     Set-Content $cfg (Read-Host "Link")
 }
-if (-not (Test-Path $tok)) {
+if (-not (Test-Path $tok) -and -not ((Get-Command gh -ErrorAction SilentlyContinue) -and (& gh auth token 2>$null))) {
     Write-Host "Token do GitHub (so leitura, github_pat_...). So precisa se o repositorio for privado; Enter vazio = sem token." -ForegroundColor Yellow
     Set-Content $tok (Read-Host "Token")
 }
