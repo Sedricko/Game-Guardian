@@ -610,16 +610,18 @@ jogo abrir, use propor_receita com os salvos."""
             val text = (if (code < 400) c.inputStream else c.errorStream)?.bufferedReader()?.use { it.readText() }.orEmpty()
             // contador de cota por chave: quantos pedidos hoje e quando acabou
             if (body != null) Session.geminiKeys.indexOf(key).takeIf { it >= 0 }?.let { k ->
-                if (Session.geminiUseDay != quotaDay()) { Session.geminiUse.clear(); Session.geminiOut.clear(); Session.geminiUseModel.clear(); Session.geminiUseDay = quotaDay() }
+                if (Session.geminiUseDay != quotaDay()) { Session.geminiUse.clear(); Session.geminiOut.clear(); Session.geminiUseModel.clear(); Session.geminiUseDay = quotaDay(); Session.geminiCountFull = true }
                 Session.geminiUse[k] = (Session.geminiUse[k] ?: 0) + 1
                 val model = path.substringAfter("models/").substringBefore(':')
                 val used = Session.geminiUseModel.merge("$k|$model", 1, Int::plus) ?: 1
                 if (code == 429 && geminiWait(code, text) == null) {
                     // aprende: este modelo aguenta used-1 pedidos por dia; da próxima vez a chave é trocada antes de chegar lá.
                     // Só sobe: o contador pode ter perdido pedidos (app fechado à força) e contaria menos que o real
-                    val learned = maxOf(used - 1, Session.geminiLimit[model] ?: 0).coerceAtLeast(1)
-                    if (Session.geminiLimit[model] != learned) Diag.add("Gemini: aprendi que $model aguenta $learned pedidos por dia por chave")
-                    Session.geminiLimit[model] = learned
+                    if (Session.geminiCountFull) {
+                        val learned = maxOf(used - 1, Session.geminiLimit[model] ?: 0).coerceAtLeast(1)
+                        if (Session.geminiLimit[model] != learned) Diag.add("Gemini: aprendi que $model aguenta $learned pedidos por dia por chave")
+                        Session.geminiLimit[model] = learned
+                    }
                     val at = java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date())
                     if (Session.geminiOut[k] == null) reportOut(key, at)
                     Session.geminiOut[k] = at

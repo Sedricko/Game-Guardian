@@ -360,6 +360,9 @@ object Session {
     var gameUpdated by mutableStateOf(false)  // o jogo mudou de versão desde a última vez: a IA conserta os salvos que não voltarem
     val geminiUseModel = java.util.concurrent.ConcurrentHashMap<String, Int>()  // "chave|modelo" → pedidos de hoje (a cota é por modelo)
     val geminiLimit = java.util.concurrent.ConcurrentHashMap<String, Int>()  // modelo → pedidos por dia aprendidos (quando a cota acabou)
+    // a contagem de hoje começou na virada do dia? Instalado no meio do dia, o contador não viu os pedidos de antes e aprenderia
+    // um limite baixo demais (25/10: "aguenta 2 pedidos" e trocava de chave a cada 2 perguntas)
+    @Volatile var geminiCountFull = false
     val geminiUse = mutableStateMapOf<Int, Int>()  // pedidos de hoje por chave (índice); o dia vira à meia-noite do Pacífico, como a cota
     val geminiOut = mutableStateMapOf<Int, String>()  // chave → hora em que a cota acabou hoje
     var geminiUseDay = quotaDay()
@@ -418,7 +421,7 @@ class Engine private constructor(private val app: Context) {
             .putString("alwaysRequests", Session.alwaysRequests.joinToString(",")).putBoolean("autoReports", Session.autoReports)
             .putString("geminiUse", quotaDay() + ";" + Session.geminiUse.entries.joinToString(",") { "${it.key}=${it.value}" } + ";" + Session.geminiOut.entries.joinToString(",") { "${it.key}=${it.value}" })
             .putString("geminiUseModel", quotaDay() + ";" + Session.geminiUseModel.entries.joinToString(",") { "${it.key}=${it.value}" })
-            .putString("geminiLimit", Session.geminiLimit.entries.joinToString(",") { "${it.key}=${it.value}" })
+            .putString("geminiLimit2", Session.geminiLimit.entries.joinToString(",") { "${it.key}=${it.value}" }).putBoolean("geminiCountFull", Session.geminiCountFull)
             .putString("geminiSpeed", Session.geminiSpeed.entries.joinToString("\n") { "${it.key}=${it.value}" }).apply()
     }
 
@@ -487,9 +490,11 @@ class Engine private constructor(private val app: Context) {
             use.split(',').forEach { e -> e.split('=').takeIf { it.size == 2 }?.let { (k, n) -> k.toIntOrNull()?.let { Session.geminiUse[it] = n.toIntOrNull() ?: 0 } } }
             out.split(',').forEach { e -> e.split('=', limit = 2).takeIf { it.size == 2 }?.let { (k, t) -> k.toIntOrNull()?.let { Session.geminiOut[it] = t } } }
         }
+        val useDay = prefs.getString("geminiUseModel", null)?.substringBefore(';')
+        Session.geminiCountFull = if (useDay == quotaDay()) prefs.getBoolean("geminiCountFull", false) else useDay != null  // dia novo: conta do zero
         prefs.getString("geminiUseModel", "").orEmpty().split(';').takeIf { it.size == 2 && it[0] == quotaDay() }?.get(1)?.split(',')
             ?.forEach { e -> e.split('=').takeIf { it.size == 2 }?.let { (k, n) -> n.toIntOrNull()?.let { Session.geminiUseModel[k] = it } } }
-        prefs.getString("geminiLimit", "").orEmpty().split(',')
+        prefs.getString("geminiLimit2", "").orEmpty().split(',')
             .forEach { e -> e.split('=').takeIf { it.size == 2 }?.let { (m, n) -> n.toIntOrNull()?.let { Session.geminiLimit[m] = it } } }
         prefs.getString("geminiSpeed", "").orEmpty().lines().forEach { l -> l.split('=').takeIf { it.size == 2 }?.let { (m, ms) -> ms.toLongOrNull()?.let { Session.geminiSpeed[m] = it } } }
         Session.alpha = prefs.getFloat("alpha", Session.alpha)
@@ -1896,13 +1901,14 @@ class Engine private constructor(private val app: Context) {
         },
         AiTool("buscar_valor", "Nova busca na memória pelo valor que a pessoa vê no jogo. Substitui os resultados atuais. " +
             "Busca em grupo: vários valores que ficam juntos no mesmo objeto (ouro;gema;nível) com ::distância em bytes, ex.: 1250;30;7::128.",
-            mapOf("valor" to "número, faixa (100~200), vários com ; (100;250) ou grupo (100;250;7::128)", "tipos" to "opcional: i32,f32,i64,f64 separados por vírgula; vazio = Auto"),
+            mapOf("valor" to "número, faixa (100~200), vários com ; (100;250) ou grupo (100;250;7::128)", "tipos" to "opcional: i32,f32,i64,f64 separados por vírgula; vazio = Auto. Jogo com Lua (o motor diz · Lua): li acha só números do Lua, bem menos resultados"),
             listOf("valor")) { a ->
             val types = a.optString("tipos").split(',').map { it.trim() }.filter { it in TYPE_SIZES && !it.startsWith("x") }.toSet()
             aiBusy { resultsText(search(types, a.optString("valor"))) }
         },
-        AiTool("refinar", "Refina os resultados atuais pelo valor novo (depois que a pessoa mudou o valor no jogo).",
-            mapOf("valor" to "o valor de agora"), listOf("valor")) { a -> aiBusy { resultsText(refine(a.optString("valor"))) } },
+        AiTool("refinar", "Refina os resultados atuais pelo valor novo (depois que a pessoa mudou o valor no jogo). Valor que muda rápido " +
+            "(mortes, pontos, tempo) já mudou de novo quando você refina: use uma faixa a partir do que a pessoa disse (48~70) ou comparar aumentou.",
+            mapOf("valor" to "o valor de agora, ou uma faixa (48~70)"), listOf("valor")) { a -> aiBusy { resultsText(refine(a.optString("valor"))) } },
         AiTool("propor_edicao", "Sugere à pessoa uma edição (aparece um botão Aplicar; nada muda sem ela tocar). Use o endereço exato " +
             "que você viu numa ficha ou nos resultados, com o tipo dele.",
             mapOf("endereco" to "endereço em hexadecimal", "tipo" to "i32, f32, i64, f64, xi32 ou xf32 (o tipo que a ficha ou o resultado mostrou)",
@@ -2020,8 +2026,9 @@ class Engine private constructor(private val app: Context) {
                 if ((count0 ?: 0L) == 0L) return@aiBusy "Não há resultados para vigiar: busque primeiro."
                 // primeiro tira o que muda sozinho (cronômetro, contador, animação): senão qualquer um deles "mudou" antes de a
                 // pessoa mexer, e o refino ficava com lixo (no Police Chief sobraram 4 endereços errados em 2 segundos)
-                delay(2500)
-                val calm = compare("same")
+                // menos quando o valor sobe ou desce o tempo todo enquanto a pessoa joga (mortes, pontos): o "não mudou" tirava
+                // justamente ele (25/10, Last Garden: o contador de mortes sumia a cada rodada)
+                val calm = if (op == "changed") { delay(2500); compare("same") } else "não precisou"
                 val (count1, first) = list()
                 if ((count1 ?: 0L) == 0L) return@aiBusy "Todos os resultados mudavam sozinhos: nenhum é o valor que fica parado até você mexer. Busque de novo."
                 val before = first.associate { it.addr + it.type to it.value }
