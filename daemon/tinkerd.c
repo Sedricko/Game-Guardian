@@ -247,6 +247,9 @@ static void format(int t, const unsigned char *p, char *out) {
 }
 
 static int region_of(const char *perms, const char *name) {
+    // memória herdada do Zygote (o molde de todo app) e as imagens do sistema: igual em todos os apps, criada antes do
+    // jogo existir; valor do jogo nunca fica nela, só deixava a busca mais lenta e com números falsos (o "Pular Zygote" do GG)
+    if (strstr(name, "dalvik-zygote") || strstr(name, "/system/framework/") || strstr(name, "boot.art") || strstr(name, "boot-framework.art")) return -1;
     if (strstr(name, "/dev/kgsl") || strstr(name, "/dev/mali") || strstr(name, "/dev/dri") || strstr(name, "dmabuf")) return R_V;
     if (strstr(name, "dalvik-main space") || strstr(name, "dalvik-alloc space") || strstr(name, "dalvik-large object") ||
         strstr(name, "dalvik-zygote space") || strstr(name, "dalvik-non moving space")) return 0;           // Jh
@@ -280,7 +283,8 @@ static int each_region(void (*fn)(uint64_t s, uint64_t e, int region, void *ctx)
         if (perms[0] != 'r' || (!region_all && (region_exec ? perms[2] != 'x' : perms[1] != 'w'))) continue;
         char *name = off ? line + off : line + strlen(line);
         name[strcspn(name, "\n")] = 0;
-        fn(s, e, region_of(perms, name), ctx);
+        int r = region_of(perms, name);
+        if (r >= 0) fn(s, e, r, ctx);
     }
     fclose(f);
     return 0;
