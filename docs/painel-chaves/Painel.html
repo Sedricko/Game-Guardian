@@ -3,51 +3,81 @@
 <head>
 <base target="_top">
 <style>
-  body { font-family: Arial, sans-serif; font-size: 13px; margin: 8px; color: #202124; }
-  h3 { margin: 4px 0 8px; }
-  .k { border: 1px solid #dadce0; border-radius: 8px; padding: 6px 8px; margin-bottom: 6px; }
+  * { box-sizing: border-box; }
+  body { font-family: Arial, sans-serif; font-size: 13px; margin: 0; padding: 12px; color: #202124; }
+  h3 { margin: 0 0 8px; font-size: 15px; }
+  .top { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 10px; }
+  .top label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: #5f6368; }
+  input, select, textarea { padding: 7px; border: 1px solid #dadce0; border-radius: 6px; font-size: 13px; }
+  #chave { width: 340px; font-family: monospace; resize: vertical; }
+  button { padding: 7px 10px; border: 1px solid #dadce0; border-radius: 6px; background: #fff; cursor: pointer; }
+  button.main { background: #1a73e8; border-color: #1a73e8; color: #fff; }
+  .cols { display: flex; gap: 12px; }
+  .col { flex: 1; min-width: 0; border: 1px solid #dadce0; border-radius: 10px; padding: 10px; max-height: 360px; overflow: auto; }
+  .k { border: 1px solid #e8eaed; border-radius: 8px; padding: 6px 8px; margin-bottom: 6px; }
+  .k b { font-family: monospace; }
   .off { opacity: .5; }
-  .s { color: #5f6368; font-size: 12px; }
-  input { width: 100%; box-sizing: border-box; margin: 3px 0; padding: 6px; }
-  button { margin: 3px 3px 0 0; padding: 5px 8px; cursor: pointer; }
-  #link { word-break: break-all; font-size: 11px; background: #f1f3f4; padding: 6px; border-radius: 6px; }
-  #msg { color: #1a73e8; margin: 6px 0; min-height: 16px; }
+  .s { color: #5f6368; font-size: 12px; margin: 2px 0 4px; }
+  .ok { color: #188038; } .bad { color: #d93025; }
+  #msg { color: #1a73e8; min-height: 18px; margin: 4px 0 8px; }
+  #link { word-break: break-all; font-size: 11px; background: #f1f3f4; padding: 6px; border-radius: 6px; margin: 6px 0; user-select: all; }
+  @media (max-width: 640px) { .cols { flex-direction: column; } #chave { width: 100%; } }
 </style>
 </head>
 <body>
-  <h3>Nova chave</h3>
-  <input id="chave" placeholder="AIza… ou AQ.…" autocomplete="off">
-  <input id="nome" placeholder="Nome (opcional), ex.: conta 2">
-  <button onclick="add()">+ Adicionar</button>
-  <button onclick="run('testarTodas')">Testar todas</button>
+  <div class="top">
+    <label>Provedor<select id="prov"><option value="">— escolha —</option><option value="gemini">Gemini</option><option value="groq">Groq</option></select></label>
+    <label>Chaves (uma por linha: pode colar várias)<textarea id="chave" rows="3" placeholder="AIza… / AQ.… (Gemini) ou gsk_… (Groq)" autocomplete="off"></textarea></label>
+    <label>Nome<input id="nome" placeholder="opcional, ex.: conta 2"></label>
+    <button class="main" onclick="add()">+ Adicionar</button>
+    <button onclick="run('testarTodas')">Testar todas</button>
+  </div>
   <div id="msg"></div>
-  <h3>Chaves</h3>
-  <div id="lista">Carregando…</div>
-  <h3>Link para o Tinker</h3>
-  <div class="s">Cole em Tinker → Ajustes → Assistente (IA) → Painel de chaves. Quem tem este link lê as chaves ativas: não compartilhe.</div>
+  <div class="cols">
+    <div class="col"><h3>Gemini</h3><div id="gemini">Carregando…</div></div>
+    <div class="col"><h3>Groq</h3><div id="groq">Carregando…</div></div>
+  </div>
+  <h3 style="margin-top:12px">Link para o Tinker</h3>
+  <div class="s">Cole em Tinker → Ajustes → Assistente (IA) → Link do painel. Quem tem este link lê as chaves ativas: não compartilhe.</div>
   <div id="link"></div>
   <button onclick="copiar()">Copiar link</button>
 <script>
   function msg(t) { document.getElementById('msg').textContent = t || ''; }
   function esc(t) { return String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+  function item(k) {
+    const cls = k.situacao === 'ok' ? 'ok' : /recusada|sem cota/.test(k.situacao) ? 'bad' : '';
+    return '<div class="k' + (k.ativa ? '' : ' off') + '"><b>' + esc(k.fim) + '</b> ' + esc(k.nome) +
+      '<div class="s">' + (k.ativa ? 'ativa' : 'desligada') + (k.situacao ? ' · <span class="' + cls + '">' + esc(k.situacao) + '</span>' : '') +
+      (k.atualizado ? ' · ' + esc(k.atualizado) : '') + '</div>' +
+      '<button onclick="run(\'alternar\',' + k.linha + ')">' + (k.ativa ? 'Desligar' : 'Ligar') + '</button> ' +
+      '<button onclick="if (confirm(\'Apagar esta chave?\')) run(\'remover\',' + k.linha + ')">Apagar</button></div>';
+  }
   function show(d) {
-    msg('');
-    document.getElementById('lista').innerHTML = d.chaves.length ? d.chaves.map(k =>
-      '<div class="k' + (k.ativa ? '' : ' off') + '"><b>' + esc(k.fim) + '</b> ' + esc(k.nome) +
-      '<div class="s">' + (k.ativa ? 'ativa' : 'desligada') + (k.situacao ? ' · ' + esc(k.situacao) : '') + (k.atualizado ? ' · ' + esc(k.atualizado) : '') + '</div>' +
-      '<button onclick="run(\'alternar\',' + k.linha + ')">' + (k.ativa ? 'Desligar' : 'Ligar') + '</button>' +
-      '<button onclick="if (confirm(\'Apagar esta chave?\')) run(\'remover\',' + k.linha + ')">Apagar</button></div>'
-    ).join('') : 'Nenhuma chave ainda.';
+    msg(d.aviso || '');
+    ['gemini', 'groq'].forEach(p => {
+      const ks = d.chaves.filter(k => k.provedor === p);
+      document.getElementById(p).innerHTML = ks.length ? ks.map(item).join('') : '<div class="s">Nenhuma chave ainda.</div>';
+    });
     document.getElementById('link').textContent = d.link || 'Implante como App da Web (veja o LEIAME) para ter o link.';
   }
   function fail(e) { msg(e.message || String(e)); }
   function run(fn, arg) { msg('…'); google.script.run.withSuccessHandler(show).withFailureHandler(fail)[fn](arg); }
   function add() {
-    msg('Testando a chave…');
+    if (!document.getElementById('prov').value) { msg('Escolha o provedor: Gemini ou Groq.'); return; }
+    msg('Testando as chaves…');
     google.script.run.withSuccessHandler(d => { document.getElementById('chave').value = ''; document.getElementById('nome').value = ''; show(d); })
-      .withFailureHandler(fail).adicionar(document.getElementById('chave').value, document.getElementById('nome').value);
+      .withFailureHandler(fail).adicionar(document.getElementById('chave').value, document.getElementById('nome').value, document.getElementById('prov').value);
   }
-  function copiar() { navigator.clipboard.writeText(document.getElementById('link').textContent).then(() => msg('Link copiado.'), () => msg('Selecione e copie o link.')); }
+  function copiar() {
+    const t = document.getElementById('link').textContent;
+    const done = () => msg('Link copiado.');
+    if (navigator.clipboard) navigator.clipboard.writeText(t).then(done, fallback); else fallback();
+    function fallback() {
+      const a = document.createElement('textarea'); a.value = t; document.body.appendChild(a); a.select();
+      try { document.execCommand('copy'); done(); } catch (e) { msg('Selecione o link e copie.'); }
+      a.remove();
+    }
+  }
   google.script.run.withSuccessHandler(show).withFailureHandler(fail).dadosPainel();
 </script>
 </body>
