@@ -1677,6 +1677,15 @@ class Engine private constructor(private val app: Context) {
     // no escopo do app: com o painel fechando no meio, o teste da tela era cancelado ("rememberCoroutineScope left the composition")
     suspend fun selfTest(): String = scope.async { selfTestIn() }.await()
 
+    /** Para o agente do PC: resultado e registro em files/autoteste.txt (ele lê pelo adb e manda para a planilha). */
+    fun selfTestToFile() {
+        scope.launch(Dispatchers.IO) {
+            val r = runCatching { selfTest() }.getOrElse { "FALHA autoteste: ${it.message}" }
+            val f = File(app.filesDir, "autoteste.txt")
+            File(app.filesDir, "autoteste.tmp").apply { writeText(r + "\n\n" + runCatching { report().readText() }.getOrDefault("")) }.renameTo(f)
+        }
+    }
+
     private suspend fun selfTestIn(): String = withContext(Dispatchers.IO) {
         val out = mutableListOf<String>()
         suspend fun check(name: String, work: suspend () -> String) {
