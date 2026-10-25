@@ -8,6 +8,7 @@ function onOpen() {
   SpreadsheetApp.getUi().createMenu('Tinker')
     .addItem('Abrir painel', 'abrirPainel')
     .addItem('Ligar análise automática dos relatórios', 'ligarAnalise')
+    .addItem('Definir o link da implantação', 'definirLink')
     .addItem('Gerar novo token (invalida o link antigo)', 'novoToken')
     .addToUi();
 }
@@ -49,6 +50,22 @@ function leitura_() {
     p.setProperty('LEITURA', t);
   }
   return t;
+}
+
+// O Google às vezes informa ao script o link de uma implantação velha (arquivada): o painel mostrava um link que dava 404.
+// Aqui se cola o "URL do app da Web" de Implantar → Gerenciar implantações, e o painel passa a mostrar ele.
+function definirLink() {
+  const ui = SpreadsheetApp.getUi();
+  const r = ui.prompt('Link da implantação', 'Cole o URL do app da Web (Implantar → Gerenciar implantações → Copiar). Termina em /exec.', ui.ButtonSet.OK_CANCEL);
+  if (r.getSelectedButton() !== ui.Button.OK) return;
+  const url = r.getResponseText().trim().split('?')[0];
+  if (!/^https:\/\/script\.google\.com\/.+\/exec$/.test(url)) { ui.alert('Não parece o link do app da Web (começa com https://script.google.com e termina em /exec).'); return; }
+  PropertiesService.getScriptProperties().setProperty('URL', url);
+  ui.alert('Pronto. Abra o painel e copie o link de novo para o Tinker.');
+}
+
+function urlApp_() {
+  return PropertiesService.getScriptProperties().getProperty('URL') || ScriptApp.getService().getUrl();
 }
 
 function novoToken() {
@@ -93,7 +110,7 @@ function testar_(chave, provedor) {
 // ---- chamadas do painel ----
 
 function dadosPainel() {
-  const url = ScriptApp.getService().getUrl();
+  const url = urlApp_();
   const tz = Session.getScriptTimeZone();
   return {
     chaves: linhas_().map(r => ({
