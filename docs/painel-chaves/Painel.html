@@ -1,83 +1,107 @@
 <!DOCTYPE html>
-<!-- Painel do Tinker · muda junto com o Code.gs (a versão aparece embaixo, ao lado do link) -->
+<!-- Painel do Tinker · muda junto com o Code.gs (a versão aparece no rodapé) -->
 <html>
 <head>
 <base target="_top">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   * { box-sizing: border-box; }
-  body { font-family: Arial, sans-serif; font-size: 13px; margin: 0; padding: 12px; color: #202124; }
+  body { font-family: Arial, sans-serif; font-size: 13px; margin: 0; padding: 12px; color: #202124; background: #f8f9fa; }
   h3 { margin: 0 0 8px; font-size: 15px; }
-  .top { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 10px; }
-  .top label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: #5f6368; }
-  input, select, textarea { padding: 7px; border: 1px solid #dadce0; border-radius: 6px; font-size: 13px; }
-  #chave { width: 340px; font-family: monospace; resize: vertical; }
-  button { padding: 7px 10px; border: 1px solid #dadce0; border-radius: 6px; background: #fff; cursor: pointer; }
+  .card { background: #fff; border: 1px solid #dadce0; border-radius: 10px; padding: 12px; margin-bottom: 12px; }
+  /* adicionar: provedor e nome numa linha, chaves embaixo ocupando a largura toda */
+  .form { display: grid; grid-template-columns: 160px 1fr; gap: 8px; }
+  .form label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: #5f6368; }
+  .form .wide { grid-column: 1 / -1; }
+  .acoes { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  input, select, textarea { width: 100%; padding: 7px; border: 1px solid #dadce0; border-radius: 6px; font-size: 13px; }
+  #chave { font-family: monospace; resize: vertical; }
+  button { padding: 7px 12px; border: 1px solid #dadce0; border-radius: 6px; background: #fff; cursor: pointer; }
   button.main { background: #1a73e8; border-color: #1a73e8; color: #fff; }
-  .cols { display: flex; gap: 12px; }
-  .col { flex: 1; min-width: 0; border: 1px solid #dadce0; border-radius: 10px; padding: 10px; max-height: 360px; overflow: auto; }
+  button:disabled { opacity: .5; cursor: default; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .lista { max-height: 260px; overflow: auto; }
   .k { border: 1px solid #e8eaed; border-radius: 8px; padding: 6px 8px; margin-bottom: 6px; }
   .k b { font-family: monospace; }
+  .k .botoes { display: flex; gap: 6px; flex-wrap: wrap; }
   .off { opacity: .5; }
   .s { color: #5f6368; font-size: 12px; margin: 2px 0 4px; }
   .ok { color: #188038; } .bad { color: #d93025; }
-  #msg { color: #1a73e8; min-height: 18px; margin: 4px 0 8px; }
-  #link, .link { word-break: break-all; font-size: 11px; background: #f1f3f4; padding: 6px; border-radius: 6px; margin: 6px 0; user-select: all; }
-  @media (max-width: 640px) { .cols { flex-direction: column; } #chave { width: 100%; } }
+  #msg { color: #1a73e8; min-height: 18px; margin: 0 0 8px; }
+  .link { word-break: break-all; font-size: 11px; background: #f1f3f4; padding: 6px; border-radius: 6px; margin: 6px 0; user-select: all; }
+  #versao { text-align: right; }
+  @media (max-width: 640px) { .cols, .form { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
-  <div class="top">
-    <label>Provedor<select id="prov"><option value="">— escolha —</option><option value="gemini">Gemini</option><option value="groq">Groq</option></select></label>
-    <label>Chaves (uma por linha: pode colar várias)<textarea id="chave" rows="3" placeholder="AIza… / AQ.… (Gemini) ou gsk_… (Groq)" autocomplete="off"></textarea></label>
-    <label>Nome<input id="nome" placeholder="opcional, ex.: conta 2"></label>
-    <button class="main" onclick="add()">+ Adicionar</button>
-    <button onclick="run('testarTodas')">Testar todas</button>
+  <div class="card">
+    <h3>Adicionar chaves</h3>
+    <div class="form">
+      <label>Provedor<select id="prov"><option value="">— escolha —</option><option value="gemini">Gemini</option><option value="groq">Groq</option></select></label>
+      <label>Nome<input id="nome" placeholder="opcional, ex.: conta 2" maxlength="60"></label>
+      <label class="wide">Chaves (uma por linha: pode colar várias)<textarea id="chave" rows="3" placeholder="AIza… / AQ.… (Gemini) ou gsk_… (Groq)" autocomplete="off"></textarea></label>
+    </div>
+    <div class="acoes">
+      <button class="main" onclick="add()">+ Adicionar</button>
+      <button onclick="run('testarTodas')">Testar todas</button>
+    </div>
   </div>
   <div id="msg"></div>
   <div class="cols">
-    <div class="col"><h3>Gemini</h3><div id="gemini">Carregando…</div></div>
-    <div class="col"><h3>Groq</h3><div id="groq">Carregando…</div></div>
+    <div class="card"><h3>Gemini</h3><div id="gemini" class="lista">Carregando…</div></div>
+    <div class="card"><h3>Groq</h3><div id="groq" class="lista">Carregando…</div></div>
   </div>
-  <h3 style="margin-top:12px">Link para o Tinker</h3>
-  <div class="s">Cole em Tinker → Ajustes → Assistente (IA) → Link do painel. Quem tem este link lê as chaves ativas: não compartilhe.</div>
-  <div id="link"></div>
-  <button onclick="copiar('link')">Copiar link</button>
-  <h3 style="margin-top:12px">Link de leitura (para análise)</h3>
-  <div class="s">Só os relatórios (aba Relatórios) e o aprendizado, nunca as chaves. É este que você passa para o Claude analisar os problemas.</div>
-  <div id="leitura" class="link"></div>
+  <div class="card">
+    <h3>Link para o Tinker</h3>
+    <div class="s">Cole em Tinker → Ajustes → Assistente (IA) → Link do painel. Quem tem este link lê as chaves ativas: não compartilhe.</div>
+    <div id="link" class="link"></div>
+    <button onclick="copiar('link')">Copiar link</button>
+  </div>
+  <div class="card">
+    <h3>Link de leitura (para análise)</h3>
+    <div class="s">Só os relatórios (aba Relatórios) e o aprendizado, nunca as chaves. É este que você passa para o Claude analisar os problemas.</div>
+    <div id="leitura" class="link"></div>
+    <button onclick="copiar('leitura')">Copiar link de leitura</button>
+  </div>
   <div id="versao" class="s"></div>
-  <button onclick="copiar('leitura')">Copiar link de leitura</button>
 <script>
   function msg(t) { document.getElementById('msg').textContent = t || ''; }
-  function esc(t) { return String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+  function esc(t) { return String(t == null ? '' : t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+  // linha + fim: o script confere que a linha ainda é a mesma chave antes de ligar, desligar ou apagar
   function item(k) {
-    const cls = k.situacao === 'ok' ? 'ok' : /recusada|sem cota/.test(k.situacao) ? 'bad' : '';
+    const cls = k.situacao === 'ok' ? 'ok' : /recusada|sem cota|sem resposta/.test(k.situacao) ? 'bad' : '';
+    const args = Number(k.linha) + ',\'' + esc(k.fim) + '\'';
     return '<div class="k' + (k.ativa ? '' : ' off') + '"><b>' + esc(k.fim) + '</b> ' + esc(k.nome) +
       '<div class="s">' + (k.ativa ? 'ativa' : 'desligada') + (k.situacao ? ' · <span class="' + cls + '">' + esc(k.situacao) + '</span>' : '') +
-      (k.atualizado ? ' · ' + esc(k.atualizado) : '') + '</div>' +
-      '<button onclick="run(\'alternar\',' + k.linha + ')">' + (k.ativa ? 'Desligar' : 'Ligar') + '</button> ' +
-      '<button onclick="if (confirm(\'Apagar esta chave?\')) run(\'remover\',' + k.linha + ')">Apagar</button></div>';
+      (k.atualizado ? ' · ' + esc(k.atualizado) : '') + '</div><div class="botoes">' +
+      '<button onclick="run(\'alternar\',' + args + ')">' + (k.ativa ? 'Desligar' : 'Ligar') + '</button>' +
+      '<button onclick="if (confirm(\'Apagar esta chave?\')) run(\'remover\',' + args + ')">Apagar</button></div></div>';
   }
   function show(d) {
+    d = d || {};
     msg(d.aviso || '');
+    const chaves = d.chaves || [];
     ['gemini', 'groq'].forEach(p => {
-      const ks = d.chaves.filter(k => k.provedor === p);
+      const ks = chaves.filter(k => k.provedor === p);
       document.getElementById(p).innerHTML = ks.length ? ks.map(item).join('') : '<div class="s">Nenhuma chave ainda.</div>';
     });
     document.getElementById('link').textContent = d.link || 'Implante como App da Web (veja o LEIAME) para ter o link.';
     document.getElementById('leitura').textContent = d.leitura || '';
     document.getElementById('versao').textContent = d.versao ? 'Script v' + d.versao : 'Script antigo (sem versão): cole o Code.gs novo';
   }
-  function fail(e) { msg(e.message || String(e)); }
-  function run(fn, arg) { msg('…'); google.script.run.withSuccessHandler(show).withFailureHandler(fail)[fn](arg); }
+  function fail(e) { msg((e && e.message) || String(e)); }
+  function run(fn, a, b) { msg('…'); google.script.run.withSuccessHandler(show).withFailureHandler(fail)[fn](a, b); }
   function add() {
-    if (!document.getElementById('prov').value) { msg('Escolha o provedor: Gemini ou Groq.'); return; }
+    const v = id => document.getElementById(id).value;
+    if (!v('prov')) { msg('Escolha o provedor: Gemini ou Groq.'); return; }
+    if (!v('chave').trim()) { msg('Cole pelo menos uma chave.'); return; }
     msg('Testando as chaves…');
     google.script.run.withSuccessHandler(d => { document.getElementById('chave').value = ''; document.getElementById('nome').value = ''; show(d); })
-      .withFailureHandler(fail).adicionar(document.getElementById('chave').value, document.getElementById('nome').value, document.getElementById('prov').value);
+      .withFailureHandler(fail).adicionar(v('chave'), v('nome'), v('prov'));
   }
   function copiar(id) {
     const t = document.getElementById(id).textContent;
+    if (!t || t.indexOf('https://') !== 0) { msg('Ainda não há link para copiar.'); return; }
     const done = () => msg('Link copiado.');
     if (navigator.clipboard) navigator.clipboard.writeText(t).then(done, fallback); else fallback();
     function fallback() {
