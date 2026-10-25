@@ -522,7 +522,8 @@ class Engine private constructor(private val app: Context) {
         scope.launch { freezeLoop() }
         scope.launch { watchFields() }
         scope.launch { watchNeighbors() }
-        scope.launch { checkUpdate() }
+        // aberto por horas: confere de novo a cada 30 min (antes só ao abrir, e a versão nova passava despercebida)
+        scope.launch { while (true) { checkUpdate(); delay(30 * 60_000L) } }
         // o jogo reabriu (PID novo): escolhe de novo sozinho e os salvos voltam pela restauração
         scope.launch {
             while (true) {
@@ -602,6 +603,8 @@ class Engine private constructor(private val app: Context) {
      * Versão nova na página de releases? Só avisa; sem internet ou com o GitHub fora do ar, não aparece nada
      * e o Tinker funciona igual.
      */
+    @Volatile private var updateSeen = ""
+
     private fun checkUpdate() = runCatching {
         val c = java.net.URL("https://api.github.com/repos/Sedricko/Game-Guardian/releases/latest").openConnection() as java.net.HttpURLConnection
         c.connectTimeout = 5000
@@ -614,7 +617,9 @@ class Engine private constructor(private val app: Context) {
         val assets = json.optJSONArray("assets")
         val apk = (0 until (assets?.length() ?: 0)).map { assets!!.getJSONObject(it).optString("browser_download_url") }
             .firstOrNull { it.endsWith(".apk") } ?: json.getString("html_url")
-        if (mine.isNotEmpty() && newer(latest, mine)) {
+        // a mesma versão avisa uma vez só: se a pessoa fechou o aviso, ele não volta a cada 30 min
+        if (mine.isNotEmpty() && newer(latest, mine) && latest != updateSeen) {
+            updateSeen = latest
             Session.update = latest to apk
             Diag.add("Versão nova disponível: $latest (instalada: $mine)")
         }
