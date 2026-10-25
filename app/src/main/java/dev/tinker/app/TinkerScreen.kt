@@ -135,7 +135,13 @@ fun TinkerPanel(
 
     Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
         Column {
-            Header(overlay, onPick = { picking = true }, onMinimize = onMinimize, onOpenOverlay = onOpenOverlay, onExit = onExit, run = run, onQuickBar = onQuickBar)
+            // deitado (jogo na horizontal) a altura é pouca: cabeçalho e abas numa linha só, sobra mais para a lista
+            val wide = landscape()
+            if (wide) Row(verticalAlignment = Alignment.CenterVertically) {
+                Header(overlay, onPick = { picking = true }, onMinimize = onMinimize, onOpenOverlay = onOpenOverlay, onExit = onExit, run = run, onQuickBar = onQuickBar,
+                    modifier = Modifier.weight(0.5f))
+                if (!picking) TabBar(Modifier.weight(0.5f))
+            } else Header(overlay, onPick = { picking = true }, onMinimize = onMinimize, onOpenOverlay = onOpenOverlay, onExit = onExit, run = run, onQuickBar = onQuickBar)
             error?.let { Banner(it) { error = null } }
             s.gameGone?.let { gone ->
                 // como o GameGuardian: o jogo fechou, pergunta se reabre
@@ -185,7 +191,7 @@ fun TinkerPanel(
                     run { engine.attach(p) }
                 }
             } else {
-                TabBar()
+                if (!wide) TabBar()
                 when (s.tab) {
                     0 -> SearchTab(engine, run)
                     1 -> SavedTab(engine, overlay, onMinimize, run)
@@ -200,10 +206,10 @@ fun TinkerPanel(
 
 /** Abas do Tinker: o Tab do Material tem padding fixo e cortava "Memória" e "Registro" em telas estreitas. */
 @Composable
-private fun TabBar() {
+private fun TabBar(modifier: Modifier = Modifier) {
     val s = Session
     val primary = MaterialTheme.colorScheme.primary
-    Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+    Row(modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
         TABS.forEachIndexed { i, title ->
             val on = s.tab == i
             Box(
@@ -235,13 +241,13 @@ private fun TabBar() {
 @Composable
 private fun Header(
     overlay: Boolean, onPick: () -> Unit, onMinimize: () -> Unit, onOpenOverlay: () -> Unit, onExit: () -> Unit, run: (suspend () -> String) -> Unit,
-    onQuickBar: (() -> Unit)?,
+    onQuickBar: (() -> Unit)?, modifier: Modifier = Modifier,
 ) {
     val s = Session
     val engine = Engine.get(LocalContext.current)
     val p = s.process
     // uma linha só, como no GameGuardian: o resto da tela fica para a lista; tocar no nome troca o jogo
-    Row(Modifier.padding(horizontal = 8.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier.padding(horizontal = 8.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         Row(
             Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).clickable(enabled = !s.busy, onClick = onPick).padding(4.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -1157,9 +1163,14 @@ private fun ClassOpener(engine: Engine) {
  */
 @Composable
 private fun TopArea(content: @Composable ColumnScope.() -> Unit) {
-    val max = (LocalConfiguration.current.screenHeightDp * 0.45f).dp
+    // deitado: só um quarto da altura para os controles (rolam), o resto fica para a lista
+    val max = (LocalConfiguration.current.screenHeightDp * if (landscape()) 0.25f else 0.45f).dp
     Column(Modifier.fillMaxWidth().heightIn(max = max).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
 }
+
+/** Tela deitada (jogo na horizontal): mais larga que alta. */
+@Composable
+private fun landscape() = LocalConfiguration.current.let { it.screenWidthDp > it.screenHeightDp }
 
 /** Uma classe da lista: nome, namespace, campos que bateram com o filtro; toque abre, ⧉ copia o nome. */
 @Composable
@@ -1665,6 +1676,8 @@ private val HELP = listOf(
     "Reportar um problema" to "Na aba Registro, toque em Compartilhar relatório e envie o arquivo .txt. Ele tem tudo que é preciso para investigar.",
 )
 
+private var detectedKey = ""  // a chave já detectada nesta abertura: abrir Ajustes de novo não consulta de novo
+
 /** Modelos do Gemini: ao colar a chave, pergunta ao Google quais ela pode usar e escolhe o melhor; dá para trocar tocando. */
 @Composable
 private fun GeminiModels(engine: Engine) {
@@ -1680,7 +1693,8 @@ private fun GeminiModels(engine: Engine) {
     }
     // chave nova (colada ou digitada): espera parar de mudar e detecta sozinho
     LaunchedEffect(s.geminiKey) {
-        if (s.geminiKey.length < 20) return@LaunchedEffect
+        if (s.geminiKey.length < 20 || (s.geminiModels.isNotEmpty() && detectedKey == s.geminiKey)) return@LaunchedEffect
+        detectedKey = s.geminiKey
         delay(1200)
         detect()
     }

@@ -921,7 +921,11 @@ class Engine private constructor(private val app: Context) {
             library().forEach { g ->
                 put(g.pkg, JSONObject().put("nome", g.name).put("notas", g.notes).put("receitas", jsonFile("recipes-${g.pkg}.json"))
                     // pid -1 (de outra vez do jogo): na restauração o salvo é procurado de novo (classe, ponteiro ou assinatura), nunca usado no endereço velho
-                    .put("salvos", JSONArray().apply { portableSaved(g.pkg).forEach { put(it.put("pid", -1).put("frozen", false)) } }))
+                    .put("salvos", JSONArray().apply { portableSaved(g.pkg).forEach { o ->
+                        // 200 caminhos de reserva por salvo deixavam o backup enorme: os 20 primeiros bastam para voltar
+                        o.optJSONArray("chains")?.let { c -> o.put("chains", JSONArray((0 until minOf(c.length(), 20)).map { c.getString(it) })) }
+                        put(o.put("pid", -1).put("frozen", false))
+                    } }))
             }
         })
         .toString(2)

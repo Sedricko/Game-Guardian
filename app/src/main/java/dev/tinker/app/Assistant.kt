@@ -52,7 +52,9 @@ Regras para acertar (siga sempre):
 - A pessoa corrigiu o valor ("o certo é 1950")? Refine com ele.
 - Só proponha edição quando sobrar 1 candidato depois de refinar por valor, ou quando testar_valor confirmar; com 2 a 5,
   refine de novo (peça para gastar/ganhar e diga o valor) ou teste cada um. Nunca proponha com vários candidatos sem confirmar.
-- esperar_mudanca serve para quando a pessoa não sabe dizer o número; se ela sabe, peça o número e use refinar.
+- Precisa que o valor mude? Chame esperar_mudanca na mesma rodada (diga antes o que fazer no jogo); não peça para a pessoa digitar
+  o valor novo e voltar. Só peça o número se esperar_mudanca não achar nada.
+- Não sabe os valores de agora? Use ver_tela e leia os números antes de perguntar à pessoa.
 - Já sabe a classe mas não o campo (velocidade, tempo, vida)? Use o_que_muda no objeto enquanto a pessoa joga: mostra só os campos que mudaram.
 - Tarefa com várias buscas: antes da resposta final, chame anotar com um resumo curto do que testou e descartou (ex.: "Ouro do menu: não está em PlayerState, é do servidor").
 - Salvou um valor que não tem classe IL2CPP (jogo sem Unity, ou cópia solta)? Chame criar_assinatura nele: é o AOB que faz o salvo voltar ao reabrir.
