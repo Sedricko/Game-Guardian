@@ -156,48 +156,87 @@ function Ui-Nodes {
     }
     throw "nao consegui ler a tela (uiautomator)"
 }
+# tamanho da tela agora (em pe ou deitado): os deslizes sao proporcionais, valem nas duas posicoes
+$script:W = 1440; $script:H = 3120
+function Set-Rot($r) {
+    & $adb shell settings put system user_rotation $r
+    Start-Sleep 3
+    $sz = (& $adb shell wm size) -join " "
+    if ($sz -match "(\d+)x(\d+)") { $a = [int]$Matches[1]; $b = [int]$Matches[2] } else { $a = 1440; $b = 3120 }
+    if ($r -eq 1) { $script:W = [Math]::Max($a, $b); $script:H = [Math]::Min($a, $b) } else { $script:W = [Math]::Min($a, $b); $script:H = [Math]::Max($a, $b) }
+}
+# rola pela margem esquerda (x=30, fora dos botoes): no meio, com a lista ja no topo, o deslize virava toque num tipo (Dword)
+function Scroll-Down { & $adb shell input swipe 30 ([int]($script:H * 0.62)) 30 ([int]($script:H * 0.3)) 300; Start-Sleep -Milliseconds 700 }
 # acha um texto (regex) na tela; sem achar, rola para baixo e tenta de novo
 function Find-Ui($re, $scrolls = 6) {
     for ($k = 0; $k -le $scrolls; $k++) {
         $n = Ui-Nodes | Where-Object { $_.t -match $re } | Select-Object -First 1
         if ($n) { return $n }
-        if ($k -lt $scrolls) { & $adb shell input swipe 30 1900 30 900 300; Start-Sleep -Milliseconds 700 }
+        if ($k -lt $scrolls) { Scroll-Down }
     }
     $null
 }
+# espera um texto aparecer (resultado de uma acao que demora), sem rolar
+function Wait-Ui($re, $secs = 15) {
+    for ($k = 0; $k -lt $secs; $k++) { $n = Find-Ui $re 0; if ($n) { return $n }; Start-Sleep 1 }
+    $null
+}
+function Tap-At($n) { & $adb shell input tap ([int]$n.x) ([int]$n.y); Start-Sleep -Milliseconds 900 }
 function Tap-Ui($re, $scrolls = 6) {
     $n = Find-Ui $re $scrolls
     if (-not $n) { throw "nao achei '$re' na tela" }
-    & $adb shell input tap ([int]$n.x) ([int]$n.y)
-    Start-Sleep -Milliseconds 900
-}
-# botao da fileira de ferramentas (rola para o lado): sem achar na tela, desliza a fileira e procura de novo
-function Tap-Chip($re) {
-    Top-Ui
-    $n = Find-Ui $re 0
-    # a fileira rola para o lado: desliza ate 3 vezes (uma so deixava o ultimo botao ainda fora da tela)
-    for ($k = 0; $k -lt 3 -and -not $n; $k++) {
-        $row = Find-Ui '(^|\s)(Loja|Velocidade|Cron.metros)$' 0
-        if (-not $row) { break }
-        & $adb shell input swipe 1300 ([int]$row.y) 100 ([int]$row.y) 300; Start-Sleep -Milliseconds 700
-        $n = Find-Ui $re 0
-    }
-    if (-not $n) { throw "nao achei o botao '$re' na fileira de ferramentas" }
-    & $adb shell input tap ([int]$n.x) ([int]$n.y)
-    Start-Sleep -Milliseconds 900
+    Tap-At $n
 }
 # o teclado do Tinker (abre quando um campo pega o foco) cobre a metade de baixo: fecha pelo OK dele
 function Close-Pad {
     $nodes = Ui-Nodes
     if ($nodes | Where-Object { $_.t -eq "⌫" }) {
         $ok = $nodes | Where-Object { $_.t -eq "OK" } | Select-Object -Last 1
-        if ($ok) { & $adb shell input tap ([int]$ok.x) ([int]$ok.y); Start-Sleep -Milliseconds 700 }
+        if ($ok) { Tap-At $ok }
     }
 }
-# rola pela margem da tela (x=30, fora dos botoes): no meio, com a lista ja no topo, o deslize virava toque num tipo (Dword)
-function Top-Ui { Close-Pad; for ($k = 0; $k -lt 4; $k++) { & $adb shell input swipe 30 700 30 1900 200 }; Start-Sleep -Milliseconds 500 }
+function Top-Ui { Close-Pad; for ($k = 0; $k -lt 4; $k++) { & $adb shell input swipe 30 ([int]($script:H * 0.22)) 30 ([int]($script:H * 0.62)) 200 }; Start-Sleep -Milliseconds 500 }
+# botao da fileira de ferramentas (rola para o lado): sem achar na tela, desliza a fileira ate 3 vezes
+function Tap-Chip($re) {
+    Top-Ui
+    $n = Find-Ui $re 0
+    for ($k = 0; $k -lt 3 -and -not $n; $k++) {
+        $row = Find-Ui '(^|\s)(Loja|Velocidade|Cron.metros)$' 0
+        if (-not $row) { break }
+        & $adb shell input swipe ([int]($script:W * 0.9)) ([int]$row.y) 100 ([int]$row.y) 300; Start-Sleep -Milliseconds 700
+        $n = Find-Ui $re 0
+    }
+    if (-not $n) { throw "nao achei o botao '$re' na fileira de ferramentas" }
+    Tap-At $n
+}
+# abre a ferramenta (se ja nao estiver aberta) e confere o que ela mostra
+function Open-Tool($chip, $shows) {
+    Top-Ui
+    if (-not (Find-Ui $shows 0)) { Tap-Chip $chip }
+    if (-not (Find-Ui $shows 3)) { throw "abriu mas nao mostrou '$shows'" }
+}
+# janelas do Tinker sobre o jogo (bolinha, painel, barra rapida), pelo dumpsys: o uiautomator nao ve janela flutuante
+function Overlay-Frames {
+    $d = (& $adb shell dumpsys window windows) -join "`n"
+    $d -split "Window #" | Where-Object { $_ -match "APPLICATION_OVERLAY" -and $_ -match "dev\.tinker\.app" -and $_ -match "mHasSurface=true" } | ForEach-Object {
+        if ($_ -match "\sframe=\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]") {
+            $l = [int]$Matches[1]; $t = [int]$Matches[2]; $r = [int]$Matches[3]; $b = [int]$Matches[4]
+            [pscustomobject]@{ x = ($l + $r) / 2; y = ($t + $b) / 2; w = $r - $l; h = $b - $t }
+        }
+    }
+}
+function Open-Bubble {
+    & $adb shell am force-stop $app
+    Step "aba 0" | Out-Null; Start-Sleep 2
+    Tap-Ui "^⧉$" 0  # o botao do menu flutuante no topo do Tinker
+    Start-Sleep 3
+    $b = Overlay-Frames | Sort-Object { $_.w * $_.h } | Select-Object -First 1
+    if (-not $b) { throw "a bolinha nao apareceu (nenhuma janela do Tinker sobre o jogo)" }
+    $b
+}
 
-# volta por todo o app, como uma pessoa: cada aba, cada ferramenta, cada modo; confere que a tela abriu e o app nao fechou
+# volta por todo o app, como uma pessoa: cada aba, cada ferramenta, cada modo, com e sem jogo, em pe e deitado, o menu
+# flutuante e a barra rapida; confere que cada tela abriu e que o app nao fechou
 function Ui-Tour($v) {
     function Check($name, [scriptblock]$b) {
         try { $r = & $b; $script:tourRes += "OK $name$(if ($r) { ": $r" })" }
@@ -209,27 +248,21 @@ function Ui-Tour($v) {
         }
     }
     $script:tourRes = @(); $script:tourShots = ""
-    # print de cada tela de dentro (ferramenta aberta, Mais buscas, Ficha, Codigo, Ajuda), uma linha por print na planilha
+    # print de cada tela de dentro, uma linha por print na planilha
     function Snap($name) { try { Post-Sheet "agente PC: print $name" "" ("jpeg base64`n" + (Shot "tour")) $v } catch { } }
-    & $adb shell settings put system user_rotation 0
+    $tools = @(@('(^|\s)F.{1,2}cil$', "Modo f", "Facil"), @('(^|\s)Velocidade$', "Achar a velocidade|Escolha a velocidade", "Velocidade"),
+               @('(^|\s)Cron.metros$', "Achar cron", "Cronometros"), @('(^|\s)Loja$', "Achar pre", "Loja"),
+               @('(^|\s)Disfar.ado$', "mero disfar", "Disfarcado"))
+    Set-Rot 0
     & $adb logcat -b crash -c
     Step "aba 0" | Out-Null; Start-Sleep 2; Top-Ui
+
+    # --- sem jogo: cada tela abre ---
     Check "Busca: botoes principais no topo" {
         foreach ($t in @("Nova busca", "Refinar", "Ferramentas")) { if (-not (Find-Ui $t 0)) { throw "'$t' nao aparece sem rolar" } }
     }
-    # cada ferramenta: abre pelo botao da fileira e confere o titulo dela; toca de novo para fechar
-    # nome no fim do texto, depois de um espaco (o botao e "emoji Nome"; uma frase com a mesma palavra no meio nao conta)
-    foreach ($tool in @(@('(^|\s)F.{1,2}cil$', "Modo f", "Facil"), @('(^|\s)Velocidade$', "Achar a velocidade", "Velocidade"),
-                        @('(^|\s)Cron.metros$', "Achar cron", "Cronometros"), @('(^|\s)Loja$', "Achar pre", "Loja"),
-                        @('(^|\s)Disfar.ado$', "mero disfar", "Disfarcado"))) {
-        Check "Ferramenta $($tool[2])" {
-            Top-Ui
-            $was = Find-Ui $tool[1] 0
-            if (-not $was) { Tap-Chip $tool[0] }
-            if (-not (Find-Ui $tool[1] 3)) { throw "abriu mas nao mostrou '$($tool[1])'" }
-            Snap "Ferramenta $($tool[2])"
-            Tap-Chip $tool[0]  # fecha
-        }
+    foreach ($tool in $tools) {
+        Check "Ferramenta $($tool[2])" { Open-Tool $tool[0] $tool[1]; Snap "Ferramenta $($tool[2])"; Tap-Chip $tool[0] }
     }
     Check "Mais buscas" {
         Top-Ui; Tap-Ui "Mais buscas"
@@ -249,8 +282,7 @@ function Ui-Tour($v) {
     Check "Registro" { Step "aba 3" | Out-Null; Start-Sleep 2; if (-not (Find-Ui "Compartilhar relat" 4)) { throw "nao mostrou Compartilhar relatorio" } }
     Check "Ajustes: o dia a dia antes da IA" {
         Step "aba 4" | Out-Null; Start-Sleep 2; Top-Ui
-        $menu = Find-Ui "^Menu flutuante$" 0
-        if (-not $menu) { throw "Menu flutuante nao e a primeira coisa dos Ajustes" }
+        if (-not (Find-Ui "^Menu flutuante$" 0)) { throw "Menu flutuante nao e a primeira coisa dos Ajustes" }
         if (-not (Find-Ui "^Assistente \(IA\)$" 12)) { throw "nao achei o Assistente (IA) rolando" }
         "Menu flutuante no topo, IA mais abaixo"
     }
@@ -259,12 +291,102 @@ function Ui-Tour($v) {
         if (-not (Find-Ui "Editor de mem" 2)) { throw "o item da Ajuda nao abriu" }
         Snap "Ajuda"
     }
-    Check "Tinker continua aberto" {
-        if (-not (& $adb shell pidof $app)) { throw "o Tinker fechou durante a volta" }
+    # teste 3: "Configurar IA" abre os Ajustes ja na parte da IA, sem a pessoa rolar
+    Check "Configurar IA leva ate a IA" {
+        Step "aba 0" | Out-Null; Start-Sleep 1
+        Step "ajustesia" | Out-Null; Start-Sleep 2
+        if (-not (Find-Ui "^Assistente \(IA\)$" 0)) { throw "os Ajustes abriram, mas a IA nao esta na tela" }
+        Snap "Configurar IA"
+    }
+
+    # --- teste 1: com o Jogo de Teste escolhido, as ferramentas de verdade ---
+    Front-Game; Start-Sleep 2
+    Check "Com jogo: escolher o Jogo de Teste" { Step "escolher" | Out-Null; Step "aba 0" | Out-Null; Start-Sleep 2; if (Find-Ui "Escolha o jogo para come" 0) { throw "o Tinker nao ficou com o jogo" } }
+    Check "Com jogo: Velocidade 2x e volta a 1x" {
+        Open-Tool $tools[1][0] $tools[1][1]
+        if (-not (Find-Ui "Escolha a velocidade" 0)) { Tap-Ui "^Achar a velocidade$" 3 }
+        if (-not (Wait-Ui "Escolha a velocidade|N.o achei" 20)) { throw "Achar a velocidade nao terminou em 20 s" }
+        if (Find-Ui "N.o achei" 0) { throw "nao achou a velocidade no Jogo de Teste" }
+        Tap-Ui "^2x$" 2; Start-Sleep 2; Snap "Com jogo Velocidade"
+        Tap-Ui "^1x$" 2
+        Tap-Chip $tools[1][0]
+    }
+    Check "Com jogo: Cronometros acha a obra" {
+        Tap "Construir"  # o Jogo de Teste comeca uma obra de 2 h
+        Step "aba 0" | Out-Null; Start-Sleep 2
+        Open-Tool $tools[2][0] $tools[2][1]
+        Tap-Ui "^Achar cron" 3
+        if (-not (Wait-Ui "termina em|Nenhum cron" 25)) { throw "Achar cronometros nao terminou em 25 s" }
+        if (Find-Ui "Nenhum cron" 0) { throw "nao achou a obra do Jogo de Teste" }
+        Snap "Com jogo Cronometros"
+        Tap-Chip $tools[2][0]
+    }
+    Check "Com jogo: Ficha do Jogo.Heroi pela lista de classes" {
+        Step "aba 2" | Out-Null; Start-Sleep 2; Top-Ui
+        Tap-Ui "^Ficha$" 0
+        Tap-Ui "Ver todas as classes" 3
+        Tap-Ui "Heroi" 8
+        if (-not (Wait-Ui "nome|ouro|Her.i" 10)) {
+            $o = Find-Ui "^0x[0-9a-f]+" 4  # a classe abre a lista de objetos: abre o primeiro
+            if ($o) { Tap-At $o }
+            if (-not (Wait-Ui "nome|ouro" 10)) { throw "a ficha do Jogo.Heroi nao mostrou os campos" }
+        }
+        Snap "Com jogo Ficha Heroi"
+    }
+    # teste 5: valor que nao da para buscar mostra frase amigavel (friendly), nao a mensagem tecnica
+    Check "Erro em frase amigavel" {
+        Step "aba 0" | Out-Null; Start-Sleep 2; Top-Ui
+        Tap-Ui "^Valor$" 0
+        foreach ($k in @("1", "~")) { $n = Ui-Nodes | Where-Object { $_.t -eq $k } | Select-Object -Last 1; if (-not $n) { throw "o teclado do Tinker nao abriu" }; Tap-At $n }
+        Close-Pad
+        Tap-Ui "^Nova busca$" 0
+        $sim = Find-Ui "Sim, nova busca" 0; if ($sim) { Tap-At $sim }
+        $m = Wait-Ui "N.o entendi o valor|inv.lid" 10
+        if (-not $m) { throw "nao apareceu mensagem de erro" }
+        if ($m.t -notmatch "N.o entendi o valor") { throw "mensagem tecnica em vez da amigavel: $($m.t)" }
+        Snap "Erro amigavel"
+        Tap-Ui "^Valor$" 0
+        foreach ($k in 1..3) { $n = Ui-Nodes | Where-Object { $_.t -eq "⌫" } | Select-Object -Last 1; if ($n) { Tap-At $n } }
+        Close-Pad
+        $m.t
+    }
+
+    # --- teste 4: deitado ---
+    Set-Rot 1
+    Step "aba 0" | Out-Null; Start-Sleep 2
+    foreach ($tool in $tools) {
+        Check "Deitado: ferramenta $($tool[2])" { Open-Tool $tool[0] $tool[1]; Snap "Deitado Ferramenta $($tool[2])"; Tap-Chip $tool[0] }
+    }
+    Check "Deitado: Mais buscas" { Top-Ui; Tap-Ui "Mais buscas"; if (-not (Find-Ui "Come.ar sem valor" 4)) { throw "nao mostrou 'Comecar sem valor'" }; Snap "Deitado Mais buscas"; Top-Ui; Tap-Ui "Mais buscas" }
+    Check "Deitado: Ficha" { Step "aba 2" | Out-Null; Start-Sleep 2; Top-Ui; Tap-Ui "^Ficha$" 0; if (-not (Find-Ui "classe|nome|ouro" 3)) { throw "a Ficha nao abriu" }; Snap "Deitado Ficha" }
+    Set-Rot 0
+
+    # --- teste 2: menu flutuante e barra rapida (janelas sobre o jogo, vistas pelo dumpsys) ---
+    Check "Menu flutuante: bolinha e painel" {
+        $b = Open-Bubble
+        Snap "Menu flutuante bolinha"
+        & $adb shell input tap ([int]$b.x) ([int]$b.y); Start-Sleep 3
+        $p = Overlay-Frames | Where-Object { $_.w * $_.h -gt $script:W * $script:H * 0.3 }
+        if (-not $p) { throw "tocar na bolinha nao abriu o painel" }
+        Snap "Menu flutuante painel"
+        "bolinha $([int]$b.w)x$([int]$b.h), painel $([int]$p[0].w)x$([int]$p[0].h)"
+    }
+    Check "Barra rapida (segurar a bolinha)" {
+        $b = Open-Bubble
+        & $adb shell input swipe ([int]$b.x) ([int]$b.y) ([int]$b.x) ([int]$b.y) 1200; Start-Sleep 3
+        $bar = Overlay-Frames | Where-Object { $_.w -gt $script:W * 0.6 -and $_.h -lt $script:H * 0.5 }
+        if (-not $bar) { throw "segurar a bolinha nao abriu a barra rapida" }
+        Snap "Barra rapida"
+        "barra $([int]$bar[0].w)x$([int]$bar[0].h)"
+    }
+    & $adb shell am force-stop $app  # fecha a bolinha/barra; as missoes abrem o Tinker de novo
+
+    Check "Tinker continua aberto e sem queda" {
+        Step "aba 0" | Out-Null
+        if (-not (& $adb shell pidof $app)) { throw "o Tinker nao abriu de novo" }
         $c = (& $adb logcat -d -b crash) -join "`n"
         if ($c -match "dev\.tinker\.app") { throw "queda registrada: " + $c.Substring(0, [Math]::Min($c.Length, 1500)) }
     }
-    Step "aba 0" | Out-Null
     $ok = @($script:tourRes | Where-Object { $_ -like "OK*" }).Count
     $fails = ($script:tourRes | Where-Object { $_ -like "FALHA*" }) -join "`n"
     Say "volta pelo app: $ok de $($script:tourRes.Count) ok"
