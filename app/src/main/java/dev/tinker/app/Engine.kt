@@ -2182,6 +2182,18 @@ class Engine private constructor(private val app: Context) {
         }
     }
 
+    /** O número escrito na mesma linha de um nome da tela ("Abates: 113" com "abates"), com o lugar dele. */
+    private suspend fun labeledNumber(label: String): Pair<Long, android.graphics.Rect>? {
+        val png = screenPng()
+        return withContext(Dispatchers.Default) {
+            val bmp = android.graphics.BitmapFactory.decodeByteArray(png, 0, png.size) ?: throw IOException("o print veio vazio")
+            val text = com.google.android.gms.tasks.Tasks.await(ocr.process(com.google.mlkit.vision.common.InputImage.fromBitmap(bmp, 0)))
+            text.textBlocks.flatMap { it.lines }.filter { it.text.contains(label, ignoreCase = true) }.firstNotNullOfOrNull { l ->
+                l.elements.firstNotNullOfOrNull { e -> val n = screenNumber(e.text) ?: return@firstNotNullOfOrNull null; val b = e.boundingBox ?: return@firstNotNullOfOrNull null; n to b }
+            }
+        }
+    }
+
     /** O número que está dentro da área (um pouco maior que onde estava: o número cresce para os lados). */
     private fun readAt(nums: List<Pair<Long, android.graphics.Rect>>, at: android.graphics.Rect): Long? {
         val area = android.graphics.Rect(at).apply { inset(-maxOf(at.width(), 40), -at.height() / 2) }
@@ -2203,20 +2215,23 @@ class Engine private constructor(private val app: Context) {
     fun autoFindStart(value: String, types: Set<String>, waitMs: Long = 600) {
         autoFindStop()
         Session.autoFindWinner = null
-        val target = screenNumber(value) ?: run { Session.autoFind = null; Session.status = "Digite o número que aparece na tela."; return }
+        // número ("113") ou o nome escrito ao lado dele na tela ("Abates"): com o nome, o número pode mudar à vontade
+        val label = value.trim().takeIf { screenNumber(it) == null && it.any(Char::isLetter) }
+        val target = screenNumber(value) ?: if (label != null) 0L else run { Session.autoFind = null; Session.status = "Digite o número que aparece na tela, ou o nome escrito ao lado dele."; return }
         fun say(t: String) { scope.launch(Dispatchers.Main) { if (autoJob != null) Session.autoFind = t } }
         autoJob = scope.launch {
             try {
                 withContext(Dispatchers.Main) { Session.autoFind = "Procurando $target na tela…"; Session.aiHidePanel = true }
                 delay(waitMs)
                 withContext(Dispatchers.Main) { Session.aiHidePanel = false }
-                val seen = screenNumbers()
-                var spots = seen.filter { it.first == target }.map { it.second }.toMutableList()
+                val byLabel = if (label != null) labeledNumber(label) ?: run { say("Não vi \"$label\" com um número do lado na tela."); return@launch } else null
+                val seen = if (byLabel != null) listOf(byLabel) else screenNumbers()
+                var spots = (if (byLabel != null) listOf(byLabel.second) else seen.filter { it.first == target }.map { it.second }).toMutableList()
                 // o número já mudou um pouco (abates, tempo): fica com o mais perto, até 30 de diferença
                 val near = if (spots.isEmpty()) seen.filter { kotlin.math.abs(it.first - target) in 1..30 }.minByOrNull { kotlin.math.abs(it.first - target) } else null
                 if (near != null) spots = mutableListOf(near.second)
                 if (spots.isEmpty()) { say("Não vi $target na tela. Deixe o número visível (painel minimizado) e tente de novo."); return@launch }
-                val start = near?.first ?: target
+                val start = byLabel?.first ?: near?.first ?: target
                 aiBusy { resultsText(search(types, start.toString())) }
                 Diag.add("Achar sozinho: $target em ${spots.size} lugar(es) da tela, ${Session.count} resultados")
                 var place = spots.first()

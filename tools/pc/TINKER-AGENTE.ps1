@@ -366,7 +366,7 @@ function Run-Missions($v) {
         "achou $c lugar(es); em 3x o tempo andou $([math]::Round($d, 1)) em 4 s"
     }
     Mission "achar sozinho lendo a tela (abates)" {
-        $c = Step "sozinho $(Val 'Abates')"
+        $c = Step "sozinho Abates"  # pelo nome na tela: o numero muda rapido demais para digitar
         $msg = ($script:last -split "`n")[0]
         if ($c -lt 1 -or $c -gt 3 -or $msg -match "vi |Parou|Nenhum") { throw "sobraram $c ($msg)" }
         "sobraram $c so lendo a tela ($msg)"
