@@ -507,8 +507,15 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                 }
                 // 🎯 lê o número na tela e refina sozinho a cada mudança; com "IA pode testar valores", acha o verdadeiro
                 val finding = s.autoFind
-                if (finding == null) OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { engine.autoFindStart(s.value, s.types) },
-                    enabled = enabled && s.value.isNotBlank()) { Text("🎯 Achar sozinho (o número da tela)") }
+                if (finding == null) {
+                    // número que muda rápido (tempo, abates): pelo nome escrito ao lado dele na tela
+                    var label by remember { mutableStateOf("") }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        TinkerTextField(label, { label = it }, "ou o nome ao lado (ex.: Moedas)", Modifier.weight(1f))
+                        OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { engine.autoFindStart(label.ifBlank { s.value }, s.types) },
+                            enabled = enabled && (label.isNotBlank() || s.value.isNotBlank())) { Text("🎯 Achar sozinho") }
+                    }
+                }
                 else Panel {
                     Text("🎯 $finding", style = MaterialTheme.typography.bodyMedium)
                     s.autoFindWinner?.let { w ->
