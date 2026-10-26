@@ -2648,7 +2648,8 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
 
 private val HELP = listOf(
     "Como achar um valor" to "1. Escolha o jogo. 2. Digite o número que aparece na tela (ex.: moedas) e toque em Nova busca. " +
-        "3. Faça o número mudar no jogo, digite o novo e toque em Refinar. 4. Repita até sobrar 1 ou poucos resultados.",
+        "3. Faça o número mudar no jogo, digite o novo e toque em Refinar. 4. Repita até sobrar 1 ou poucos resultados. " +
+        "Já sabe o final do endereço (de outra vez)? Refine com ...A4 para ficar só com os que terminam em A4.",
     "Tipos de valor" to "Auto procura Dword, Float, Qword e Double de uma vez. Se souber o tipo, marque só ele: a busca fica mais rápida " +
         "e com menos resultados. Vida e velocidade costumam ser Float; moedas, Dword.",
     "Faixa (100~200)" to "Use quando o jogo mostra o número arredondado ou abreviado (1.2K = 1150~1250) ou quando você não sabe o valor exato. " +

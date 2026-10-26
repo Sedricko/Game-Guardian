@@ -922,6 +922,13 @@ class Engine private constructor(private val app: Context) {
 
     suspend fun refine(value: String): String = call { d ->
         val before = Session.count
+        // "...A4": só os endereços que terminam em A4 (o mesmo campo cai sempre no mesmo final depois de reabrir)
+        addrEnd(value)?.let { end ->
+            val n = d.send("addrend $end").status
+            Session.canUndo = true
+            step(false, "...$end", n)
+            return@call "$n terminam em $end."
+        }
         val n = d.frozenGame(few = (before ?: Long.MAX_VALUE) < 20_000) { d.send("refine ${value.arg()}") }.status
         Session.canUndo = true
         Session.lastRefine = value.trim()
@@ -4752,6 +4759,9 @@ internal fun signature(raw: ByteArray, off: Int, vlen: Int): String {
     }
     return raw.indices.joinToString("") { if (wild[it]) "??" else "%02x".format(raw[it]) }
 }
+
+/** "...A4" (ou "…a4") no refino = endereço termina em A4; null se não for isso. */
+internal fun addrEnd(text: String) = Regex("""(?:\.\.\.|…)\s*([0-9a-fA-F]{1,8})""").matchEntire(text.trim())?.groupValues?.get(1)?.lowercase()
 
 /** Junta duas leituras da assinatura: o byte que mudou vira ??. */
 internal fun mergeSig(old: String, new: String) = old.chunked(2).zip(new.chunked(2)).joinToString("") { (a, b) -> if (a == b) a else "??" }

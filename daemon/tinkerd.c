@@ -823,6 +823,26 @@ static void cmd_compare(const char *opname, const char *value) {
     printf("ok %zu\n", nres);
 }
 
+// Só os resultados cujo endereço termina em "hex" (como o searchAddress com máscara do GameGuardian): o mesmo campo
+// costuma cair sempre no mesmo final de endereço (ex.: ...A4) depois de reabrir. Desfaz com undo, como o refino.
+static void cmd_addrend(const char *hex) {
+    size_t n = strlen(hex);
+    if (n < 1 || n > 8 || strspn(hex, "0123456789abcdefABCDEF") != n) { printf("err final de endereço inválido: %s\n", hex); return; }
+    if (snapfd >= 0) { puts("err ainda são resultados demais: refine antes de filtrar pelo endereço"); return; }
+    uint64_t want = strtoull(hex, NULL, 16), mask = (1ULL << (4 * n)) - 1;
+    if (nres > capprev) {
+        capprev = nres;
+        prev = realloc(prev, capprev * sizeof *prev);
+        if (!prev) { puts("err sem memória"); exit(1); }
+    }
+    memcpy(prev, res, nres * sizeof *res);
+    nprev = nres;
+    size_t k = 0;
+    for (size_t i = 0; i < nres; i++) if ((res[i].addr & mask) == want) res[k++] = res[i];
+    nres = k;
+    printf("ok %zu\n", nres);
+}
+
 // Foto do jogo (antes/depois): a memória gravável inteira vai para um arquivo. Depois de uma ação no jogo (pegar a
 // recompensa do correio), photodiff lista os Dwords que mudaram (fora o que muda sozinho e os ponteiros) e photorestore
 // põe de volta o valor da foto: o jogo volta a ficar como estava antes da ação. Só para jogo offline.
@@ -2901,6 +2921,7 @@ int main(void) {
         else if (!strcmp(cmd, "group")) cmd_group(a1, a2, a3);
         else if (!strcmp(cmd, "refine")) cmd_compare("eq", a1);
         else if (!strcmp(cmd, "compare")) cmd_compare(a1, a2);
+        else if (!strcmp(cmd, "addrend")) cmd_addrend(a1);
         else if (!strcmp(cmd, "snapshot")) cmd_snapshot(a1);
         else if (!strcmp(cmd, "pointers")) cmd_pointers(a1, a2, a3, a4[0] == '1');
         else if (!strcmp(cmd, "aob")) cmd_aob(a1, a2, 1);

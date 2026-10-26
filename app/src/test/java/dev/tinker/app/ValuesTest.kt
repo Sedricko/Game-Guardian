@@ -166,6 +166,14 @@ class ValuesTest {
     }
 
     @Test
+    fun terminaEm() {
+        assertEquals("a4", addrEnd("...A4"))
+        assertEquals("1f0", addrEnd(" … 1F0 "))
+        assertEquals(null, addrEnd("100"))
+        assertEquals(null, addrEnd("...zz"))
+    }
+
+    @Test
     fun crashesOnlyOfTheGame() {
         val log = listOf(
             "--------- beginning of crash", "F libc : Fatal signal 11 in tid 1 (UnityGfx)", "F DEBUG : >>> com.outro <<<",

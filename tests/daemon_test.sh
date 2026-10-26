@@ -352,6 +352,15 @@ grep -q '^State:.*S (sleeping)' /proc/$pid/status || { echo "FALHOU: jogo ficou 
 sleep 0.5; pkill -TERM -f "^$out/tinkerd$" || { echo "FALHOU: daemon não encontrado"; exit 1; }; wait $dpid 2>/dev/null || true
 grep -q '^State:.*S (sleeping)' /proc/$pid/status || { echo "FALHOU: jogo ficou pausado após SIGTERM"; grep State /proc/$pid/status; exit 1; }
 
+# "termina em": dos achados do valor de iaddr fica só o do final de endereço pedido; undo volta
+end=${iaddr: -3}
+iv=$(printf '%s\n' "attach $pid" "read $iaddr i32" | "$out/tinkerd" | tail -1 | cut -d' ' -f2)
+ae=$(printf '%s\n' "attach $pid" "search i32 $iv" "addrend $end" "list 5" "addrend fff0000" "undo" "addrend zz" | "$out/tinkerd")
+echo "$ae"
+mapfile -t ar < <(grep -E '^(ok|err)' <<<"$ae")
+[ "${ar[3]}" = "ok 1" ] && grep -q "^$iaddr " <<<"$ae" && [ "${ar[5]}" = "ok 0" ] && [ "${ar[6]}" = "ok 1" ] && [ "${ar[7]}" = "err final de endereço inválido: zz" ] \
+    || { echo "FALHOU: addrend"; exit 1; }
+
 kill $tpid; wait $tpid 2>/dev/null || true
 dead=$(printf 'attach %s\n' "$pid" | "$out/tinkerd")
 grep -q "^err processo $pid não existe$" <<<"$dead" || { echo "FALHOU: jogo fechado"; exit 1; }
