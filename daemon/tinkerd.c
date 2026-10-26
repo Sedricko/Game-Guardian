@@ -696,8 +696,10 @@ static void cmd_group(const char *types, const char *value, const char *range) {
 }
 
 // Refino: igual a um valor, ou comparado com o valor da última busca/refino (busca desconhecida).
-enum { OP_EQ, OP_INC, OP_DEC, OP_SAME, OP_CHANGED, OP_INCBY, OP_DECBY };
-static const char *OPS[] = {"eq", "inc", "dec", "same", "changed", "incby", "decby"};
+// lin "A;B": o número da tela foi de A para B e a memória guarda k×tela+c (k inteiro de 1 a 100000, c qualquer: dobro,
+// ×10, +100); xk "A;B": guarda tela XOR uma chave fixa (a mesma nas duas vezes). Os dois acham o "guardado diferente".
+enum { OP_EQ, OP_INC, OP_DEC, OP_SAME, OP_CHANGED, OP_INCBY, OP_DECBY, OP_LIN, OP_XK };
+static const char *OPS[] = {"eq", "inc", "dec", "same", "changed", "incby", "decby", "lin", "xk"};
 
 static double num(int t, const unsigned char *p) {
     if (t == T_F32) { float x; memcpy(&x, p, 4); return x; }
@@ -714,6 +716,19 @@ static int keep(int t, const unsigned char *cur, const unsigned char *old, int o
     if (op == OP_SAME) return !memcmp(cur, old, sz);
     if (op == OP_CHANGED) return memcmp(cur, old, sz) != 0;
     double c = num(t, cur), o = num(t, old);
+    if (op == OP_LIN || op == OP_XK) {
+        if (v->n != 2 || TYPES[t].isfloat) return 0;
+        int64_t a = llround(v->v[0].f), b = llround(v->v[1].f), x1 = (int64_t)o, x2 = (int64_t)c;
+        if (a == b || x1 == x2) return 0;
+        if (op == OP_XK) {
+            uint64_t m = sz == 8 ? ~0ULL : (1ULL << (sz * 8)) - 1, k1 = ((uint64_t)x1 ^ (uint64_t)a) & m, k2 = ((uint64_t)x2 ^ (uint64_t)b) & m;
+            return k1 == k2 && k1 != 0;
+        }
+        int64_t d = x2 - x1, dv = b - a;
+        if (d % dv) return 0;
+        int64_t k = d / dv, off = x1 - k * a;
+        return k >= 1 && k <= 100000 && !(k == 1 && off == 0) && off >= -100000000 && off <= 100000000;
+    }
     if (op == OP_INC) return c > o;
     if (op == OP_DEC) return c < o;
     double d = op == OP_INCBY ? c - o : o - c;
@@ -768,7 +783,7 @@ static void cmd_compare(const char *opname, const char *value) {
     int op = -1;
     for (int i = 0; i < (int)(sizeof OPS / sizeof *OPS); i++) if (!strcmp(opname, OPS[i])) op = i;
     if (op < 0) { printf("err comparação inválida: %s\n", opname); return; }
-    int needv = op == OP_EQ || op == OP_INCBY || op == OP_DECBY;
+    int needv = op == OP_EQ || op == OP_INCBY || op == OP_DECBY || op == OP_LIN || op == OP_XK;
     vset_t v[NTYPES];
     int ok[NTYPES];
     for (int t = 0; t < NTYPES; t++) ok[t] = !needv || parse_set(t, value, &v[t]);

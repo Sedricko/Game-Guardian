@@ -401,6 +401,18 @@ function Run-Missions($v) {
         if ($d -ne 1) { throw "a espada custou $d (esperava 1)" }
         "achou $c; a espada saiu por 1"
     }
+    Mission "guardado diferente: nivel x10+7 e moedas com chave fixa" {
+        foreach ($p in @(@("Nivel", "+1 nível", "lin"), @("Moedas", "+1 moeda", "xk"))) {
+            $a = Val $p[0]
+            Step "desconhecido i32" | Out-Null
+            Tap $p[1]; $b = Val $p[0]
+            Step "comparar $($p[2]) $a;$b" | Out-Null
+            Tap $p[1]; $c2 = Val $p[0]
+            $c = Step "comparar $($p[2]) $b;$c2"
+            if ($c -lt 1 -or $c -gt 3) { throw "$($p[0]): sobraram $c depois de 2 mudancas" }
+        }
+        "achou os dois (x10+7 e chave fixa) com 2 mudancas cada"
+    }
     Mission "jogo atualizado (campos mudam de lugar)" {
         Tap "Atualizar jogo"
         $r = Narrow "i32" "Ouro" "+1 ouro" $int

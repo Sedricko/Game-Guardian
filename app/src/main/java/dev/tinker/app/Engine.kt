@@ -4643,7 +4643,8 @@ private val AOB = Regex("""([0-9a-f]{2}|\?\?){1,192}""")
 /** Caminho de ponteiro aceito: vai direto para o daemon, então nada de espaço extra, quebra de linha ou outro comando. */
 private val POINTER = Regex("""[^\s+]{1,100}\+[0-9a-f]{1,16}( [0-9a-f]{1,8}){0,7}""")
 
-val COMPARE_NAMES = mapOf("inc" to "aumentou", "dec" to "diminuiu", "same" to "não mudou", "changed" to "mudou", "incby" to "aumentou", "decby" to "diminuiu")
+val COMPARE_NAMES = mapOf("inc" to "aumentou", "dec" to "diminuiu", "same" to "não mudou", "changed" to "mudou", "incby" to "aumentou", "decby" to "diminuiu",
+    "lin" to "guardado diferente (×k+c)", "xk" to "cifrado com chave fixa")
 
 /** "1.10.0" é mais nova que "1.9.2"? Compara número por número. */
 internal fun newer(latest: String, mine: String): Boolean {

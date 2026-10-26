@@ -67,6 +67,10 @@ class GameActivity : Activity() {
     private val shop = ByteBuffer.allocateDirect(64).order(ByteOrder.LITTLE_ENDIAN).apply {
         intArrayOf(150, 320, 75).forEachIndexed { i, p -> putInt(i * 16, i + 1); putInt(i * 16 + 4, p); putInt(i * 16 + 8, 9) }
     }
+    // guardados diferente: nível como ×10+7 e moedas XOR uma chave fixa (missões "guardado diferente")
+    private val odd = ByteBuffer.allocateDirect(32).order(ByteOrder.LITTLE_ENDIAN).apply { putInt(0, 3 * 10 + 7); putInt(16, 40 xor 0x5A17C3) }
+    private val level get() = (odd.getInt(0) - 7) / 10
+    private val coins get() = odd.getInt(16) xor 0x5A17C3
     private val buildLeft get() = ((build.getLong(8) - System.currentTimeMillis()) / 1000).coerceAtLeast(0)
 
     private fun fresh(): ByteBuffer = ByteBuffer.allocateDirect(160).order(ByteOrder.LITTLE_ENDIAN)
@@ -130,6 +134,8 @@ class GameActivity : Activity() {
         actions["Usar poção"] = { if (potions > 0) potions -= 1 }
         actions["Achar poção"] = { potions += 1 }
         actions["Próxima fase"] = { nextLevel() }
+        actions["+1 nível"] = { odd.putInt(0, (level + 1) * 10 + 7) }
+        actions["+1 moeda"] = { odd.putInt(16, (coins + 1) xor 0x5A17C3) }
         actions["Comprar espada"] = { val p = shop.getInt(4); if (gold >= p) gold -= p }
         actions["Construir"] = { build.putLong(8, System.currentTimeMillis() + 2 * 3600_000L) }
         actions["Atualizar jogo"] = { update() }
@@ -187,7 +193,7 @@ class GameActivity : Activity() {
     }
 
     private fun show() {
-        val t = "Fase $fase · versão ${if (base == 0) 1 else 2}\nOuro: $gold\nGemas: $gems\nVida: ${"%.1f".format(hp)}\nEnergia: $energy\nPontos: $points\nDiamantes: $diamonds\nMadeira: $wood\nPoções: $potions\nTempo: ${"%.1f".format(java.util.Locale.ROOT, time)}\nAbates: $kills\nVelocidade: ${"%.1f".format(java.util.Locale.ROOT, speed)}\nObra: $buildLeft\nEspada: ${shop.getInt(4)}"
+        val t = "Fase $fase · versão ${if (base == 0) 1 else 2}\nOuro: $gold\nGemas: $gems\nVida: ${"%.1f".format(hp)}\nEnergia: $energy\nPontos: $points\nDiamantes: $diamonds\nMadeira: $wood\nPoções: $potions\nTempo: ${"%.1f".format(java.util.Locale.ROOT, time)}\nAbates: $kills\nVelocidade: ${"%.1f".format(java.util.Locale.ROOT, speed)}\nObra: $buildLeft\nEspada: ${shop.getInt(4)}\nNivel: $level\nMoedas: $coins"
         if (t == shown) return  // a tela só muda quando um valor muda
         shown = t
         text.text = t

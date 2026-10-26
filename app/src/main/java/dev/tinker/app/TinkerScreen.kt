@@ -448,6 +448,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
         item { GameSpeed(engine, enabled, run) }
         item { Timers(engine, enabled, run) }
         item { ShopPrices(engine, enabled, run) }
+        item { HiddenValue(engine, enabled, run) }
         item {
             Panel {
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -666,6 +667,36 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
  * Modo fácil: o passo a passo para quem não sabe o que é Dword, Float ou cifrado. Só pergunta o que qualquer pessoa sabe
  * (o número da tela, se aumentou ou diminuiu); o tipo, o cifrado, o dobro e as cópias o Tinker resolve sozinho.
  */
+/**
+ * 🧮 Número guardado diferente: a tela mostra 50 mas a memória guarda 100 (dobro), 507 (×10+7) ou 50 XOR uma chave.
+ * Marca o número de agora; a cada mudança, diz o novo e o Tinker fica com o que mudou na mesma proporção (ou chave).
+ */
+@Composable
+private fun HiddenValue(engine: Engine, enabled: Boolean, run: (suspend () -> String) -> Unit) {
+    var now by remember { mutableStateOf("") }
+    var last by remember { mutableStateOf<String?>(null) }
+    Panel {
+        Text("🧮 Número guardado diferente", style = MaterialTheme.typography.titleMedium)
+        Text(if (last == null) "Quando a busca normal não acha (o jogo guarda em dobro, ×10, +100 ou cifrado): digite o número da tela agora e toque em Começar."
+            else "Era $last. Mude no jogo, digite o número novo e escolha o jeito.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        ValueField(now, if (last == null) "Número da tela agora" else "Número novo", { now = it }, Modifier.fillMaxWidth(), keyboard = KeyboardType.Number)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (last == null) Button(shape = MaterialTheme.shapes.medium, enabled = enabled && now.isNotBlank(), onClick = {
+                val v = now; run { engine.startUnknown(setOf("i32")).also { last = v; now = "" } }
+            }) { Text("Começar") }
+            else {
+                listOf("lin" to "×k + c (dobro, ×10, +100)", "xk" to "Cifrado (chave fixa)").forEach { (op, l) ->
+                    OutlinedButton(shape = MaterialTheme.shapes.medium, enabled = enabled && now.isNotBlank() && now != last, onClick = {
+                        val a = last; val b = now; run { engine.compare(op, "$a;$b").also { last = b; now = "" } }
+                    }) { Text(l) }
+                }
+                TextButton(onClick = { last = null; now = "" }) { Text("Recomeçar") }
+            }
+        }
+    }
+}
+
 /** 🛒 Preços da loja: com a loja aberta, os preços que aparecem viram uma busca em grupo; depois "tudo por 1". */
 @Composable
 private fun ShopPrices(engine: Engine, enabled: Boolean, run: (suspend () -> String) -> Unit) {
