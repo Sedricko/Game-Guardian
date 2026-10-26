@@ -413,6 +413,19 @@ function Run-Missions($v) {
         }
         "achou os dois (x10+7 e chave fixa) com 2 mudancas cada"
     }
+    Mission "patch volta sozinho ao reabrir o jogo" {
+        Step "fixar jogo_bonus_ouro 5" | Out-Null
+        & $adb shell am force-stop $game
+        Start-Sleep 2; Front-Game; Start-Sleep 10  # o Tinker escolhe o jogo de novo e liga os patches salvos
+        $o = Val "Ouro"; Tap "+1 ouro"; Start-Sleep 1
+        $d = (Val "Ouro") - $o
+        Step "escolher" | Out-Null
+        Step "despatch" | Out-Null
+        if ($d -ne 5) { throw "depois de reabrir o ouro subiu $d (esperava 5: o patch nao voltou)" }
+        $o = Val "Ouro"; Tap "+1 ouro"; Start-Sleep 1
+        if (((Val "Ouro") - $o) -ne 1) { throw "desfez o patch mas o ouro nao voltou a subir de 1" }
+        "o patch voltou sozinho pelo nome da funcao e desfez"
+    }
     Mission "jogo atualizado (campos mudam de lugar)" {
         Tap "Atualizar jogo"
         $r = Narrow "i32" "Ouro" "+1 ouro" $int

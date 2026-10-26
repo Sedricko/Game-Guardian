@@ -89,6 +89,8 @@ data class CodePatch(
     val ctx: String = "",
     // endereço de verdade na vez do jogo em que foi criado (não vai para o arquivo): nessa vez não precisa recalcular
     val addr: String = "", val pid: Int = 0,
+    // função com nome (tabela de símbolos da lib): ao reabrir, acha pelo nome em vez de lib+deslocamento
+    val sym: String = "",
 )
 
 // Um método IL2CPP: endereço do código, tipo de retorno (código do Unity: 01 void, 02 bool, 08 int, 0a long, 0c float,
@@ -3790,7 +3792,7 @@ class Engine private constructor(private val app: Context) {
         val room = (info.end.toLong(16) - info.start.toLong(16)).let { if (x86) (it + 15) / 16 * 16 else it }
         if (hex.length / 2 > room) return "A função ${fn.name} é curta demais para esse valor: use um número menor."
         val label = if (ret == 0x01) "não faz nada" else "sempre $value"
-        return createPatch(fn.addr, hex, "$prefix${fn.name} → $label", "${fn.name}() em ${fn.lib} passa a ${if (ret == 0x01) "voltar sem fazer nada" else "devolver $value"}", apply)
+        return createPatch(fn.addr, hex, "$prefix${fn.name} → $label", "${fn.name}() em ${fn.lib} passa a ${if (ret == 0x01) "voltar sem fazer nada" else "devolver $value"}", apply, sym = fn.name)
     }
 
     /**
@@ -3930,7 +3932,7 @@ class Engine private constructor(private val app: Context) {
     private fun hexWords(hex: String) = hex.chunked(8).map { c -> c.chunked(2).reversed().joinToString("").toLong(16).toInt() }
 
     /** Cria o patch (bytes novos no lugar das instruções em addr) e já aplica; os bytes de agora ficam guardados para desfazer. */
-    suspend fun createPatch(addr: String, newHex: String, name: String, note: String = "", apply: Boolean = true): String {
+    suspend fun createPatch(addr: String, newHex: String, name: String, note: String = "", apply: Boolean = true, sym: String = ""): String {
         val hex = newHex.replace(" ", "").lowercase()
         require(Regex("""([0-9a-f]{8}){1,16}""").matches(hex)) { "bytes inválidos: use 8 dígitos por instrução (ex.: 1f2003d5 = NOP)" }
         require(savedPkg != null) { "escolha o jogo primeiro" }
@@ -3944,7 +3946,7 @@ class Engine private constructor(private val app: Context) {
             Triple(w, wordsHex(cur), if (around.size == n + 8) wordsHex(around) else "")
         }
         require(orig != hex) { "esses já são os bytes de agora" }
-        val p = CodePatch(name = name.ifBlank { where }, where = where, orig = orig, new = hex, note = note.take(300), ctx = ctx, addr = addr, pid = currentPid)
+        val p = CodePatch(name = name.ifBlank { where }, where = where, orig = orig, new = hex, note = note.take(300), ctx = ctx, addr = addr, pid = currentPid, sym = sym)
         withContext(Dispatchers.Main) { Session.patches.add(p); storePatches() }
         Diag.add("Patch criado: ${p.name} em $where ($orig → $hex)")
         return if (apply) setPatch(p, true) else "Patch \"${p.name}\" guardado (desligado): ligue em Salvos → Patches de código."
@@ -3964,7 +3966,10 @@ class Engine private constructor(private val app: Context) {
     suspend fun setPatch(p: CodePatch, on: Boolean): String {
         var relocated: String? = null
         val msg = call { d ->
-            val addr = if (p.pid == currentPid && p.addr.isNotEmpty()) p.addr else d.send("resolve ${p.where}", quiet = true).status
+            val bySym = if (p.sym.isEmpty() || p.pid == currentPid) null else runCatching {
+                d.send("syms ${p.sym}", quiet = true).lines.firstOrNull { it.startsWith("sym ") && it.substringAfterLast(' ') == p.sym }?.split(' ')?.get(1)
+            }.getOrNull()
+            val addr = if (p.pid == currentPid && p.addr.isNotEmpty()) p.addr else bySym ?: d.send("resolve ${p.where}", quiet = true).status
             val n = p.new.length / 8
             val cur = wordsHex(d.send("dump $addr i32 $n", quiet = true).lines.map { it.substringAfter(' ').toLong().toInt() })
             val want = if (on) p.new else p.orig
@@ -5015,7 +5020,7 @@ private fun Drawable.toImageBitmap(): ImageBitmap {
 private val WHERE = Regex("""[A-Za-z0-9_.@+-]{1,120}\+[0-9a-f]{1,10}""")
 
 private fun CodePatch.toJson() = JSONObject().put("id", id).put("name", name).put("where", where).put("orig", orig).put("new", new)
-    .put("enabled", enabled).put("suspect", suspect).put("note", note).put("ctx", ctx)
+    .put("enabled", enabled).put("suspect", suspect).put("note", note).put("ctx", ctx).put("sym", sym)
 
 private fun JSONObject.toPatch(): CodePatch? = runCatching {
     val w = getString("where")
@@ -5025,5 +5030,6 @@ private fun JSONObject.toPatch(): CodePatch? = runCatching {
     require(WHERE.matches(w) && Regex("""([0-9a-f]{8}){1,16}""").matches(o) && o.length == n.length && Regex("""[0-9a-f]+""").matches(n))
     CodePatch(optString("id").ifEmpty { java.util.UUID.randomUUID().toString() }, optString("name", w).take(60), w, o, n,
         optBoolean("enabled", false), optBoolean("suspect", false), optString("note", "").take(300),
-        optString("ctx", "").lowercase().takeIf { Regex("""([0-9a-f]{8}){9,24}""").matches(it) }.orEmpty())
+        optString("ctx", "").lowercase().takeIf { Regex("""([0-9a-f]{8}){9,24}""").matches(it) }.orEmpty(),
+        sym = optString("sym", "").takeIf { Regex("""[A-Za-z0-9_.$@:]{1,160}""").matches(it) }.orEmpty())
 }.getOrNull()
