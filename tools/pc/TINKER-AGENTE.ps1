@@ -368,7 +368,7 @@ function Run-Missions($v) {
     Mission "achar sozinho lendo a tela (abates)" {
         $c = Step "sozinho $(Val 'Abates')"
         $msg = ($script:last -split "`n")[0]
-        if ($c -lt 1 -or $c -gt 3) { throw "sobraram $c ($msg)" }
+        if ($c -lt 1 -or $c -gt 3 -or $msg -match "vi |Parou|Nenhum") { throw "sobraram $c ($msg)" }
         "sobraram $c so lendo a tela ($msg)"
     }
     Mission "unreal: objeto pelo nome (tabelas de nomes e objetos)" {

@@ -2212,8 +2212,8 @@ class Engine private constructor(private val app: Context) {
                 withContext(Dispatchers.Main) { Session.aiHidePanel = false }
                 val seen = screenNumbers()
                 var spots = seen.filter { it.first == target }.map { it.second }.toMutableList()
-                // o número já mudou um pouco (abates, tempo): fica com o mais perto, até 5 de diferença
-                val near = if (spots.isEmpty()) seen.filter { kotlin.math.abs(it.first - target) in 1..5 }.minByOrNull { kotlin.math.abs(it.first - target) } else null
+                // o número já mudou um pouco (abates, tempo): fica com o mais perto, até 30 de diferença
+                val near = if (spots.isEmpty()) seen.filter { kotlin.math.abs(it.first - target) in 1..30 }.minByOrNull { kotlin.math.abs(it.first - target) } else null
                 if (near != null) spots = mutableListOf(near.second)
                 if (spots.isEmpty()) { say("Não vi $target na tela. Deixe o número visível (painel minimizado) e tente de novo."); return@launch }
                 val start = near?.first ?: target
@@ -3696,7 +3696,7 @@ class Engine private constructor(private val app: Context) {
         if (nums.size < 2) return "Digite pelo menos 2 preços que aparecem na loja (ex.: 150 320 75)."
         for (type in listOf("i32", "f32")) for (dist in listOf(64, 256, 1024)) {
             search(setOf(type), nums.joinToString(";") + "::$dist")
-            val n = Session.count ?: 0
+            val n = list().first ?: 0  // Session.count só a tela atualiza; aqui vale o que o daemon tem agora
             if (n in 1L..(nums.size * 4L)) return "Achei os ${nums.size} preços juntos ($n resultados, ${if (type == "i32") "Dword" else "Float"}, até $dist bytes). Toque em Tudo por 1."
         }
         return "Não achei os preços juntos: confira os números (sem pontos) ou tente com outros itens da loja."
