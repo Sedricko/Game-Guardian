@@ -132,6 +132,8 @@ function Send-Shots($v) {
                 $tab = @("Busca", "Salvos", "Memoria", "Registro", "Ajustes")[$t]
                 Step "aba $t" | Out-Null
                 Start-Sleep 3
+                # emulador lento: a print saia preta antes de a tela desenhar; espera aparecer conteudo (ate 15 s)
+                for ($k = 0; $k -lt 15; $k++) { if (@(try { Ui-Nodes } catch { @() }).Count -gt 5) { break }; Start-Sleep 1 }
                 Post-Sheet "agente PC: print $tab $($rot[1])" "" ("jpeg base64`n" + (Shot "$t-$($rot[0])")) $v
             }
         }
