@@ -1761,6 +1761,15 @@ class Engine private constructor(private val app: Context) {
                 ?: error("não achei a função ${w[1]}")
             "velocidade" -> if (arg.isEmpty()) return findGameSpeed().also { speedAddrs = it }.let { "ok ${it.size}\ncount ${it.size}\n" + it.joinToString("\n") }
                 else setGameSpeed(speedAddrs, arg)
+            // 🎯 Achar sozinho no Jogo de Teste: põe o jogo na frente, lê a tela e refina sozinho (até 2 minutos)
+            "sozinho" -> {
+                withContext(Dispatchers.Main) { app.packageManager.getLaunchIntentForPackage(TEST_GAME)?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)?.let(app::startActivity) }
+                autoFindStart(w[1], setOf(w.getOrElse(2) { "i32" }), waitMs = 2500)
+                val end = System.currentTimeMillis() + 120_000
+                while (autoJob?.isActive == true && System.currentTimeMillis() < end) delay(500)
+                delay(300)  // a última frase chega pela thread da tela
+                (Session.autoFind ?: "parou").also { autoFindStop() }
+            }
             "despatch" -> Session.patches.filter { it.name.startsWith("missão ") }.onEach { setPatch(it, false); withContext(Dispatchers.Main) { removePatch(it) } }.let { "desfeitos ${it.size}" }
             "desconhecido" -> startUnknown(setOf(w.getOrElse(1) { "i32" }))
             "comparar" -> compare(w[1], w.drop(2).joinToString(" "))
@@ -2176,7 +2185,7 @@ class Engine private constructor(private val app: Context) {
      * value: o número que a pessoa vê agora. Acha ele na tela, busca, e a cada mudança na tela refina sozinho. Com até 3
      * resultados (e "IA pode testar valores" ligado), testa cada um: o que faz o número da tela mudar é o verdadeiro.
      */
-    fun autoFindStart(value: String, types: Set<String>) {
+    fun autoFindStart(value: String, types: Set<String>, waitMs: Long = 600) {
         autoFindStop()
         Session.autoFindWinner = null
         val target = screenNumber(value) ?: run { Session.autoFind = null; Session.status = "Digite o número que aparece na tela."; return }
@@ -2184,14 +2193,19 @@ class Engine private constructor(private val app: Context) {
         autoJob = scope.launch {
             try {
                 withContext(Dispatchers.Main) { Session.autoFind = "Procurando $target na tela…"; Session.aiHidePanel = true }
-                delay(600)
+                delay(waitMs)
                 withContext(Dispatchers.Main) { Session.aiHidePanel = false }
-                val spots = screenNumbers().filter { it.first == target }.map { it.second }.toMutableList()
+                val seen = screenNumbers()
+                var spots = seen.filter { it.first == target }.map { it.second }.toMutableList()
+                // o número já mudou um pouco (abates, tempo): fica com o mais perto, até 5 de diferença
+                val near = if (spots.isEmpty()) seen.filter { kotlin.math.abs(it.first - target) in 1..5 }.minByOrNull { kotlin.math.abs(it.first - target) } else null
+                if (near != null) spots = mutableListOf(near.second)
                 if (spots.isEmpty()) { say("Não vi $target na tela. Deixe o número visível (painel minimizado) e tente de novo."); return@launch }
-                aiBusy { resultsText(search(types, target.toString())) }
+                val start = near?.first ?: target
+                aiBusy { resultsText(search(types, start.toString())) }
                 Diag.add("Achar sozinho: $target em ${spots.size} lugar(es) da tela, ${Session.count} resultados")
                 var place = spots.first()
-                var last = target
+                var last = start
                 val end = System.currentTimeMillis() + 10 * 60_000L
                 while (System.currentTimeMillis() < end) {
                     val count = Session.count ?: 0L

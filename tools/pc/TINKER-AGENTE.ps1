@@ -336,6 +336,12 @@ function Run-Missions($v) {
         if ($d -lt 8) { throw "em 3x o tempo andou so $d em 4 s (normal seria 4)" }
         "achou $c lugar(es); em 3x o tempo andou $([math]::Round($d, 1)) em 4 s"
     }
+    Mission "achar sozinho lendo a tela (abates)" {
+        $c = Step "sozinho $(Val 'Abates')"
+        $msg = ($script:last -split "`n")[0]
+        if ($c -lt 1 -or $c -gt 3) { throw "sobraram $c ($msg)" }
+        "sobraram $c so lendo a tela ($msg)"
+    }
     Mission "jogo atualizado (campos mudam de lugar)" {
         Tap "Atualizar jogo"
         $r = Narrow "i32" "Ouro" "+1 ouro" $int
