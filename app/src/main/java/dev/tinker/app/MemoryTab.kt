@@ -7,7 +7,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -118,8 +117,7 @@ internal fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
         val ownPad = s.ownKeypad
         var hexPad by remember { mutableStateOf(false) }
         val addrTaps = remember { MutableInteractionSource() }
-        val addrPressed by addrTaps.collectIsPressedAsState()
-        LaunchedEffect(addrPressed) { if (addrPressed && ownPad) hexPad = true }
+        OnTap(addrTaps) { if (s.ownKeypad) hexPad = true }
         fun go() {
             val a = parseAddress(goTo)
             if (a != null) { s.view = a to type; hexPad = false } else error = "Endereço inválido: $goTo"
@@ -219,8 +217,7 @@ private fun CodeView(engine: Engine, center: String, run: (suspend () -> String)
     var goTo by remember(center) { mutableStateOf(if (center == "0") "" else center) }
     var pad by remember { mutableStateOf(false) }
     val taps = remember { MutableInteractionSource() }
-    val pressed by taps.collectIsPressedAsState()
-    LaunchedEffect(pressed) { if (pressed && s.ownKeypad) pad = true }
+    OnTap(taps) { if (s.ownKeypad) pad = true }
     LaunchedEffect(center) {
         if (center == "0") return@LaunchedEffect
         runCatching { engine.codeAt(center) }.onSuccess { rows = it; error = null }.onFailure { error = friendly(it.message) }

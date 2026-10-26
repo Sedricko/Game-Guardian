@@ -11,7 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
@@ -117,6 +117,15 @@ private fun PadKey(label: String, modifier: Modifier, ok: Boolean = false, onCli
     ) { Text(label, fontSize = 16.sp, color = if (ok) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface) }
 }
 
+/**
+ * Abre o teclado do Tinker num toque de verdade. Encostar o dedo e arrastar (rolar a lista por cima do campo) cancela o
+ * toque e não abre: antes abria só de encostar, e rolar a Busca deixava o teclado cobrindo a tela.
+ */
+@Composable
+fun OnTap(taps: MutableInteractionSource, action: () -> Unit) {
+    LaunchedEffect(taps) { taps.interactions.collect { if (it is PressInteraction.Release) action() } }
+}
+
 /** Campo de texto com o teclado do Tinker (Ajustes → Teclado do Tinker); desligado, é o campo normal com o do telefone. */
 @Composable
 fun TinkerTextField(
@@ -126,8 +135,7 @@ fun TinkerTextField(
     val own = Session.ownKeypad
     var pad by remember { mutableStateOf(false) }
     val taps = remember { MutableInteractionSource() }
-    val pressed by taps.collectIsPressedAsState()
-    LaunchedEffect(pressed) { if (pressed && own) pad = true }
+    OnTap(taps) { if (Session.ownKeypad) pad = true }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         NoPhoneKeyboard(own) { OutlinedTextField(
             value, onChange, label = { Text(label) }, placeholder = if (placeholder.isEmpty()) null else { { Text(placeholder) } },
