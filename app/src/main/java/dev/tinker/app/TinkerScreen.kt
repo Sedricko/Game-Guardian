@@ -403,6 +403,7 @@ private fun ValueField(value: String, label: String, onChange: (String) -> Unit,
             singleLine = true,
             readOnly = own,
             interactionSource = taps,
+            trailingIcon = if (own) { { PasteButton { onChange(value + it) } } } else null,
             textStyle = MaterialTheme.typography.titleLarge,
             keyboardOptions = KeyboardOptions(keyboardType = if (hex) KeyboardType.Ascii else keyboard),
             modifier = Modifier.fillMaxWidth(),
@@ -1362,6 +1363,7 @@ private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
             OutlinedTextField(
                 value = goTo, onValueChange = { goTo = it.removePrefix("0x").trim() }, label = { Text("Endereço (7a0010+8)") },
                 singleLine = true, readOnly = ownPad, interactionSource = addrTaps, modifier = Modifier.weight(1f),
+                trailingIcon = if (ownPad) { { PasteButton { goTo = it.removePrefix("0x").trim() } } } else null,
             )
             Button(shape = MaterialTheme.shapes.medium, onClick = { go() }, contentPadding = PaddingValues(horizontal = 12.dp)) { Text("Ir") }
             if (center != "0") {
@@ -1466,7 +1468,8 @@ private fun CodeView(engine: Engine, center: String, run: (suspend () -> String)
     }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         OutlinedTextField(goTo, { goTo = it.removePrefix("0x").trim() }, label = { Text("Endereço do código") }, singleLine = true,
-            readOnly = s.ownKeypad, interactionSource = taps, modifier = Modifier.weight(1f))
+            readOnly = s.ownKeypad, interactionSource = taps, modifier = Modifier.weight(1f),
+            trailingIcon = if (s.ownKeypad) { { PasteButton { goTo = it.removePrefix("0x").trim() } } } else null)
         Button(shape = MaterialTheme.shapes.medium, onClick = { go() }, contentPadding = PaddingValues(horizontal = 12.dp)) { Text("Ir") }
     }
     if (s.ownKeypad && pad) NumPad(onKey = { goTo = applyKey(goTo, it) }, onDone = { go() }, compact = landscape(), hex = true)

@@ -22,6 +22,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material3.TextButton
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -133,9 +135,20 @@ fun TinkerTextField(
         OutlinedTextField(
             value, onChange, label = { Text(label) }, placeholder = if (placeholder.isEmpty()) null else { { Text(placeholder) } },
             singleLine = singleLine, readOnly = own, interactionSource = taps,
+            trailingIcon = if (own) { { PasteButton { onChange(value + it) } } } else null,
             textStyle = if (mono) LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace) else LocalTextStyle.current,
             modifier = Modifier.fillMaxWidth(),
         )
         if (own && pad) TextPad(onKey = { onChange(applyKey(value, it)) }, onDone = { pad = false })
     }
+}
+
+/** Colar no campo: com o teclado do Tinker o campo é só leitura e o Android tira o "Colar" do menu de segurar. */
+@Composable
+fun PasteButton(onPaste: (String) -> Unit) {
+    val ctx = LocalContext.current
+    TextButton(onClick = {
+        ctx.getSystemService(android.content.ClipboardManager::class.java).primaryClip?.takeIf { it.itemCount > 0 }
+            ?.getItemAt(0)?.coerceToText(ctx)?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let(onPaste)
+    }) { Text("Colar") }
 }
