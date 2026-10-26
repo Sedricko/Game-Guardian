@@ -1717,6 +1717,8 @@ class Engine private constructor(private val app: Context) {
                 ?: error("o Jogo de Teste não está aberto")
             return "ok " + attach(GameProcess(pid, TEST_GAME, "Jogo de Teste", null))
         }
+        // só troca a aba na tela (para o agente tirar print de cada uma)
+        if (w.firstOrNull() == "aba") return "ok ${TABS.getOrNull(w[1].toInt())}\ncount 0".also { withContext(Dispatchers.Main) { Session.tab = w[1].toInt().coerceIn(0, TABS.lastIndex) } }
         require(Session.process?.pkg == TEST_GAME) { "missão só no Jogo de Teste" }
         val msg = when (w.firstOrNull()) {
             "buscar" -> search(if (w[1] == "auto") emptySet() else setOf(w[1]), w.drop(2).joinToString(" "))
