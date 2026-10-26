@@ -4804,6 +4804,8 @@ internal fun fichaRows(start: Long, raw: ByteArray, base: Long, il2: Il2Class?):
             val size = (il2.fields.getOrNull(n + 1)?.offset ?: (f.offset + 16)) - f.offset
             val floats = if (f.code == 0x11 && size in 8..16 && i + size <= raw.size)
                 List(size / 4) { java.lang.Float.intBitsToFloat(u32(i + 4 * it).toInt()) }.takeIf { v -> v.all { it.isFinite() && kotlin.math.abs(it) < 1e7f } }
+                    // Vector3 + 4 bytes de alinhamento até o próximo ponteiro: o 0 do fim não é campo (Quaternion termina em 1)
+                    ?.let { v -> if (v.size == 4 && v[3] == 0f && u32(i + 12) == 0L) v.take(3) else v }
             else null
             val v = il2.extra[f.offset] ?: floats?.joinToString(", ", "(", ")") { readable(it.toString(), "f32") ?: "?" } ?: when (t) {
                 "f32" -> java.lang.Float.intBitsToFloat(u32(i).toInt()).toString()

@@ -163,6 +163,9 @@ class ValuesTest {
             le(java.lang.Float.floatToIntBits(-3f).toLong(), 4) + le(0, 4) + le(0, 8)
         val unity = Il2Class("Game.Player", "1000", listOf(Il2Field(0, 0x11, "pos"), Il2Field(0xc, 0x0e, "nick")), mapOf(0xc to "\"Ação\""))
         assertEquals(listOf("(1.5, 2, -3)", "\"Ação\""), fichaRows(0x1000, vec, 0x1000, unity).map { it.value })
+        // Vector3 com alinhamento antes do próximo campo (offset 0x10): o 0 de enchimento não aparece
+        val padded = Il2Class("Game.Player", "1000", listOf(Il2Field(0, 0x11, "pos"), Il2Field(0x10, 0x0e, "nick")))
+        assertEquals("(1.5, 2, -3)", fichaRows(0x1000, vec, 0x1000, padded).first().value)
     }
 
     @Test
