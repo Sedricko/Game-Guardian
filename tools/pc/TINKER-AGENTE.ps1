@@ -459,5 +459,5 @@ while ($true) {
         if (-not ((& $adb shell pm list packages com.topjohnwu.magisk) -match "magisk")) { Install-Magisk; continue }
         Test-Version
     } catch { Say "erro: $($_.Exception.Message)" }
-    Start-Sleep 120
+    Start-Sleep 30  # versão nova é testada em até 30 s depois de publicada
 }
