@@ -208,6 +208,7 @@ function Run-Missions($v) {
     Front-Game
     Start-Sleep 2
     Step "escolher" | Out-Null
+    Step "limpar" | Out-Null
     $int = { param($x) [long]$x }
     Mission "ouro (Dword com 6 copias iguais)" {
         $r = Narrow "i32" "Ouro" "+1 ouro" $int

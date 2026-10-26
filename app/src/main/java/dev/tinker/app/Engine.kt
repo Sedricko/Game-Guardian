@@ -1727,6 +1727,8 @@ class Engine private constructor(private val app: Context) {
             "comparar" -> compare(w[1], w.drop(2).joinToString(" "))
             "escrever" -> writeAll(arg)
             "congelar" -> list().second.take(1).also { withContext(Dispatchers.Main) { addSaved(it, frozen = true, name = "missão") } }.let { "congelado ${it.size}" }
+            // tira os salvos de missões anteriores (cada rodada começa do zero)
+            "limpar" -> Session.saved.filter { it.name.startsWith("missão") }.also { withContext(Dispatchers.Main) { removeSaved(it) } }.let { "limpos ${it.size}" }
             "salvar" -> list().second.take(1).also { withContext(Dispatchers.Main) { addSaved(it, name = "missão $arg") } }.let { "salvo ${it.size}" }
             // salvos da missão depois de reabrir o jogo: voltou = o Tinker achou o endereço novo sozinho (pid de agora)
             "salvos" -> return "ok\n" + Session.saved.filter { it.name.startsWith("missão") }.map { i ->
