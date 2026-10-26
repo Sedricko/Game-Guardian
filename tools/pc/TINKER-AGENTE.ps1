@@ -169,6 +169,19 @@ function Tap-Ui($re, $scrolls = 6) {
     & $adb shell input tap ([int]$n.x) ([int]$n.y)
     Start-Sleep -Milliseconds 900
 }
+# botao da fileira de ferramentas (rola para o lado): sem achar na tela, desliza a fileira e procura de novo
+function Tap-Chip($re) {
+    Top-Ui
+    $n = Find-Ui $re 0
+    if (-not $n) {
+        $row = Find-Ui '^\W*Loja$' 0
+        if ($row) { & $adb shell input swipe 1300 ([int]$row.y) 200 ([int]$row.y) 300; Start-Sleep -Milliseconds 700 }
+        $n = Find-Ui $re 0
+    }
+    if (-not $n) { throw "nao achei o botao '$re' na fileira de ferramentas" }
+    & $adb shell input tap ([int]$n.x) ([int]$n.y)
+    Start-Sleep -Milliseconds 900
+}
 function Top-Ui { for ($k = 0; $k -lt 4; $k++) { & $adb shell input swipe 540 700 540 1900 200 }; Start-Sleep -Milliseconds 500 }
 
 # volta por todo o app, como uma pessoa: cada aba, cada ferramenta, cada modo; confere que a tela abriu e o app nao fechou
@@ -188,19 +201,19 @@ function Ui-Tour($v) {
         foreach ($t in @("Nova busca", "Refinar", "Ferramentas")) { if (-not (Find-Ui $t 0)) { throw "'$t' nao aparece sem rolar" } }
     }
     # cada ferramenta: abre pelo botao da fileira e confere o titulo dela; toca de novo para fechar
-    foreach ($tool in @(@("F.{1,2}cil", "Modo f"), @("Velocidade", "Achar a velocidade"), @("Cron.metros", "Achar cron"),
-                        @("Loja", "Achar pre"), @("Disfar.ado", "mero disfar"))) {
+    foreach ($tool in @(@('^\W*F.{1,2}cil$', "Modo f"), @('^\W*Velocidade$', "^Achar a velocidade$"), @('^\W*Cron.metros$', "^Achar cron"),
+                        @('^\W*Loja$', "^Achar pre"), @('^\W*Disfar.ado$', "mero disfar"))) {
         Check "Ferramenta $($tool[0])" {
             Top-Ui
             $was = Find-Ui $tool[1] 0
-            if (-not $was) { Tap-Ui $tool[0] 2 }
+            if (-not $was) { Tap-Chip $tool[0] }
             if (-not (Find-Ui $tool[1] 3)) { throw "abriu mas nao mostrou '$($tool[1])'" }
-            Top-Ui; Tap-Ui $tool[0] 2  # fecha
+            Tap-Chip $tool[0]  # fecha
         }
     }
     Check "Mais buscas" {
         Top-Ui; Tap-Ui "Mais buscas"
-        foreach ($t in @("Come.ar sem valor", "Buscar bytes")) { if (-not (Find-Ui $t 4)) { throw "nao mostrou '$t'" } }
+        foreach ($t in @("Come.ar sem valor", "Busca por bytes")) { if (-not (Find-Ui $t 4)) { throw "nao mostrou '$t'" } }
         Top-Ui; Tap-Ui "Mais buscas"
     }
     Check "Salvos" { Step "aba 1" | Out-Null; Start-Sleep 2; if (-not (Find-Ui "Exportar|Colar lista|Receitas" 6)) { throw "a aba nao mostrou a lista nem Exportar" } }
