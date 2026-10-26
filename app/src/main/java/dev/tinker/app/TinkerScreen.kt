@@ -727,12 +727,14 @@ private fun ShopPrices(engine: Engine, enabled: Boolean, run: (suspend () -> Str
 @Composable
 private fun Timers(engine: Engine, enabled: Boolean, run: (suspend () -> String) -> Unit) {
     var found by remember { mutableStateOf<List<GameTimer>?>(null) }
+    var left by remember { mutableStateOf("") }
     Panel {
         Text("⏱️ Cronômetros (terminar agora)", style = MaterialTheme.typography.titleMedium)
+        TinkerTextField(left, { left = it }, "Quanto falta na tela (ex.: 2h 30min, 45min, 90s)", Modifier.fillMaxWidth())
         Text("Com uma construção ou espera rodando no jogo, acha a hora em que ela termina. Troca os resultados da busca.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Button(shape = MaterialTheme.shapes.medium, enabled = enabled, onClick = {
-            run { engine.findTimers().let { found = it; if (it.isEmpty()) "Nenhum cronômetro (o jogo pode contar de outro jeito, como segundos que faltam)." else "Achei ${it.size} cronômetro(s)." } }
+            run { engine.findTimers(durationSec(left)).let { found = it; if (it.isEmpty()) "Nenhum cronômetro (o jogo pode contar de outro jeito, como segundos que faltam)." else "Achei ${it.size} cronômetro(s)." } }
         }) { Text("Achar cronômetros") }
         found?.takeIf { it.isNotEmpty() }?.let { list ->
             list.take(10).forEach { t ->
@@ -744,6 +746,23 @@ private fun Timers(engine: Engine, enabled: Boolean, run: (suspend () -> String)
             if (list.size > 1) OutlinedButton(shape = MaterialTheme.shapes.medium, enabled = enabled, onClick = { run { engine.finishTimers(list) } }) { Text("Terminar todos") }
         }
     }
+}
+
+/** "2h 30min", "45min", "90s", "1:20:00" → segundos (null: vazio ou não entendeu). */
+internal fun durationSec(text: String): Long? {
+    val t = text.lowercase().replace(" ", "")
+    if (t.isEmpty()) return null
+    Regex("""(\d+):(\d{1,2})(?::(\d{1,2}))?""").matchEntire(t)?.let { m ->
+        val (a, b, c) = m.destructured
+        return if (c.isEmpty()) a.toLong() * 60 + b.toLong() else a.toLong() * 3600 + b.toLong() * 60 + c.toLong()
+    }
+    var sec = 0L
+    var any = false
+    Regex("""(\d+)(d|h|min|m|s)""").findAll(t).forEach { m ->
+        any = true
+        sec += m.groupValues[1].toLong() * when (m.groupValues[2]) { "d" -> 86400L; "h" -> 3600L; "s" -> 1L; else -> 60L }
+    }
+    return if (any) sec else t.toLongOrNull()?.times(60)
 }
 
 /** ⏩ Velocidade do jogo (Unity): acha a escala do tempo pelo relógio do Unity e muda com um toque. */

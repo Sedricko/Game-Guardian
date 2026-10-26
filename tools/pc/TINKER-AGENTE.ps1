@@ -379,7 +379,7 @@ function Run-Missions($v) {
     Mission "cronometro: terminar a construcao agora" {
         Tap "Construir"
         if ((Val "Obra") -lt 3600) { throw "a construcao nao comecou" }
-        $c = Step "cronometros"
+        $c = Step "cronometros $(Val 'Obra')"  # com quanto falta, como a pessoa ve na tela
         if ($c -lt 1) { throw "nao achou o cronometro ($($script:last -replace "`n", ' | '))" }
         Step "terminar" | Out-Null; Start-Sleep 2
         $left = Val "Obra"
@@ -403,15 +403,17 @@ function Run-Missions($v) {
     }
     Mission "guardado diferente: nivel x10+7 e moedas com chave fixa" {
         # mudando de jeitos diferentes (+1 e depois +3): subir sempre igual deixa contadores passarem
-        foreach ($p in @(@("Nivel", "+1 nível", "lin", "+3 níveis"), @("Moedas", "+1 moeda", "xk", "+1 moeda"))) {
+        foreach ($p in @(@("Nivel", "+1 nível", "lin", "+3 níveis"), @("Moedas", "+1 moeda", "xk", "+5 moedas"))) {
             $a = Val $p[0]
             Step "desconhecido i32" | Out-Null
             Tap $p[1]; $b = Val $p[0]
             Step "comparar $($p[2]) $a;$b" | Out-Null
             Tap $p[3]; $c2 = Val $p[0]
             $c = Step "comparar $($p[2]) $b;$c2"
-            # ainda muitos: mais uma mudanca (como uma pessoa faria)
-            if ($c -gt 3) { Tap $p[1]; $c3 = Val $p[0]; $c = Step "comparar $($p[2]) $c2;$c3" }
+            # ainda muitos: mais mudancas, alternando o jeito (como uma pessoa faria)
+            for ($k = 0; $c -gt 3 -and $k -lt 3; $k++) {
+                Tap $p[(1, 3)[$k % 2]]; $c3 = Val $p[0]; $c = Step "comparar $($p[2]) $c2;$c3"; $c2 = $c3
+            }
             if ($c -lt 1 -or $c -gt 3) { throw "$($p[0]): sobraram $c depois de 2 mudancas" }
         }
         "achou os dois (x10+7 e chave fixa) com 2 mudancas cada"

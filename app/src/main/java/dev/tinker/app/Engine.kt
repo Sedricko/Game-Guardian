@@ -1786,7 +1786,7 @@ class Engine private constructor(private val app: Context) {
                 (Session.autoFind ?: "parou").also { autoFindStop() }
             }
             "unreal" -> return unrealObjects(arg).let { (msg, l) -> "ok $msg\ncount ${l.size}\n" + l.joinToString("\n") { "ueobj ${it.addr} ${it.cls} ${it.name}" } }
-            "cronometros" -> return findTimers().also { timerHits = it }.let { "ok ${it.size}\ncount ${it.size}\n" + it.joinToString("\n") { t -> "timer ${t.addr} ${t.leftSec}" } }
+            "cronometros" -> return findTimers(arg.toLongOrNull()).also { timerHits = it }.let { "ok ${it.size}\ncount ${it.size}\n" + it.joinToString("\n") { t -> "timer ${t.addr} ${t.leftSec}" } }
             "terminar" -> finishTimers(timerHits)
             "quaisrodam" -> return whichRun(nativeFunctions(arg).second).let { r -> "ok ${r.size}\ncount ${r.size}\n" + r.joinToString("\n") { "roda ${it.first.name} ${it.second}" } }
             "loja" -> findShopPrices(arg)
@@ -3681,18 +3681,21 @@ class Engine private constructor(private val app: Context) {
      * ⏱️ Cronômetros (construção, espera, energia que volta): jogos offline guardam a hora de terminar como número de
      * milissegundos ou segundos desde 1970. Procura os que terminam entre agora e 7 dias. Usa a lista de resultados da busca.
      */
-    suspend fun findTimers(): List<GameTimer> = call { d ->
+    suspend fun findTimers(leftSec: Long? = null): List<GameTimer> = call { d ->
         val now = System.currentTimeMillis()
         val week = 7L * 86_400_000
         val out = mutableListOf<GameTimer>()
+        // com o "quanto falta" da tela: só a hora de terminar a até 2 min disso (antes achava dezenas e escrevia em dados do jogo)
+        val (from, to) = if (leftSec == null) now to now + week else (now + (leftSec - 120) * 1000).coerceAtLeast(now) to now + (leftSec + 120) * 1000
         for ((type, ms) in listOf("i64" to true, "i64" to false, "i32" to false)) {
-            val lo = if (ms) now else now / 1000
-            val hi = if (ms) now + week else (now + week) / 1000
+            val lo = if (ms) from else from / 1000
+            val hi = if (ms) to else to / 1000
             val n = runCatching { d.send("search $type $lo~$hi").status.toLongOrNull() }.getOrNull() ?: 0
             if (n == 0L || n > 200) continue  // muitos: são relógios e datas comuns, não um cronômetro
             d.send("list 200", quiet = true).lines.forEach { l ->
                 val f = l.split(' ')
                 val v = f.getOrNull(3)?.toLongOrNull() ?: return@forEach
+                if (f[0].toLong(16) % (if (type == "i64") 8 else 4) != 0L) return@forEach  // hora guardada fica alinhada
                 if (out.none { it.addr == f[0] }) out += GameTimer(f[0], type, ms, (if (ms) v - now else v - now / 1000).let { if (ms) it / 1000 else it })
             }
         }
@@ -3702,6 +3705,8 @@ class Engine private constructor(private val app: Context) {
 
     /** Termina o cronômetro agora: a hora de terminar vira o momento atual (menos 1 s). */
     suspend fun finishTimers(timers: List<GameTimer>): String = call { d ->
+        // escrever em dezenas de lugares estraga o jogo (a memória interna dele tem números parecidos com horas)
+        if (timers.size > 5) return@call "${timers.size} lugares é demais para ser só o cronômetro: diga quanto falta na tela e procure de novo."
         val now = System.currentTimeMillis() - 1000
         timers.forEach { t -> d.send("write ${t.addr} ${t.type} ${if (t.ms) now else now / 1000}") }
         "${timers.size} cronômetro(s) terminados agora."

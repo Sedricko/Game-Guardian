@@ -108,6 +108,15 @@ class ValuesTest {
     }
 
     @Test
+    fun quantoFalta() {
+        assertEquals(9000L, durationSec("2h 30min"))
+        assertEquals(2700L, durationSec("45min"))
+        assertEquals(90L, durationSec("90s"))
+        assertEquals(4800L, durationSec("1:20:00"))
+        assertEquals(null, durationSec(""))
+    }
+
+    @Test
     fun versaoNova() {
         assertTrue(newer("1.10.0", "1.9.2"))
         assertTrue(newer("1.5", "1.4.1"))

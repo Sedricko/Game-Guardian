@@ -137,6 +137,7 @@ class GameActivity : Activity() {
         actions["+1 nível"] = { odd.putInt(0, (level + 1) * 10 + 7) }
         actions["+3 níveis"] = { odd.putInt(0, (level + 3) * 10 + 7) }
         actions["+1 moeda"] = { odd.putInt(16, (coins + 1) xor 0x5A17C3) }
+        actions["+5 moedas"] = { odd.putInt(16, (coins + 5) xor 0x5A17C3) }
         actions["Comprar espada"] = { val p = shop.getInt(4); if (gold >= p) gold -= p }
         actions["Construir"] = { build.putLong(8, System.currentTimeMillis() + 2 * 3600_000L) }
         actions["Atualizar jogo"] = { update() }
