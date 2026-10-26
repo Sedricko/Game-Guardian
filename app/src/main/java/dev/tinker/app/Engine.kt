@@ -879,6 +879,16 @@ class Engine private constructor(private val app: Context) {
         val n = d.frozenGame(few = (before ?: Long.MAX_VALUE) < 20_000) { d.send("refine ${value.arg()}") }.status
         Session.canUndo = true
         Session.lastRefine = value.trim()
+        // nada sobrou: os achados eram coincidências de número comum; o valor de verdade pode estar guardado de outro
+        // jeito (em dobro, cifrado com a chave ao lado, decimal). Tenta esses com o número de agora, sem a pessoa pedir.
+        if (n == "0" && value.trim().toDoubleOrNull() != null) for ((l, v, why) in retryPlans("i32,f32,i64,f64,xi32,xf32", normalizeNumbers(value.trim()))) {
+            val found = d.frozenGame { d.send("search $l $v") }.status
+            if (found != "0") {
+                inFile = false
+                step(true, value.trim() + " ($why)", found)
+                return@call "Não era um número comum: achei $found $why. Mude o valor no jogo e refine de novo."
+            }
+        }
         step(false, value.trim(), n)
         when {
             n == "0" -> "Nenhum restou. O valor pode ter mudado de novo antes do refino: toque em Desfazer e refine com o valor atual." + byName +
