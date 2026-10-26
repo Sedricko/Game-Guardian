@@ -33,6 +33,9 @@ static void *ticker(void *arg) {
     return NULL;
 }
 
+// função com nome que chama outra: "calls" acha tick_once dentro dela (o volatile tira a chamada do fim, que viraria jmp)
+__attribute__((noinline)) int tinker_calls_tick(void) { tick_once(); return ticks; }
+
 // código que nunca roda: o teste escreve nele (patch) e confere
 __attribute__((noinline)) int never_called(int x) { return x * 3 + 7; }
 

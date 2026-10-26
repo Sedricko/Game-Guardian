@@ -289,6 +289,10 @@ class ValuesTest {
     fun returnPatchBytes() {
         val ret = "c0035fd6"
         assertEquals(ret, returnPatch(0x01, ""))                               // void: só RET
+        // x86_64 (emulador): MOV EAX, 5 + RET + NOPs; void: RET + NOPs; long: MOV RAX
+        assertEquals("b805000000c39090", returnPatch(0x08, "5", x86 = true))
+        assertEquals("c3909090", returnPatch(0x01, "", x86 = true))
+        assertEquals("48b80a00000000000000c39090909090", returnPatch(0x0a, "10", x86 = true))
         assertEquals("20008052$ret", returnPatch(0x02, "true"))                // MOVZ W0, #1
         assertEquals("e07c8052$ret", returnPatch(0x08, "999"))
         assertEquals("00008012$ret", returnPatch(0x08, "-1"))                  // MOVN W0, #0

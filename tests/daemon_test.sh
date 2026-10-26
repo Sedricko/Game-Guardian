@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 out=$(mktemp -d); tpid=
 trap 'kill -9 $tpid 2>/dev/null || true; rm -rf "$out"' EXIT  # -9: um alvo parado (SIGSTOP) ignora o SIGTERM
 cc -O2 -Wall -Werror -pthread -o "$out/tinkerd" daemon/tinkerd.c -lm
-cc -O2 -pthread -o "$out/target" tests/target.c
+cc -O2 -pthread -rdynamic -o "$out/target" tests/target.c  # -rdynamic: os nomes das funções ficam na tabela de símbolos, como numa lib
 "$out/target" > "$out/info" & tpid=$!
 for _ in $(seq 50); do [ -s "$out/info" ] && break; sleep 0.1; done
 read -r pid iaddr faddr paddr xaddr oaddr yaddr zaddr qaddr waddr taddr caddr maddr kaddr ltaddr lnaddr ppaddr fraddr < "$out/info"
@@ -144,6 +144,16 @@ me=$(printf '%s\n' "attach $pid" "il2methods $oaddr" "il2methods $iaddr" | "$out
 echo "$me"
 grep -qE "^method $caddr 08 target\+[0-9a-f]+ get_gold$" <<<"$me" && grep -qE "^method $kaddr 08 target\+[0-9a-f]+ Tick$" <<<"$me" \
     && grep -qx "ok 2" <<<"$me" && grep -q "^err não achei a classe" <<<"$me" || { echo "FALHOU: métodos IL2CPP"; exit 1; }
+
+# Funções pelo nome (tabela de símbolos), a função de um endereço (eh_frame) e quem ela chama, sem IDA
+fn=$(printf '%s\n' "attach $pid" "syms never_called" "syms tinker_calls" "func $kaddr" "syms zzz_nada" | TINKER_ALL_LIBS=1 "$out/tinkerd")
+echo "$fn"
+grep -qE "^sym $caddr [0-9]+ target never_called$" <<<"$fn" && grep -qE "^ok $kaddr [0-9a-f]+ target\+[0-9a-f]+ x86_64 tick_once$" <<<"$fn" \
+    && grep -qx "ok 0" <<<"$fn" || { echo "FALHOU: funções pelo nome"; exit 1; }
+ct=$(grep -m1 "^sym .* tinker_calls_tick$" <<<"$fn" | cut -d' ' -f2)
+cl=$(printf '%s\n' "attach $pid" "calls $ct" | "$out/tinkerd")
+echo "$cl"
+grep -qE "^call [0-9a-f]+ $kaddr tick_once$" <<<"$cl" || { echo "FALHOU: quem a função chama"; exit 1; }
 
 # Patch: escreve no código (página sem escrita) e lê de volta
 pt=$(printf '%s\n' "attach $pid" "read $caddr i32" "write $caddr i32 -1869574000" "read $caddr i32" | "$out/tinkerd")

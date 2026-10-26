@@ -35,6 +35,9 @@ jobs:
             "$cc" -O2 -Wall -Werror -pthread -o "$dir/libtinkerd.so" daemon/tinkerd.c -lm
             # jogo de teste: o mesmo alvo do teste do daemon, para o autoteste usar no lugar de um jogo
             "$cc" -O2 -pthread -o "$dir/libtinkertarget.so" tests/target.c
+            # lib do Jogo de Teste: funções com nome e chamadas diretas (sem PLT), para a missão "função pelo nome"
+            gdir=testgame/src/main/jniLibs/${abi%%:*}; mkdir -p "$gdir"
+            "$cc" -O1 -shared -fPIC -fno-semantic-interposition -Wl,-Bsymbolic -o "$gdir/libjogo.so" testgame/src/main/c/jogo.c
           done
 
       - uses: actions/setup-java@v6

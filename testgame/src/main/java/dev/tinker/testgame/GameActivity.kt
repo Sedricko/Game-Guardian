@@ -37,6 +37,10 @@ import kotlin.random.Random
  * e o que a tela mostra vai para files/estado.txt (o leitor de tela do Android trava com a tela mudando sem parar).
  */
 class GameActivity : Activity() {
+    // ouro + bônus na lib nativa: o Tinker acha jogo_bonus_ouro pelo nome e fixa o retorno (missão "função pelo nome")
+    private external fun ganhaOuro(ouro: Int): Int
+    companion object { init { System.loadLibrary("jogo") } }
+
     private var mem: ByteBuffer = fresh()
     private val decoys = List(6) { fresh() }  // cópias do ouro que não mandam em nada
     private lateinit var text: TextView
@@ -103,7 +107,7 @@ class GameActivity : Activity() {
         for (i in 0 until 40) inv.putInt(i * 4, Random.nextInt(0, 10))
         potions = prefs.getInt("potions", Random.nextInt(1, 9))
         text = TextView(this).apply { textSize = 24f; setTextColor(Color.WHITE); gravity = Gravity.CENTER }
-        actions["+1 ouro"] = { gold += 1; xp += Random.nextInt(3, 10) }
+        actions["+1 ouro"] = { gold = ganhaOuro(gold); xp += Random.nextInt(3, 10) }  // o bônus vem da lib nativa (libjogo.so)
         actions["+1 gema"] = { gems += 1 }
         actions["-10 vida"] = { hp -= 10f }
         actions["+5 pontos"] = { points += 5 }

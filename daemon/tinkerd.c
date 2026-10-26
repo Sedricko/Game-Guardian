@@ -1754,6 +1754,223 @@ static void cmd_where(const char *addr) {
     else printf("ok %s\n", w);
 }
 
+// ---- Funções das libs do jogo sem IDA nem Ghidra: os nomes vêm da tabela de símbolos da própria lib (.dynsym),
+// o começo de cada função da tabela que o Android usa para desenrolar a pilha (.eh_frame_hdr), e as chamadas das
+// instruções BL (ARM64) e CALL (x86_64). Tudo lido da memória do jogo: vale também para lib dentro do APK.
+typedef struct { uint64_t bias, symtab, strtab, strsz, eh; size_t nsym; int machine; } elf_t;
+typedef struct { uint64_t a; uint32_t name; } fsym_t;
+
+static int elf_open(const module_t *m, elf_t *e) {
+    Elf64_Ehdr h;
+    Elf64_Phdr ph[64];
+    memset(e, 0, sizeof *e);
+    if (read_mem(m->base, &h, sizeof h) || h.e_ident[EI_CLASS] != ELFCLASS64 || h.e_phnum > 64 ||
+        read_mem(m->base + h.e_phoff, ph, h.e_phnum * sizeof *ph)) return -1;
+    uint64_t lo = UINT64_MAX, dyn = 0, dynsz = 0;
+    for (int i = 0; i < h.e_phnum; i++) {
+        if (ph[i].p_type == PT_LOAD && ph[i].p_vaddr < lo) lo = ph[i].p_vaddr & ~0xfffULL;
+        if (ph[i].p_type == PT_DYNAMIC) { dyn = ph[i].p_vaddr; dynsz = ph[i].p_memsz; }
+        if (ph[i].p_type == PT_GNU_EH_FRAME) e->eh = ph[i].p_vaddr;
+    }
+    if (lo == UINT64_MAX) return -1;
+    e->bias = m->base - lo;
+    e->machine = h.e_machine;
+    if (e->eh) e->eh += e->bias;
+    uint64_t hash = 0, gnu = 0;
+    Elf64_Dyn d[256];
+    size_t nd = dynsz / sizeof *d < 256 ? dynsz / sizeof *d : 256;
+    if (dyn && nd && !read_mem(e->bias + dyn, d, nd * sizeof *d)) {
+        for (size_t i = 0; i < nd && d[i].d_tag != DT_NULL; i++) {
+            // o linker do Android deixa o endereço sem somar a base; o do Linux (glibc) às vezes soma
+            uint64_t v = d[i].d_un.d_ptr < e->bias ? d[i].d_un.d_ptr + e->bias : d[i].d_un.d_ptr;
+            if (d[i].d_tag == DT_SYMTAB) e->symtab = v;
+            else if (d[i].d_tag == DT_STRTAB) e->strtab = v;
+            else if (d[i].d_tag == DT_STRSZ) e->strsz = d[i].d_un.d_val;
+            else if (d[i].d_tag == DT_HASH) hash = v;
+            else if (d[i].d_tag == DT_GNU_HASH) gnu = v;
+        }
+    }
+    uint32_t hv[4];
+    if (hash && !read_mem(hash, hv, 8)) e->nsym = hv[1];
+    else if (gnu && !read_mem(gnu, hv, 16) && hv[0] && hv[0] < 1000000) {
+        // GNU hash não diz quantos símbolos: o último é o fim da corrente do maior balde
+        uint32_t *b = malloc(hv[0] * 4ULL), last = 0, c = 0;
+        uint64_t chains = gnu + 16 + (uint64_t)hv[2] * 8 + (uint64_t)hv[0] * 4;
+        if (b && !read_mem(gnu + 16 + (uint64_t)hv[2] * 8, b, hv[0] * 4ULL))
+            for (uint32_t i = 0; i < hv[0]; i++) if (b[i] > last) last = b[i];
+        free(b);
+        if (last >= hv[1]) {
+            while (last - hv[1] < 2000000 && !read_mem(chains + (uint64_t)(last - hv[1]) * 4, &c, 4) && !(c & 1)) last++;
+            e->nsym = last + 1;
+        } else e->nsym = hv[1];
+    }
+    if (e->nsym > 2000000) e->nsym = 0;
+    return 0;
+}
+
+// Funções com nome da lib, em ordem de endereço (devolve quantas; *out é do chamador)
+static int cmp_fsym(const void *a, const void *b) {
+    uint64_t x = ((const fsym_t *)a)->a, y = ((const fsym_t *)b)->a;
+    return x < y ? -1 : x > y;
+}
+
+static size_t elf_funcs(const elf_t *e, fsym_t **out) {
+    *out = NULL;
+    if (!e->symtab || !e->strtab || !e->nsym) return 0;
+    Elf64_Sym *s = malloc(e->nsym * sizeof *s);
+    fsym_t *f = malloc(e->nsym * sizeof *f);
+    size_t n = 0;
+    if (s && f && !read_mem(e->symtab, s, e->nsym * sizeof *s))
+        for (size_t i = 0; i < e->nsym; i++)
+            if (ELF64_ST_TYPE(s[i].st_info) == STT_FUNC && s[i].st_value && s[i].st_shndx != SHN_UNDEF && s[i].st_name < e->strsz)
+                f[n++] = (fsym_t){e->bias + s[i].st_value, s[i].st_name};
+    free(s);
+    if (!n) { free(f); return 0; }
+    qsort(f, n, sizeof *f, cmp_fsym);
+    *out = f;
+    return n;
+}
+
+static void elf_name(const elf_t *e, uint32_t off, char *out, size_t len) {
+    out[0] = 0;
+    if (read_mem(e->strtab + off, out, len - 1)) { size_t i = 0; while (i < len - 1 && !read_mem(e->strtab + off + i, out + i, 1) && out[i]) i++; out[i] = 0; }
+    out[len - 1] = 0;
+    for (char *c = out; *c; c++) if (*c == ' ' || *c == '\n') *c = '_';
+}
+
+// Começos de função da .eh_frame_hdr (tabela já ordenada); só o formato que clang e gcc gravam (datarel sdata4)
+static size_t elf_starts(const elf_t *e, uint64_t **out) {
+    unsigned char h[12];
+    *out = NULL;
+    if (!e->eh || read_mem(e->eh, h, 12) || h[0] != 1 || h[3] != 0x3b || (h[1] & 0x0f) != 0x0b || h[2] != 0x03) return 0;
+    uint32_t n;
+    memcpy(&n, h + 8, 4);
+    if (!n || n > 2000000) return 0;
+    int32_t *t = malloc(n * 8ULL);
+    uint64_t *s = malloc(n * sizeof *s);
+    if (!t || !s || read_mem(e->eh + 12, t, n * 8ULL)) { free(t); free(s); return 0; }
+    for (uint32_t i = 0; i < n; i++) s[i] = e->eh + (int64_t)t[2 * i];
+    free(t);
+    *out = s;
+    return n;
+}
+
+static int game_module(uint64_t a) {
+    if (mods_pid != target) { psize = ptr_size(); if (load_modules()) return -1; }
+    int best = -1;
+    for (size_t i = 0; i < nmods; i++) if (mods[i].base <= a && (best < 0 || mods[i].base > mods[best].base)) best = (int)i;
+    return best < 0 || a - mods[best].base > 0x20000000 ? -1 : best;
+}
+
+// "syms gold": funções com nome nas libs do jogo (fora as do sistema) que contêm o texto; vazio ou * = todas
+static void cmd_syms(const char *filter) {
+    if (mods_pid != target) { psize = ptr_size(); if (load_modules()) { puts("err sem mapa"); return; } }
+    const char *f = !filter[0] || !strcmp(filter, "*") ? "" : filter;
+    size_t shown = 0, total = 0;
+    char name[160];
+    for (size_t m = 0; m < nmods; m++) {
+        elf_t e;
+        fsym_t *fs;
+        // TINKER_ALL_LIBS: o teste no Linux, onde o alvo não fica em /data
+        if ((mods[m].system && !getenv("TINKER_ALL_LIBS")) || elf_open(&mods[m], &e)) continue;
+        size_t n = elf_funcs(&e, &fs);
+        for (size_t i = 0; i < n; i++) {
+            elf_name(&e, fs[i].name, name, sizeof name);
+            if (!name[0] || (f[0] && !strcasestr(name, f))) continue;
+            total++;
+            // tamanho = até a próxima função com nome (a tabela de símbolos nem sempre traz)
+            if (shown++ < 300) printf("sym %" PRIx64 " %" PRIu64 " %s %s\n", fs[i].a, i + 1 < n ? fs[i + 1].a - fs[i].a : 0, mods[m].name, name);
+        }
+        free(fs);
+    }
+    printf("ok %zu\n", total);
+}
+
+// Função que contém addr: começo e fim (eh_frame), nome (símbolo) e a arquitetura da lib
+static int func_of(uint64_t a, uint64_t *start, uint64_t *end, char *name, size_t len, int *machine) {
+    int m = game_module(a);
+    elf_t e;
+    if (m < 0 || elf_open(&mods[m], &e)) return -1;
+    *machine = e.machine;
+    uint64_t *st;
+    size_t n = elf_starts(&e, &st);
+    fsym_t *fs;
+    size_t nf = elf_funcs(&e, &fs);
+    *start = *end = 0;
+    size_t lo = 0, hi = n;
+    while (lo < hi) { size_t mid = (lo + hi) / 2; if (st[mid] <= a) lo = mid + 1; else hi = mid; }
+    if (lo) { *start = st[lo - 1]; *end = lo < n ? st[lo] : *start + 0x1000; }
+    // sem eh_frame: o símbolo com nome logo antes
+    lo = 0; hi = nf;
+    while (lo < hi) { size_t mid = (lo + hi) / 2; if (fs[mid].a <= a) lo = mid + 1; else hi = mid; }
+    name[0] = 0;
+    if (lo && fs[lo - 1].a >= *start) {
+        if (!*start || fs[lo - 1].a > *start) { *start = fs[lo - 1].a; if (lo < nf && (!*end || fs[lo].a < *end)) *end = fs[lo].a; }
+        if (fs[lo - 1].a == *start) elf_name(&e, fs[lo - 1].name, name, len);
+    }
+    free(st);
+    free(fs);
+    if (!*start) return -1;
+    if (!*end || *end - *start > 0x100000) *end = *start + 0x1000;
+    return 0;
+}
+
+static void cmd_func(const char *addr) {
+    uint64_t a = strtoull(addr, NULL, 16), s, e;
+    char name[160], w[160];
+    int mach;
+    if (func_of(a, &s, &e, name, sizeof name, &mach) || where_of(s, w, sizeof w)) { puts("err fora das funções das libs do jogo"); return; }
+    printf("ok %" PRIx64 " %" PRIx64 " %s %s %s\n", s, e, w, mach == EM_X86_64 ? "x86_64" : mach == EM_AARCH64 ? "arm64" : "outra", name[0] ? name : "-");
+}
+
+// "calls ADDR": as funções que a função de ADDR chama (BL no ARM64, CALL rel32 no x86_64), com nome quando tem
+static void cmd_calls(const char *addr) {
+    uint64_t a = strtoull(addr, NULL, 16), s, e;
+    char name[160];
+    int mach;
+    if (func_of(a, &s, &e, name, sizeof name, &mach)) { puts("err fora das funções das libs do jogo"); return; }
+    size_t len = e - s > 0x10000 ? 0x10000 : e - s;
+    unsigned char *b = malloc(len + 8);
+    if (!b || read_mem(s, b, len)) { free(b); puts("err não leu o código"); return; }
+    elf_t el;
+    uint64_t *st = NULL, seen[100];
+    fsym_t *fs = NULL;
+    size_t nst = 0, nf = 0, ns = 0;
+    int m = game_module(s);
+    if (m >= 0 && !elf_open(&mods[m], &el)) { nst = elf_starts(&el, &st); nf = elf_funcs(&el, &fs); }
+    for (size_t i = 0; i + 4 <= len && ns < 100; i += mach == EM_AARCH64 ? 4 : 1) {
+        uint64_t to = 0;
+        if (mach == EM_AARCH64) {
+            uint32_t w;
+            memcpy(&w, b + i, 4);
+            if ((w & 0xfc000000u) == 0x94000000u) to = s + i + (uint64_t)((int64_t)((int32_t)(w << 6) >> 6) * 4);
+        } else if (mach == EM_X86_64 && b[i] == 0xe8 && i + 5 <= len) {
+            int32_t r;
+            memcpy(&r, b + i + 1, 4);
+            to = s + i + 5 + (int64_t)r;
+        }
+        if (!to) continue;
+        // x86 lido byte a byte acha "E8" no meio de outra instrução: só vale se cair no começo de uma função
+        size_t lo = 0, hi = nst;
+        while (lo < hi) { size_t mid = (lo + hi) / 2; if (st[mid] < to) lo = mid + 1; else hi = mid; }
+        int start = lo < nst && st[lo] == to;
+        char tn[160] = "";
+        lo = 0; hi = nf;
+        while (lo < hi) { size_t mid = (lo + hi) / 2; if (fs[mid].a < to) lo = mid + 1; else hi = mid; }
+        if (lo < nf && fs[lo].a == to) { start = 1; elf_name(&el, fs[lo].name, tn, sizeof tn); }
+        if (!start) continue;
+        int dup = 0;
+        for (size_t k = 0; k < ns; k++) dup |= seen[k] == to;
+        if (dup) continue;
+        seen[ns++] = to;
+        printf("call %" PRIx64 " %" PRIx64 " %s\n", s + i, to, tn[0] ? tn : "-");
+    }
+    free(b);
+    free(st);
+    free(fs);
+    printf("ok %zu\n", ns);
+}
+
 // "O que escreve aqui", como o "Find out what writes to this address" do Cheat Engine: um ponto de observação de
 // hardware em cada thread do jogo por alguns segundos; cada instrução que escreve no endereço é anotada e o jogo segue.
 // exec = 0: ponto de observação (escrita em addr); exec = 1: ponto de parada (a instrução em addr vai rodar)
@@ -2523,6 +2740,9 @@ int main(void) {
         else if (!strcmp(cmd, "il2classes")) cmd_il2classes();
         else if (!strcmp(cmd, "resolve")) cmd_resolve(strstr(line, "resolve") + 7);
         else if (!strcmp(cmd, "where")) cmd_where(a1);
+        else if (!strcmp(cmd, "syms")) cmd_syms(a1);
+        else if (!strcmp(cmd, "func")) cmd_func(a1);
+        else if (!strcmp(cmd, "calls")) cmd_calls(a1);
         else if (!strcmp(cmd, "photo")) cmd_photo();
         else if (!strcmp(cmd, "photonoise")) cmd_photonoise();
         else if (!strcmp(cmd, "photodiff")) cmd_photodiff();

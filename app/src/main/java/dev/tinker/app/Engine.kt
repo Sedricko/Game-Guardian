@@ -103,7 +103,8 @@ internal val RET_NAMES = mapOf(0x01 to "void", 0x02 to "bool", 0x03 to "char", 0
  * Bytes (hex, como ficam na memória) de "o método sempre devolve value" em ARM64: carrega o valor em W0/X0 (ou S0/D0 para
  * float/double) e volta. void: só volta (o método deixa de fazer qualquer coisa). null: tipo que não dá (objeto, texto).
  */
-internal fun returnPatch(ret: Int, value: String): String? {
+internal fun returnPatch(ret: Int, value: String, x86: Boolean = false): String? {
+    if (x86) return x86Return(ret, value)
     fun le(w: Int) = (0 until 4).joinToString("") { "%02x".format((w ushr (8 * it)) and 0xff) }
     fun w32(n: Int): List<Int> = when {
         n in 0..0xffff -> listOf(0x52800000 or (n shl 5))
@@ -130,6 +131,30 @@ internal fun returnPatch(ret: Int, value: String): String? {
     }
     return (words + ret0).joinToString("") { le(it) }
 }
+
+/** O mesmo no x86_64 (emulador do PC): MOV EAX/RAX com o valor (MOVD/MOVQ para XMM0 se decimal) e RET, NOPs até 4 bytes. */
+private fun x86Return(ret: Int, value: String): String? {
+    fun le(n: Long, bytes: Int) = (0 until bytes).joinToString("") { "%02x".format((n ushr (8 * it)) and 0xff) }
+    fun i32(n: Int) = "b8" + le(n.toLong(), 4)
+    fun i64(n: Long) = "48b8" + le(n, 8)
+    val v = value.trim().lowercase()
+    val body = when (ret) {
+        0x01 -> ""
+        0x02 -> i32(if (v in setOf("true", "sim", "1", "verdadeiro")) 1 else if (v in setOf("false", "não", "nao", "0", "falso")) 0 else return null)
+        in 0x03..0x09 -> i32(v.toLongOrNull()?.toInt() ?: return null)
+        0x0a, 0x0b -> i64(v.toLongOrNull() ?: return null)
+        0x0c -> i32(java.lang.Float.floatToRawIntBits(v.toFloatOrNull() ?: return null)) + "660f6ec0"
+        0x0d -> i64(java.lang.Double.doubleToRawLongBits(v.toDoubleOrNull() ?: return null)) + "66480f6ec0"
+        else -> return null
+    } + "c3"
+    return body + "90".repeat((8 - body.length % 8) % 8 / 2)
+}
+
+/** Função de uma lib do jogo, achada pelo nome na tabela de símbolos da própria lib (sem IDA nem Ghidra). */
+data class NativeFn(val addr: String, val size: Long, val lib: String, val name: String)
+
+/** Onde fica um endereço de código: começo e fim da função, lib+deslocamento, arquitetura e nome (vazio se a lib não traz). */
+data class FnInfo(val start: String, val end: String, val where: String, val arch: String, val name: String)
 
 // Uma instrução na aba Código: endereço, onde fica na lib, os 4 bytes e o que ela faz.
 data class CodeRow(val addr: String, val where: String, val word: Int?, val text: String)
@@ -228,7 +253,7 @@ data class Step(
 )
 
 /** Motor do jogo, reconhecido pelas bibliotecas do APK; bits do processo (32 ou 64). */
-data class GameEngine(val name: String, val bits: Int, val lua: Boolean = false) {
+data class GameEngine(val name: String, val bits: Int, val lua: Boolean = false, val x86: Boolean = false) {
     val il2cpp get() = name == "Unity IL2CPP"
     val header get() = if (bits == 32) 0x8L else 0x10L  // onde começam os campos de um objeto IL2CPP
     override fun toString() = "$name · $bits bits" + if (lua) " · Lua" else ""
@@ -747,7 +772,7 @@ class Engine private constructor(private val app: Context) {
             else -> "motor próprio"
         }
         // Lua 5.3/5.4 (xLua, ToLua, SLua): a Ficha Lua lê as tabelas; LuaJIT guarda diferente e fica de fora
-        return GameEngine(name, bits, has("libxlua", "libtolua", "libslua", "libulua", "liblua5", "liblua.so"))
+        return GameEngine(name, bits, has("libxlua", "libtolua", "libslua", "libulua", "liblua5", "liblua.so"), x86 = dir.startsWith("x86"))
     }
 
     suspend fun followGame(startDaemon: Boolean): String? {
@@ -1723,6 +1748,13 @@ class Engine private constructor(private val app: Context) {
         val msg = when (w.firstOrNull()) {
             "buscar" -> search(if (w[1] == "auto") emptySet() else setOf(w[1]), w.drop(2).joinToString(" "))
             "refinar" -> refine(arg)
+            // funções da lib do jogo pelo nome, quem uma função chama, fixar o retorno e desfazer (patch)
+            "funcoes" -> return nativeFunctions(arg).let { (n, l) -> "ok $n\n" + l.joinToString("\n") { "fn ${it.addr} ${it.name}" } }
+            "chama" -> return nativeFunctions(arg).second.firstOrNull { it.name == arg }?.let { f -> "ok\n" + callsOf(f.addr).joinToString("\n") { "call ${it.first} ${it.second}" } }
+                ?: error("não achei a função $arg")
+            "fixar" -> nativeFunctions(w[1]).second.firstOrNull { it.name == w[1] }?.let { patchNative(it, w.getOrElse(2) { "" }, apply = true, prefix = "missão ") }
+                ?: error("não achei a função ${w[1]}")
+            "despatch" -> Session.patches.filter { it.name.startsWith("missão ") }.onEach { setPatch(it, false); withContext(Dispatchers.Main) { removePatch(it) } }.let { "desfeitos ${it.size}" }
             "desconhecido" -> startUnknown(setOf(w.getOrElse(1) { "i32" }))
             "comparar" -> compare(w[1], w.drop(2).joinToString(" "))
             "escrever" -> writeAll(arg)
@@ -3492,12 +3524,48 @@ class Engine private constructor(private val app: Context) {
      */
     suspend fun patchReturn(m: Il2Method, cls: String, value: String): String {
         require(Session.engine?.bits != 32) { "só jogos de 64 bits por enquanto" }
-        val hex = returnPatch(m.ret, value) ?: return "Esse método devolve ${RET_NAMES[m.ret] ?: "um objeto"}: não dá para fixar com \"$value\"."
+        val x86 = Session.engine?.x86 == true
+        val hex = returnPatch(m.ret, value, x86) ?: return "Esse método devolve ${RET_NAMES[m.ret] ?: "um objeto"}: não dá para fixar com \"$value\"."
         val n = hex.length / 8
         val orig = codeAt(m.code, 0, n)
-        if (orig.dropLast(1).any { it.word == 0xd65f03c0.toInt() }) return "O método ${m.name} é curto demais para esse valor (termina antes): use um número até 65535."
+        if (!x86 && orig.dropLast(1).any { it.word == 0xd65f03c0.toInt() }) return "O método ${m.name} é curto demais para esse valor (termina antes): use um número até 65535."
         val label = if (m.ret == 0x01) "não faz nada" else "sempre $value"
         return createPatch(m.code, hex, "$cls.${m.name} → $label", "${RET_NAMES[m.ret]} ${m.name}() passa a ${if (m.ret == 0x01) "voltar sem fazer nada" else "devolver $value"}", apply = false)
+    }
+
+    /** Funções com nome nas libs do jogo que contêm o texto (até 300) e quantas há ao todo. */
+    suspend fun nativeFunctions(filter: String): Pair<Int, List<NativeFn>> = call { d ->
+        val r = d.send("syms ${filter.filterNot { it.isWhitespace() }.ifEmpty { "*" }}", quiet = true)
+        (r.status.toIntOrNull() ?: 0) to r.lines.filter { it.startsWith("sym ") }.map { it.split(' ', limit = 5) }.filter { it.size == 5 }
+            .map { NativeFn(it[1], it[2].toLongOrNull() ?: 0, it[3], it[4]) }
+    }
+
+    /** Em que função cai um endereço de código (null fora das libs do jogo). */
+    suspend fun functionAt(addr: String): FnInfo? = call { d ->
+        val r = runCatching { d.send("func $addr", quiet = true).status }.getOrNull() ?: return@call null
+        r.split(' ').takeIf { it.size == 5 }?.let { FnInfo(it[0], it[1], it[2], it[3], it[4].takeIf { n -> n != "-" }.orEmpty()) }
+    }
+
+    /** As funções que a função de addr chama (endereço e nome; nome vazio se a lib não traz). */
+    suspend fun callsOf(addr: String): List<Pair<String, String>> = call { d ->
+        d.send("calls $addr", quiet = true).lines.filter { it.startsWith("call ") }.map { it.split(' ') }.filter { it.size == 4 }
+            .map { it[2] to it[3].takeIf { n -> n != "-" }.orEmpty() }
+    }
+
+    /**
+     * "Sempre devolve" numa função nativa achada pelo nome. A lib não diz o tipo: número inteiro (int) ou, sem valor,
+     * "não faz nada" (volta logo). Não escreve além do fim da função (no x86 o fim vai até o alinhamento de 16).
+     */
+    suspend fun patchNative(fn: NativeFn, value: String, apply: Boolean = false, prefix: String = ""): String {
+        val info = functionAt(fn.addr) ?: return "Não achei a função ${fn.name} nas libs do jogo."
+        val x86 = info.arch == "x86_64"
+        if (!x86 && info.arch != "arm64") return "Lib de 32 bits ou de outra arquitetura: ainda não dá para fixar o retorno."
+        val ret = if (value.isBlank()) 0x01 else 0x08
+        val hex = returnPatch(ret, value, x86) ?: return "\"$value\" não é um número inteiro."
+        val room = (info.end.toLong(16) - info.start.toLong(16)).let { if (x86) (it + 15) / 16 * 16 else it }
+        if (hex.length / 2 > room) return "A função ${fn.name} é curta demais para esse valor: use um número menor."
+        val label = if (ret == 0x01) "não faz nada" else "sempre $value"
+        return createPatch(fn.addr, hex, "$prefix${fn.name} → $label", "${fn.name}() em ${fn.lib} passa a ${if (ret == 0x01) "voltar sem fazer nada" else "devolver $value"}", apply)
     }
 
     /**

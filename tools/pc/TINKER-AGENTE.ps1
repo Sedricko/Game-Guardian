@@ -311,6 +311,20 @@ function Run-Missions($v) {
         if ([double]$f[4] -ne (Val "Ouro")) { throw "voltou num endereco errado: le $($f[4]), a tela mostra $(Val 'Ouro')" }
         "voltou sozinho pelo caminho $($f[5..($f.Count - 1)] -join ' ')"
     }
+    Mission "funcao pelo nome (lib nativa, sem IDA)" {
+        Step "funcoes bonus_ouro" | Out-Null
+        if ($script:last -notmatch "fn [0-9a-f]+ jogo_bonus_ouro") { throw "nao achou jogo_bonus_ouro ($($script:last -replace "`n", ' | '))" }
+        Step "chama jogo_ganha_ouro" | Out-Null
+        if ($script:last -notmatch "call [0-9a-f]+ jogo_bonus_ouro") { throw "nao viu que jogo_ganha_ouro chama jogo_bonus_ouro ($($script:last -replace "`n", ' | '))" }
+        Step "fixar jogo_bonus_ouro 5" | Out-Null
+        $o = Val "Ouro"; Tap "+1 ouro"; Start-Sleep 1
+        $d = (Val "Ouro") - $o
+        Step "despatch" | Out-Null
+        if ($d -ne 5) { throw "com o patch o ouro subiu $d, esperava 5 ($($script:last -replace "`n", ' | '))" }
+        $o = Val "Ouro"; Tap "+1 ouro"; Start-Sleep 1
+        if (((Val "Ouro") - $o) -ne 1) { throw "desfez o patch mas o ouro nao voltou a subir de 1" }
+        "achou pelo nome, viu a chamada, o patch deu +5 e desfazer voltou ao +1"
+    }
     Mission "jogo atualizado (campos mudam de lugar)" {
         Tap "Atualizar jogo"
         $r = Narrow "i32" "Ouro" "+1 ouro" $int

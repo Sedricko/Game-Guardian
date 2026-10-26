@@ -1464,8 +1464,16 @@ private fun CodeView(engine: Engine, center: String, run: (suspend () -> String)
         if (center == "0") return@LaunchedEffect
         runCatching { engine.codeAt(center) }.onSuccess { rows = it; error = null }.onFailure { error = it.message }
     }
-    Text("Instruções do jogo (ARM64). Ache o endereço com \"O que escreve aqui?\" num salvo, ou digite um.",
+    Text("Instruções do jogo (ARM64). Ache o endereço com \"O que escreve aqui?\" num salvo, procure uma função pelo nome, ou digite um.",
         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    NativeFunctions(engine, run)
+    var fn by remember(center) { mutableStateOf<FnInfo?>(null) }
+    LaunchedEffect(center) { if (center != "0") fn = runCatching { engine.functionAt(center) }.getOrNull() }
+    fn?.let { f ->
+        val off = center.toLong(16) - f.start.toLong(16)
+        Text("Fica na função ${f.name.ifEmpty { "sem nome" }}" + (if (off > 0) " (+0x${off.toString(16)})" else "") + " · ${f.where} · ${f.arch}",
+            style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+    }
     fun go() {
         val a = parseAddress(goTo)
         if (a != null) { s.view = a to "i32"; pad = false } else error = "Endereço inválido: $goTo"
@@ -1507,6 +1515,57 @@ private fun CodeView(engine: Engine, center: String, run: (suspend () -> String)
                             enabled = bytes.length >= 8 && bytes.length % 8 == 0 && !s.busy) { Text("Aplicar") }
                     }
                     if (bytes.length == 8) bytes.toLongOrNull(16)?.let { Text("= " + decodeArm64(Integer.reverseBytes(it.toInt()), r.addr.toLong(16)), fontFamily = FontFamily.Monospace, fontSize = 12.sp) }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Funções das libs do jogo pelo nome (a tabela de símbolos da própria lib, sem IDA): ver o código, quem ela chama,
+ * contar chamadas e fixar o retorno. Serve para Unreal, Cocos e motor próprio, que não têm os nomes do IL2CPP.
+ */
+@Composable
+private fun NativeFunctions(engine: Engine, run: (suspend () -> String) -> Unit) {
+    val s = Session
+    val scope = rememberCoroutineScope()
+    var filter by remember { mutableStateOf("") }
+    var found by remember { mutableStateOf<Pair<Int, List<NativeFn>>?>(null) }
+    var open by remember { mutableStateOf<String?>(null) }
+    var calls by remember { mutableStateOf<List<Pair<String, String>>?>(null) }
+    fun find() = scope.launch {
+        runCatching { engine.nativeFunctions(filter) }.onSuccess { found = it; open = null }.onFailure { s.status = it.message ?: "erro" }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        TinkerTextField(filter, { filter = it }, "Função pelo nome (ex.: gold, AddCoins)", Modifier.weight(1f))
+        OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { find() }, enabled = !s.busy, contentPadding = PaddingValues(horizontal = 12.dp)) { Text("Procurar") }
+    }
+    val (total, list) = found ?: return
+    Text(if (total == 0) "Nenhuma função com esse nome nas libs do jogo (a lib pode vir sem nomes: use \"O que escreve aqui?\")."
+        else "$total funções" + if (total > list.size) " (mostrando ${list.size}: escreva mais do nome)" else "",
+        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Column(Modifier.fillMaxWidth().heightIn(max = 260.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        list.forEach { f ->
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceContainerLow)
+                    .sizeIn(minHeight = 48.dp).clickable { open = if (open == f.addr) null else f.addr; calls = null }.padding(horizontal = 12.dp, vertical = 6.dp),
+            ) {
+                Text(f.name, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                if (open == f.addr) {
+                    Text("0x${f.addr} · ${f.lib}", fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = { s.view = f.addr to "i32" }) { Text("Ver código") }
+                        TextButton(onClick = { scope.launch { calls = runCatching { engine.callsOf(f.addr) }.getOrDefault(emptyList()) } }) { Text("Quem ela chama") }
+                        TextButton(onClick = { engine.traceLater(f.addr, f.name) }) { Text("Contar chamadas (10 s)") }
+                        OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { open = null; run { engine.patchNative(f, "") } }) { Text("Não fazer nada") }
+                    }
+                    InlineEditor("", "Sempre devolver (número inteiro)", onSave = { v -> open = null; run { engine.patchNative(f, v) } }, onCancel = { open = null })
+                    Text("Vira um patch desligado em Salvos → Patches de código: ligue lá para valer.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    calls?.let { c ->
+                        if (c.isEmpty()) Text("Não chama outra função desta lib.", style = MaterialTheme.typography.bodySmall)
+                        c.forEach { (a, n) -> Text("→ ${n.ifEmpty { "sem nome" }} (0x$a)", fontFamily = FontFamily.Monospace, fontSize = 12.sp,
+                            modifier = Modifier.fillMaxWidth().clickable { s.view = a to "i32" }.padding(vertical = 4.dp)) }
+                    }
                 }
             }
         }
