@@ -61,6 +61,38 @@ internal val TECHNIQUES: List<Know> = listOf(
     how("save em arquivo", "💾 Editor de save: XML, PlayerPrefs ou JSON pelo nome; o Tinker faz backup e fecha o jogo antes de gravar."),
     how("jogo fechou", "Edição num endereço errado ou de outro tipo: refine até 1 e teste 2 s antes de salvar."),
     how("varios iguais", "Editar → Só os que valem agora: X → Y (todos os inimigos com 100 de vida)."),
+    // tipos e formatos
+    how("tipo certo", "Auto acha Dword, Float, Qword e Double de uma vez, mas traz mais lixo: com o tipo aprendido marque só ele. Dinheiro e itens: Dword; barras, posição e velocidade: Float; tempo e ids grandes: Qword/Double."),
+    how("numero em dobro", "Flutter/JavaScript guardam inteiro em dobro (100 vira 200): o Tinker acha como Dword ×2 sozinho; no 🧮 Disfarçado escolha ×2."),
+    how("lua", "Jogo com Lua (motor · Lua): 🌙 Lua acha só números do Lua; abra o resultado na Ficha para ver a tabela com o nome de cada campo."),
+    how("unreal", "Unreal: na Ficha digite o nome do objeto ou da classe (Player, BP_Player_C) e Procurar, pelas tabelas do próprio motor."),
+    how("cifrado com chave ao lado", "150X4 = valor cifrado com a chave 4 bytes depois (como no GameGuardian); ao editar um 🔒 o Tinker tranca o novo valor com a mesma chave."),
+    // cortar resultados
+    how("refino por final do endereco", "Depois de ver o endereço certo uma vez, ...A4 no refino deixa só os que terminam em A4 (o final costuma repetir entre aberturas)."),
+    how("mesmo objeto", "Grupo: 100;250;7::128 acha os 3 valores a até 128 bytes um do outro; o resto (números soltos iguais) some de uma vez."),
+    how("buscar perto", "Achou o ouro? Memória → Buscar perto procura a prata nas linhas em volta dele: muito mais rápido que buscar na memória toda."),
+    how("so onde o jogo escreve", "📍 Onde o jogo escreve: Começar, carregue uma fase, Ver; usar nas buscas faz a busca começar só nessas regiões."),
+    how("pausar na busca", "Ajustes → Pausar o jogo durante a busca: o valor não muda no meio da varredura (essencial em número que anda sozinho)."),
+    // confirmar e não quebrar o jogo
+    how("confirmar antes de salvar", "Com 1 a 3 resultados: IA pode testar valores (escreve +7 por 2 s e volta) ou Ver ficha: o campo verdadeiro fica no objeto com os vizinhos que fazem sentido."),
+    how("copia temporaria", "Em Unity, Cópia temporária (Int32) é só o número da tela: editar não muda nada; salve o campo da classe (PlayerData.gold)."),
+    how("congelar ou escrever", "Escrever muda uma vez (o jogo pode recalcular); ❄ Congelar reescreve várias vezes por segundo. Para vida/energia, congele; para moedas, escreva."),
+    how("desfazer", "Refinou errado e sobrou 0: ↶ Desfazer volta à lista anterior; tocar de novo refaz."),
+    // fazer durar
+    how("receita ao abrir", "Marque os salvos e Criar receita com ao abrir: aplica sozinha quando o jogo carrega; guarda pela classe (Unity), ponteiro ou assinatura."),
+    how("barra rapida", "⚡ Barra rápida sobre o jogo: valor, Buscar/Refinar e ↑↓=≠ sem abrir o painel; com 1 resultado, ❄ congela e salva; receitas viram ▶ botões."),
+    how("distancia entre salvos", "Marque dois salvos para ver a distância: é o offset do campo no objeto, útil para achar o mesmo campo em outro objeto ou depois de atualizar."),
+    how("exportar", "Salvos → Exportar leva para outro aparelho; Exportar .CT abre no Cheat Engine do PC."),
+    // código
+    how("contar chamadas", "Memória → Código ou ⚙ Métodos: Contar chamadas por 10 s enquanto faz a ação; a função que roda na hora certa é a do recurso."),
+    how("sempre devolver", "Sempre devolver (número, sim/não ou Não fazer nada) vira um patch desligado: ligue e teste; volta sozinho ao reabrir o jogo."),
+    how("quais rodam quando eu jogo", "Memória → Código → Quais rodam quando eu jogo? conta as funções que rodaram: compare parado com fazendo a ação."),
+    how("aob em codigo", "Busca por bytes em Código acha a instrução de novo depois de atualizar (?? de curinga nos bytes que mudam)."),
+    // roteiros completos
+    how("roteiro moedas infinitas", "1) Achar o Dword (ou 🔒). 2) O que escreve aqui? e gastar. 3) Desligar a instrução que subtrai (NOP). 4) Se quebrar, Sempre devolver na função AddCoins/SpendCoins. 5) Receita ao abrir com o valor."),
+    how("roteiro vida infinita", "1) Float pela barra (Sem valor ↓ ao levar dano). 2) Ver ficha: a vida máxima costuma estar ao lado. 3) Congelar ❄ no máximo. 4) Receita ao abrir."),
+    how("roteiro desbloquear tudo", "Unity: 🔓 Desbloquear na tela da loja/inventário; senão, Ficha da classe do item: campos owned/isUnlocked viram 1 em todos com Editar."),
+    how("roteiro depois de atualizar o jogo", "Ordem: assinatura AOB → classe+campo (Unity) → vizinho que voltou (distância) → função pelo nome (patch) → valor e tipo conhecidos → 🎯 Achar sozinho pelo nome."),
 )
 
 /** Tipos para tentar, na ordem, quando o primeiro do que se sabe já errou neste jogo. */
