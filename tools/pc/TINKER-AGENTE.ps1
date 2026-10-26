@@ -161,6 +161,7 @@ function Step($cmd) {
         $t = & $adb shell cat /data/data/$app/files/missao.txt 2>$null
         if ($LASTEXITCODE -eq 0 -and $t) {
             $t = $t -join "`n"
+            $script:last = $t
             if ($t -like "erro*") { throw "Tinker: $t" }
             if ($t -match "count (\d+)") { return [long]$Matches[1] } else { return 0 }
         }
@@ -265,6 +266,21 @@ function Run-Missions($v) {
         }
         if ($c -lt 1) { throw "nenhum candidato sobrou" }
         "sobraram $c em $n comparacoes"
+    }
+    Mission "fechar e reabrir o jogo (o salvo volta sozinho)" {
+        $r = Narrow "i32" "Ouro" "+1 ouro" $int
+        Step "salvar ouro" | Out-Null
+        Start-Sleep 8  # o Tinker procura o ponteiro do salvo
+        Tap "+1 ouro"  # grava o ouro no save do jogo, que volta igual ao reabrir
+        & $adb shell am force-stop $game
+        Start-Sleep 2; Front-Game; Start-Sleep 12  # o Tinker percebe o jogo novo e restaura os salvos
+        Step "salvos" | Out-Null
+        $line = ($script:last -split "`n") | Where-Object { $_ -like "salvo ouro *" } | Select-Object -First 1
+        if (-not $line) { throw "o salvo sumiu da lista" }
+        $f = $line -split " "
+        if ($f[3] -ne "voltou") { throw "nao voltou sozinho depois de reabrir ($line)" }
+        if ([double]$f[4] -ne (Val "Ouro")) { throw "voltou num endereco errado: le $($f[4]), a tela mostra $(Val 'Ouro')" }
+        "voltou sozinho pelo caminho $($f[5..($f.Count - 1)] -join ' ')"
     }
     Mission "jogo atualizado (campos mudam de lugar)" {
         Tap "Atualizar jogo"

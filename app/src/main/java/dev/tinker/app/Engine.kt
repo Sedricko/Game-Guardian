@@ -1723,6 +1723,12 @@ class Engine private constructor(private val app: Context) {
             "comparar" -> compare(w[1], w.drop(2).joinToString(" "))
             "escrever" -> writeAll(arg)
             "congelar" -> list().second.take(1).also { withContext(Dispatchers.Main) { addSaved(it, frozen = true, name = "missão") } }.let { "congelado ${it.size}" }
+            "salvar" -> list().second.take(1).also { withContext(Dispatchers.Main) { addSaved(it, name = "missão $arg") } }.let { "salvo ${it.size}" }
+            // salvos da missão depois de reabrir o jogo: voltou = o Tinker achou o endereço novo sozinho (pid de agora)
+            "salvos" -> return "ok\n" + Session.saved.filter { it.name.startsWith("missão") }.joinToString("\n") { i ->
+                val now = runCatching { call { d -> d.send("read ${i.addr} ${i.type}", quiet = true).status } }.getOrDefault("?")
+                "salvo ${i.name.substringAfter("missão ")} ${i.addr} ${if (i.pid == currentPid) "voltou" else "perdido"} $now ${i.pointer.ifEmpty { "-" }}"
+            }
             else -> error("passo desconhecido: $cmd")
         }
         val (count, hits) = list()
