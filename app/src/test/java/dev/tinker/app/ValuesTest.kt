@@ -177,6 +177,12 @@ class ValuesTest {
     }
 
     @Test
+    fun faixaParaFrente() {
+        assertEquals("19~24", ahead(19))
+        assertEquals("1000~1050", ahead(1000))
+    }
+
+    @Test
     fun terminaEm() {
         assertEquals("a4", addrEnd("...A4"))
         assertEquals("1f0", addrEnd(" … 1F0 "))

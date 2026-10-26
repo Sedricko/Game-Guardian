@@ -2324,7 +2324,9 @@ class Engine private constructor(private val app: Context) {
                 if (near != null) spots = mutableListOf(near.second)
                 if (spots.isEmpty()) { say("Não vi $target na tela. Deixe o número visível (painel minimizado) e tente de novo."); return@launch }
                 val start = byLabel?.first ?: near?.first ?: target
-                aiBusy { resultsText(search(types, start.toString())) }
+                // pelo nome o número costuma andar sozinho (abates, tempo): até a busca terminar ele já passou do que a tela
+                // mostrou; uma faixa para frente não deixa o certo de fora (refinar depois corta os outros)
+                aiBusy { resultsText(search(types, if (byLabel != null || near != null) ahead(start) else start.toString())) }
                 Diag.add("Achar sozinho: $target em ${spots.size} lugar(es) da tela, ${Session.count} resultados")
                 var place = spots.first()
                 var last = start
@@ -2348,7 +2350,7 @@ class Engine private constructor(private val app: Context) {
                         // 2 seguidos sem nada: o número já tinha mudado entre ler a tela e buscar, e o certo ficou de fora; busca de novo
                         if (++misses >= 2) {
                             misses = 0
-                            aiBusy { resultsText(search(types, cur.toString())) }
+                            aiBusy { resultsText(search(types, ahead(cur))) }
                             Diag.add("Achar sozinho: busquei de novo com $cur, ${Session.count} resultados")
                         }
                     } else misses = 0
@@ -4817,6 +4819,9 @@ private val UNLOCK_FIELD = Regex("""(?i)unlock|locked|owned|purchas|bought|acqui
 internal fun unlockField(name: String) = UNLOCK_FIELD.containsMatchIn(name)
 /** isLocked, locked: aqui desbloquear é 0 (isUnlocked, owned: 1). */
 internal fun lockedField(name: String) = Regex("""(?i)locked""").containsMatchIn(name) && !Regex("""(?i)unlocked""").containsMatchIn(name)
+
+/** Faixa da busca para um número que anda sozinho: do que a tela mostrou até um pouco à frente (ex.: 19 → 19~24). */
+internal fun ahead(v: Long) = "$v~${v + maxOf(5L, kotlin.math.abs(v) / 20)}"
 
 /** "...A4" (ou "…a4") no refino = endereço termina em A4; null se não for isso. */
 internal fun addrEnd(text: String) = Regex("""(?:\.\.\.|…)\s*([0-9a-fA-F]{1,8})""").matchEntire(text.trim())?.groupValues?.get(1)?.lowercase()
