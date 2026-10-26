@@ -678,7 +678,7 @@ private fun HiddenValue(engine: Engine, enabled: Boolean, run: (suspend () -> St
     Panel {
         Text("🧮 Número guardado diferente", style = MaterialTheme.typography.titleMedium)
         Text(if (last == null) "Quando a busca normal não acha (o jogo guarda em dobro, ×10, +100 ou cifrado): digite o número da tela agora e toque em Começar."
-            else "Era $last. Mude no jogo, digite o número novo e escolha o jeito.",
+            else "Era $last. Mude no jogo, digite o número novo e escolha o jeito. Mude de jeitos diferentes (ganhe 1, depois 3, ou gaste): subir sempre de 1 deixa contadores passarem.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         ValueField(now, if (last == null) "Número da tela agora" else "Número novo", { now = it }, Modifier.fillMaxWidth(), keyboard = KeyboardType.Number)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

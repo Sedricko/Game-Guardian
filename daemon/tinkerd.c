@@ -726,8 +726,13 @@ static int keep(int t, const unsigned char *cur, const unsigned char *old, int o
         }
         int64_t d = x2 - x1, dv = b - a;
         if (d % dv) return 0;
+        // só os multiplicadores que jogos usam: com o número da tela subindo de 1, "qualquer k" deixava passar todo
+        // contador que sobe (centenas de restos); +100 sem multiplicar fica de fora pelo mesmo motivo
+        static const int64_t ks[] = {2, 3, 4, 5, 8, 10, 16, 20, 25, 50, 100, 1000};
         int64_t k = d / dv, off = x1 - k * a;
-        return k >= 1 && k <= 100000 && !(k == 1 && off == 0) && off >= -100000000 && off <= 100000000;
+        int nice = 0;
+        for (size_t i = 0; i < sizeof ks / sizeof *ks; i++) nice |= k == ks[i];
+        return nice && off >= -1000000 && off <= 1000000;
     }
     if (op == OP_INC) return c > o;
     if (op == OP_DEC) return c < o;

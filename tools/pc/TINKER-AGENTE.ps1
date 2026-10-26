@@ -402,12 +402,13 @@ function Run-Missions($v) {
         "achou $c; a espada saiu por 1"
     }
     Mission "guardado diferente: nivel x10+7 e moedas com chave fixa" {
-        foreach ($p in @(@("Nivel", "+1 nível", "lin"), @("Moedas", "+1 moeda", "xk"))) {
+        # mudando de jeitos diferentes (+1 e depois +3): subir sempre igual deixa contadores passarem
+        foreach ($p in @(@("Nivel", "+1 nível", "lin", "+3 níveis"), @("Moedas", "+1 moeda", "xk", "+1 moeda"))) {
             $a = Val $p[0]
             Step "desconhecido i32" | Out-Null
             Tap $p[1]; $b = Val $p[0]
             Step "comparar $($p[2]) $a;$b" | Out-Null
-            Tap $p[1]; $c2 = Val $p[0]
+            Tap $p[3]; $c2 = Val $p[0]
             $c = Step "comparar $($p[2]) $b;$c2"
             if ($c -lt 1 -or $c -gt 3) { throw "$($p[0]): sobraram $c depois de 2 mudancas" }
         }
