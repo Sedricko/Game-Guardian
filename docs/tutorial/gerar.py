@@ -14,7 +14,7 @@ from reportlab.platypus import KeepTogether, PageBreak, Paragraph, SimpleDocTemp
 
 AQUI = pathlib.Path(__file__).resolve().parent
 RAIZ = AQUI.parent.parent
-TELA = RAIZ / "app/src/main/java/dev/tinker/app/TinkerScreen.kt"
+TELA = RAIZ / "app/src/main/java/dev/tinker/app/SettingsTab.kt"
 ns = {}
 exec((AQUI / "ajuda.py").read_text(encoding="utf-8"), ns)
 AJUDA = ns["AJUDA"]
@@ -42,7 +42,7 @@ def kotlin():
     linhas += [")", "// FIM AJUDA"]
     src = TELA.read_text(encoding="utf-8")
     novo, n = re.subn(r"// AJUDA:.*?// FIM AJUDA", lambda _: "\n".join(linhas), src, flags=re.S)
-    assert n == 1, "marcas // AJUDA e // FIM AJUDA não achadas em TinkerScreen.kt"
+    assert n == 1, "marcas // AJUDA e // FIM AJUDA não achadas em SettingsTab.kt"
     TELA.write_text(novo, encoding="utf-8")
 
 

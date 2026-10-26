@@ -1,4 +1,4 @@
-# Fonte única da Ajuda do Tinker: gera a Ajuda do app (TinkerScreen.kt, entre as marcas AJUDA) e o tutorial em PDF.
+# Fonte única da Ajuda do Tinker: gera a Ajuda do app (SettingsTab.kt, entre as marcas AJUDA) e o tutorial em PDF.
 # Mudou um texto? Edite aqui e rode: python3 -I docs/tutorial/gerar.py
 AJUDA = [
 ("Começo", "Para que serve o Tinker",
