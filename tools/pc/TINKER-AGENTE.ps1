@@ -145,7 +145,7 @@ function Val($label) {
     $t = (& $adb shell cat /data/data/$game/files/estado.txt 2>$null) -join "`n"
     if ($t -match "$label`: (-?[\d.]+)") { [double]$Matches[1] } else { throw "nao li '$label' na tela do jogo" }
 }
-function Front-Game { & $adb shell am start -n "$game/.GameActivity" | Out-Null; Start-Sleep 1 }
+function Front-Game { & $adb shell am start -n "$game/.GameActivity" 2>&1 | Out-Null; Start-Sleep 1 }  # sem o aviso "brought to the front"
 # "tocar" no botao: o jogo recebe o mesmo comando do botao (com a tela do jogo na frente, como uma pessoa)
 function Tap($text) {
     Front-Game

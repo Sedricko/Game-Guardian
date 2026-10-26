@@ -93,6 +93,8 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 
 /** Toda ação: trava os botões, roda no daemon, atualiza os resultados e passa o erro (null = sem erro). */
 @Composable
@@ -442,6 +444,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
         }
     }
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item { EasyMode(engine, enabled, run) }
         item {
             Panel {
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -638,6 +641,87 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
 }
 
 /** Busca desconhecida: sem número na tela (barra de vida), compara como o valor mudou. */
+/**
+ * Modo fácil: o passo a passo para quem não sabe o que é Dword, Float ou cifrado. Só pergunta o que qualquer pessoa sabe
+ * (o número da tela, se aumentou ou diminuiu); o tipo, o cifrado, o dobro e as cópias o Tinker resolve sozinho.
+ */
+@Composable
+private fun EasyMode(engine: Engine, enabled: Boolean, run: (suspend () -> String) -> Unit) {
+    val s = Session
+    var open by remember { mutableStateOf(s.count == null) }
+    var step by remember { mutableIntStateOf(0) }  // 0 número; 1 número mudou; 2 escondido (aumentou/diminuiu); 3 achou
+    var v by remember { mutableStateOf("") }
+    var target by remember { mutableStateOf("") }
+    var last by remember { mutableStateOf<Long?>(null) }
+    var stuck by remember { mutableIntStateOf(0) }
+    val count = s.count ?: 0L
+    // a cada refino: se a contagem não cai, as que sobraram mudam juntas (cópias); com 1, achou
+    LaunchedEffect(s.count) {
+        if (step !in 1..2 || s.count == null) return@LaunchedEffect
+        stuck = if (s.count == last) stuck + 1 else 0
+        last = s.count
+        if (s.count == 1L) step = 3
+    }
+    Panel {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("🧭 Modo fácil", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            TextButton(onClick = { open = !open }) { Text(if (open) "Fechar" else "Abrir") }
+        }
+        if (!open) return@Panel
+        when (step) {
+            0 -> {
+                Text("1. Qual número você quer mudar? Digite o que aparece no jogo.")
+                ValueField(v, "Número da tela", { v = it })
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(shape = MaterialTheme.shapes.medium, enabled = enabled && v.isNotBlank(), onClick = { step = 1; last = null; stuck = 0; run { engine.search(emptySet(), v) } }) { Text("Procurar") }
+                    TextButton(enabled = enabled, onClick = { step = 2; last = null; stuck = 0; run { engine.startUnknown(setOf("i32")) } }) { Text("O número não aparece na tela") }
+                }
+            }
+            1 -> {
+                Text("2. Faça esse número mudar no jogo (ganhe ou gaste) e digite o número de agora.")
+                Text("$count lugares com esse número", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                ValueField(v, "Número de agora", { v = it })
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(shape = MaterialTheme.shapes.medium, enabled = enabled && v.isNotBlank(), onClick = { run { engine.refine(v) } }) { Text("Continuar") }
+                    // as que sobraram mudam juntas: muda uma de cada vez e vê qual aparece na tela do jogo
+                    if (stuck >= 1 && count in 2L..300L) OutlinedButton(enabled = enabled, onClick = { run { engine.findBySequence(s.results.map { it.addr to it.type }, "") } }) { Text("Descobrir qual é o verdadeiro") }
+                    if (count in 2L..10L) TextButton(onClick = { step = 3 }) { Text("Usar esses $count") }
+                }
+            }
+            2 -> {
+                Text("2. Faça o valor mudar no jogo e diga o que aconteceu com ele.")
+                Text("$count candidatos", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(shape = MaterialTheme.shapes.medium, enabled = enabled, onClick = { run { engine.compare("inc") } }) { Text("Aumentou") }
+                    Button(shape = MaterialTheme.shapes.medium, enabled = enabled, onClick = { run { engine.compare("dec") } }) { Text("Diminuiu") }
+                    OutlinedButton(enabled = enabled, onClick = { run { engine.compare("same") } }) { Text("Não mudou") }
+                    if (count in 1L..10L) TextButton(onClick = { step = 3 }) { Text("Usar esses $count") }
+                }
+            }
+            else -> {
+                Text("✅ Achei${if (count > 1) " ($count lugares que mudam juntos)" else ""}! 3. Para quanto quer mudar?")
+                ValueField(target, "Novo valor", { target = it })
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(shape = MaterialTheme.shapes.medium, enabled = enabled && target.isNotBlank(), onClick = { run { engine.writeAll(target) } }) { Text("Mudar") }
+                    OutlinedButton(enabled = enabled && target.isNotBlank(), onClick = {
+                        run {
+                            val r = engine.writeAll(target)
+                            val hits = engine.list().second
+                            withContext(Dispatchers.Main) { engine.addSaved(hits, frozen = true, name = "Modo fácil") }
+                            "$r Travado: o jogo não consegue mudar."
+                        }
+                    }) { Text("Travar nesse valor") }
+                    TextButton(enabled = s.results.isNotEmpty(), onClick = {
+                        engine.addSaved(s.results, name = "Modo fácil")
+                        s.status = "Salvo em Salvos: quando você fechar e abrir o jogo, o Tinker acha de novo sozinho."
+                    }) { Text("Salvar") }
+                }
+            }
+        }
+        if (step > 0) TextButton(onClick = { step = 0; v = ""; target = ""; stuck = 0; last = null }) { Text("Começar de novo") }
+    }
+}
+
 @Composable
 private fun UnknownSearch(engine: Engine, enabled: Boolean, run: (suspend () -> String) -> Unit) {
     val s = Session
