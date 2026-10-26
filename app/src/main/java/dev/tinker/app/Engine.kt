@@ -1783,6 +1783,7 @@ class Engine private constructor(private val app: Context) {
             "unreal" -> return unrealObjects(arg).let { (msg, l) -> "ok $msg\ncount ${l.size}\n" + l.joinToString("\n") { "ueobj ${it.addr} ${it.cls} ${it.name}" } }
             "cronometros" -> return findTimers().also { timerHits = it }.let { "ok ${it.size}\ncount ${it.size}\n" + it.joinToString("\n") { t -> "timer ${t.addr} ${t.leftSec}" } }
             "terminar" -> finishTimers(timerHits)
+            "quaisrodam" -> return whichRun(nativeFunctions(arg).second).let { r -> "ok ${r.size}\ncount ${r.size}\n" + r.joinToString("\n") { "roda ${it.first.name} ${it.second}" } }
             "despatch" -> Session.patches.filter { it.name.startsWith("missão ") }.onEach { setPatch(it, false); withContext(Dispatchers.Main) { removePatch(it) } }.let { "desfeitos ${it.size}" }
             "desconhecido" -> startUnknown(setOf(w.getOrElse(1) { "i32" }))
             "comparar" -> compare(w[1], w.drop(2).joinToString(" "))
@@ -3720,6 +3721,14 @@ class Engine private constructor(private val app: Context) {
         (r.status.toIntOrNull() ?: 0) to r.lines.filter { it.startsWith("sym ") }.map { it.split(' ', limit = 5) }.filter { it.size == 5 }
             .map { NativeFn(it[1], it[2].toLongOrNull() ?: 0, it[3], it[4]) }
     }
+
+    /**
+     * "Quais rodam quando eu faço X": conta as chamadas de cada função (até 12, 3 s cada) enquanto a pessoa joga e
+     * devolve as que rodaram, mais chamadas primeiro. Mostra o mecanismo do jogo sem precisar ler o código.
+     */
+    suspend fun whichRun(fns: List<NativeFn>): List<Pair<NativeFn, Int>> =
+        fns.take(12).mapNotNull { f -> runCatching { traceCalls(f.addr, 3).first }.getOrNull()?.takeIf { it > 0 }?.let { f to it } }
+            .sortedByDescending { it.second }.also { r -> Diag.add("Quais rodam: " + r.joinToString { "${it.first.name} ${it.second}x" }.ifEmpty { "nenhuma" }) }
 
     /** Em que função cai um endereço de código (null fora das libs do jogo). */
     suspend fun functionAt(addr: String): FnInfo? = call { d ->

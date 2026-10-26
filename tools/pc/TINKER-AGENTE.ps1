@@ -382,6 +382,12 @@ function Run-Missions($v) {
         if ($left -gt 1) { throw "terminou $c, mas faltam $left s na tela" }
         "achou $c; a construcao de 2 h terminou na hora"
     }
+    Mission "quais funcoes rodam (sem tocar em nada)" {
+        $c = Step "quaisrodam jogo_"
+        if ($script:last -notmatch "roda jogo_tick \d+") { throw "nao viu o jogo_tick rodando ($($script:last -replace "`n", ' | '))" }
+        if ($script:last -match "roda jogo_bonus_ouro") { throw "disse que o bonus rodou sem ninguem tocar no ouro" }
+        "rodaram $c: $((($script:last -split "`n") | Where-Object { $_ -like 'roda *' }) -join ', ')"
+    }
     Mission "jogo atualizado (campos mudam de lugar)" {
         Tap "Atualizar jogo"
         $r = Narrow "i32" "Ouro" "+1 ouro" $int

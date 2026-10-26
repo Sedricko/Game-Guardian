@@ -1593,6 +1593,15 @@ private fun NativeFunctions(engine: Engine, run: (suspend () -> String) -> Unit)
         OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { find() }, enabled = !s.busy, contentPadding = PaddingValues(horizontal = 12.dp)) { Text("Procurar") }
     }
     val (total, list) = found ?: return
+    var running by remember(list) { mutableStateOf<List<Pair<NativeFn, Int>>?>(null) }
+    if (list.isNotEmpty()) OutlinedButton(shape = MaterialTheme.shapes.medium, enabled = !s.busy, onClick = {
+        s.status = "Jogue normalmente: contando ${minOf(list.size, 12)} funções, 3 s cada…"
+        scope.launch { running = runCatching { engine.whichRun(list) }.getOrDefault(emptyList()); s.status = "Rodaram ${running?.size ?: 0} das ${minOf(list.size, 12)}." }
+    }) { Text("Quais rodam quando eu jogo? (até 12)") }
+    running?.let { r ->
+        if (r.isEmpty()) Text("Nenhuma rodou enquanto contava.", style = MaterialTheme.typography.bodySmall)
+        r.forEach { (f, n) -> Text("▶ ${f.name}: ${n}x", fontFamily = FontFamily.Monospace, fontSize = 12.sp) }
+    }
     Text(if (total == 0) "Nenhuma função com esse nome nas libs do jogo (a lib pode vir sem nomes: use \"O que escreve aqui?\")."
         else "$total funções" + if (total > list.size) " (mostrando ${list.size}: escreva mais do nome)" else "",
         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

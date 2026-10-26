@@ -39,6 +39,7 @@ import kotlin.random.Random
 class GameActivity : Activity() {
     // ouro + bônus na lib nativa: o Tinker acha jogo_bonus_ouro pelo nome e fixa o retorno (missão "função pelo nome")
     private external fun ganhaOuro(ouro: Int): Int
+    private external fun tick()
     companion object { init { System.loadLibrary("jogo") } }
 
     private var mem: ByteBuffer = fresh()
@@ -147,7 +148,7 @@ class GameActivity : Activity() {
         kills = 0
         ui.post(object : Runnable { override fun run() {
             clock.putDouble(20, clock.getDouble(20) + 0.1); clock.putDouble(28, clock.getDouble(20) + 0.02)
-            time += 0.1f * speed; ui.postDelayed(this, 100)
+            time += 0.1f * speed; tick(); ui.postDelayed(this, 100)
         } })
         ui.post(object : Runnable { override fun run() { kills += 1; ui.postDelayed(this, Random.nextLong(300, 1200)) } })
     }

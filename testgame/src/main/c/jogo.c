@@ -13,6 +13,12 @@ __attribute__((noinline, visibility("default"))) int jogo_ganha_ouro(int ouro) {
     return ouro + b;
 }
 
+// roda sozinha 10 vezes por segundo (o "tick" do jogo): "quais rodam" acha ela e não acha o bônus sem tocar no ouro
+static volatile int ticks;
+__attribute__((noinline, visibility("default"))) void jogo_tick(void) { ticks++; }
+
+JNIEXPORT void JNICALL Java_dev_tinker_testgame_GameActivity_tick(JNIEnv *env, jobject self) { (void)env; (void)self; jogo_tick(); }
+
 JNIEXPORT jint JNICALL Java_dev_tinker_testgame_GameActivity_ganhaOuro(JNIEnv *env, jobject self, jint ouro) {
     (void)env; (void)self;
     return jogo_ganha_ouro(ouro);
