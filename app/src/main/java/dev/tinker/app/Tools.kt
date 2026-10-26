@@ -36,7 +36,7 @@ import kotlinx.coroutines.Dispatchers
  * os resultados não ficarem lá no fim da tela. Desbloquear só aparece em jogo Unity (precisa das classes IL2CPP).
  */
 @Composable
-internal fun Toolbox(engine: Engine, enabled: Boolean, run: (suspend () -> String) -> Unit) {
+internal fun Toolbox(engine: Engine, enabled: Boolean, run: (suspend () -> String) -> Unit, onOpen: () -> Unit = {}) {
     val s = Session
     // primeira vez sem busca: o Modo fácil já vem aberto, como antes; depois fica fechado até a pessoa escolher
     var tool by remember { mutableStateOf(if (s.count == null && s.history.isEmpty()) "facil" else "") }
@@ -51,7 +51,7 @@ internal fun Toolbox(engine: Engine, enabled: Boolean, run: (suspend () -> Strin
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("🧰 Ferramentas", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            tools.forEach { (key, label) -> FilterChip(selected = tool == key, onClick = { tool = if (tool == key) "" else key }, label = { Text(label) }) }
+            tools.forEach { (key, label) -> FilterChip(selected = tool == key, onClick = { tool = if (tool == key) "" else key; if (tool.isNotEmpty()) onOpen() }, label = { Text(label) }) }
         }
         when (tool) {
             "facil" -> EasyMode(engine, enabled, run)

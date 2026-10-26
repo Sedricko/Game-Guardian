@@ -161,7 +161,7 @@ function Find-Ui($re, $scrolls = 6) {
     for ($k = 0; $k -le $scrolls; $k++) {
         $n = Ui-Nodes | Where-Object { $_.t -match $re } | Select-Object -First 1
         if ($n) { return $n }
-        if ($k -lt $scrolls) { & $adb shell input swipe 540 1900 540 900 300; Start-Sleep -Milliseconds 700 }
+        if ($k -lt $scrolls) { & $adb shell input swipe 30 1900 30 900 300; Start-Sleep -Milliseconds 700 }
     }
     $null
 }
@@ -194,7 +194,8 @@ function Close-Pad {
         if ($ok) { & $adb shell input tap ([int]$ok.x) ([int]$ok.y); Start-Sleep -Milliseconds 700 }
     }
 }
-function Top-Ui { Close-Pad; for ($k = 0; $k -lt 4; $k++) { & $adb shell input swipe 540 700 540 1900 200 }; Start-Sleep -Milliseconds 500 }
+# rola pela margem da tela (x=30, fora dos botoes): no meio, com a lista ja no topo, o deslize virava toque num tipo (Dword)
+function Top-Ui { Close-Pad; for ($k = 0; $k -lt 4; $k++) { & $adb shell input swipe 30 700 30 1900 200 }; Start-Sleep -Milliseconds 500 }
 
 # volta por todo o app, como uma pessoa: cada aba, cada ferramenta, cada modo; confere que a tela abriu e o app nao fechou
 function Ui-Tour($v) {

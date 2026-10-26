@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -72,7 +73,9 @@ internal fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
             if (!s.busy && s.count != null) runCatching { s.results = engine.list().second }
         }
     }
-    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    val list = rememberLazyListState()
+    val listScope = rememberCoroutineScope()
+    LazyColumn(state = list, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         // a busca primeiro (é o que se usa toda hora); as ferramentas ficam numa fileira logo abaixo, uma aberta por vez
         item {
             Panel {
@@ -174,7 +177,8 @@ internal fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                 )
             }
         }
-        item { Toolbox(engine, enabled, run) }
+        // a ferramenta abre embaixo da busca: a lista rola até a fileira para o conteúdo dela aparecer sem rolar à mão
+        item { Toolbox(engine, enabled, run, onOpen = { listScope.launch { list.animateScrollToItem(1) } }) }
         val count = s.count ?: return@LazyColumn
         val visible = s.results.map { it.addr + it.type }.toSet()
         val chosen = s.results.filter { it.addr + it.type in selected }
