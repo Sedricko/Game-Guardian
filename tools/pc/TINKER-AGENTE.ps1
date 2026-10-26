@@ -372,6 +372,16 @@ function Run-Missions($v) {
         if ($script:last -notmatch "ueobj [0-9a-f]+ BP_Jogador_C Jogador") { throw "nao achou Jogador da classe BP_Jogador_C ($($script:last -replace "`n", ' | '))" }
         "achou $c objeto(s): $((($script:last -split "`n") | Select-Object -First 1))"
     }
+    Mission "cronometro: terminar a construcao agora" {
+        Tap "Construir"
+        if ((Val "Obra") -lt 3600) { throw "a construcao nao comecou" }
+        $c = Step "cronometros"
+        if ($c -lt 1) { throw "nao achou o cronometro ($($script:last -replace "`n", ' | '))" }
+        Step "terminar" | Out-Null; Start-Sleep 2
+        $left = Val "Obra"
+        if ($left -gt 1) { throw "terminou $c, mas faltam $left s na tela" }
+        "achou $c; a construcao de 2 h terminou na hora"
+    }
     Mission "jogo atualizado (campos mudam de lugar)" {
         Tap "Atualizar jogo"
         $r = Narrow "i32" "Ouro" "+1 ouro" $int

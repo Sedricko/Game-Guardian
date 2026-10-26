@@ -157,6 +157,9 @@ const val SPEED_NAME = "⏩ velocidade"
 // começo do bloco 0 de nomes da Unreal 4.23+ e 5: "None" e "ByteProperty", cada um com 2 bytes de cabeçalho antes
 const val UE_NAMES_AOB = "??014e6f6e65??034279746550726f7065727479"
 
+/** Cronômetro do jogo: onde guarda a hora de terminar (em ms ou s desde 1970), e quanto falta agora. */
+data class GameTimer(val addr: String, val type: String, val ms: Boolean, val leftSec: Long)
+
 /** Objeto da Unreal achado pelo nome: endereço, classe e nome (como nos dumpers). */
 data class UeObj(val addr: String, val cls: String, val name: String)
 
@@ -1778,6 +1781,8 @@ class Engine private constructor(private val app: Context) {
                 (Session.autoFind ?: "parou").also { autoFindStop() }
             }
             "unreal" -> return unrealObjects(arg).let { (msg, l) -> "ok $msg\ncount ${l.size}\n" + l.joinToString("\n") { "ueobj ${it.addr} ${it.cls} ${it.name}" } }
+            "cronometros" -> return findTimers().also { timerHits = it }.let { "ok ${it.size}\ncount ${it.size}\n" + it.joinToString("\n") { t -> "timer ${t.addr} ${t.leftSec}" } }
+            "terminar" -> finishTimers(timerHits)
             "despatch" -> Session.patches.filter { it.name.startsWith("missão ") }.onEach { setPatch(it, false); withContext(Dispatchers.Main) { removePatch(it) } }.let { "desfeitos ${it.size}" }
             "desconhecido" -> startUnknown(setOf(w.getOrElse(1) { "i32" }))
             "comparar" -> compare(w[1], w.drop(2).joinToString(" "))
@@ -3650,6 +3655,36 @@ class Engine private constructor(private val app: Context) {
         found.toList()
     }
 
+    /**
+     * ⏱️ Cronômetros (construção, espera, energia que volta): jogos offline guardam a hora de terminar como número de
+     * milissegundos ou segundos desde 1970. Procura os que terminam entre agora e 7 dias. Usa a lista de resultados da busca.
+     */
+    suspend fun findTimers(): List<GameTimer> = call { d ->
+        val now = System.currentTimeMillis()
+        val week = 7L * 86_400_000
+        val out = mutableListOf<GameTimer>()
+        for ((type, ms) in listOf("i64" to true, "i64" to false, "i32" to false)) {
+            val lo = if (ms) now else now / 1000
+            val hi = if (ms) now + week else (now + week) / 1000
+            val n = runCatching { d.send("search $type $lo~$hi").status.toLongOrNull() }.getOrNull() ?: 0
+            if (n == 0L || n > 200) continue  // muitos: são relógios e datas comuns, não um cronômetro
+            d.send("list 200", quiet = true).lines.forEach { l ->
+                val f = l.split(' ')
+                val v = f.getOrNull(3)?.toLongOrNull() ?: return@forEach
+                if (out.none { it.addr == f[0] }) out += GameTimer(f[0], type, ms, (if (ms) v - now else v - now / 1000).let { if (ms) it / 1000 else it })
+            }
+        }
+        Diag.add("Cronômetros: ${out.size} (${out.joinToString { "0x${it.addr} ${it.leftSec}s" }})")
+        out
+    }
+
+    /** Termina o cronômetro agora: a hora de terminar vira o momento atual (menos 1 s). */
+    suspend fun finishTimers(timers: List<GameTimer>): String = call { d ->
+        val now = System.currentTimeMillis() - 1000
+        timers.forEach { t -> d.send("write ${t.addr} ${t.type} ${if (t.ms) now else now / 1000}") }
+        "${timers.size} cronômetro(s) terminados agora."
+    }
+
     /** Muda a velocidade (1 = normal) e trava para o jogo não voltar sozinho; 1 solta. */
     suspend fun setGameSpeed(addrs: List<String>, factor: String): String {
         val f = normalizeNumbers(factor).toFloatOrNull()?.takeIf { it > 0f && it <= 100f } ?: return "Velocidade inválida: use de 0.1 a 100."
@@ -3873,6 +3908,7 @@ class Engine private constructor(private val app: Context) {
 
     @Volatile private var lastPatchAt = 0L
     private var speedAddrs = emptyList<String>()  // achados da missão "velocidade"
+    private var timerHits = emptyList<GameTimer>()  // achados da missão "cronometros"
 
     /** Liga (bytes novos) ou desliga (bytes originais) um patch; confere antes que o código ainda é o esperado. */
     suspend fun setPatch(p: CodePatch, on: Boolean): String {

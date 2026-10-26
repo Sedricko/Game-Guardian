@@ -446,6 +446,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { EasyMode(engine, enabled, run) }
         item { GameSpeed(engine, enabled, run) }
+        item { Timers(engine, enabled, run) }
         item {
             Panel {
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -646,6 +647,29 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
  * Modo fácil: o passo a passo para quem não sabe o que é Dword, Float ou cifrado. Só pergunta o que qualquer pessoa sabe
  * (o número da tela, se aumentou ou diminuiu); o tipo, o cifrado, o dobro e as cópias o Tinker resolve sozinho.
  */
+/** ⏱️ Cronômetros: acha as construções e esperas pela hora de terminar e termina agora. */
+@Composable
+private fun Timers(engine: Engine, enabled: Boolean, run: (suspend () -> String) -> Unit) {
+    var found by remember { mutableStateOf<List<GameTimer>?>(null) }
+    Panel {
+        Text("⏱️ Cronômetros (terminar agora)", style = MaterialTheme.typography.titleMedium)
+        Text("Com uma construção ou espera rodando no jogo, acha a hora em que ela termina. Troca os resultados da busca.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Button(shape = MaterialTheme.shapes.medium, enabled = enabled, onClick = {
+            run { engine.findTimers().let { found = it; if (it.isEmpty()) "Nenhum cronômetro (o jogo pode contar de outro jeito, como segundos que faltam)." else "Achei ${it.size} cronômetro(s)." } }
+        }) { Text("Achar cronômetros") }
+        found?.takeIf { it.isNotEmpty() }?.let { list ->
+            list.take(10).forEach { t ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("termina em ${t.leftSec / 3600}h ${t.leftSec % 3600 / 60}min ${t.leftSec % 60}s", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                    TextButton(enabled = enabled, onClick = { run { engine.finishTimers(listOf(t)) } }) { Text("Terminar agora") }
+                }
+            }
+            if (list.size > 1) OutlinedButton(shape = MaterialTheme.shapes.medium, enabled = enabled, onClick = { run { engine.finishTimers(list) } }) { Text("Terminar todos") }
+        }
+    }
+}
+
 /** ⏩ Velocidade do jogo (Unity): acha a escala do tempo pelo relógio do Unity e muda com um toque. */
 @Composable
 private fun GameSpeed(engine: Engine, enabled: Boolean, run: (suspend () -> String) -> Unit) {
