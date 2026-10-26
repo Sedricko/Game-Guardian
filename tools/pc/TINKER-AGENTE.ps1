@@ -140,26 +140,23 @@ function Set-PanelLink {
 
 # ===== Missoes: o agente usa o Tinker no Jogo de Teste como uma pessoa faria e mede o que resolveu =====
 $game = "dev.tinker.testgame"
-function Ui { & $adb shell uiautomator dump /sdcard/ui.xml | Out-Null; [xml](((& $adb shell cat /sdcard/ui.xml) -join "") -replace '^[^<]*', '') }
+# o jogo grava o que a tela mostra em files/estado.txt (o leitor de tela do Android trava com a tela mudando)
 function Val($label) {
-    Front-Game
-    $t = ((Ui).SelectNodes("//node") | ForEach-Object { $_.text }) -join "`n"
-    if ($t -match "$label`: (-?[\d.]+)") { [double]$Matches[1] } else { $null }
+    $t = (& $adb shell cat /data/data/$game/files/estado.txt 2>$null) -join "`n"
+    if ($t -match "$label`: (-?[\d.]+)") { [double]$Matches[1] } else { throw "nao li '$label' na tela do jogo" }
 }
 function Front-Game { & $adb shell am start -n "$game/.GameActivity" | Out-Null; Start-Sleep 1 }
+# "tocar" no botao: o jogo recebe o mesmo comando do botao (com a tela do jogo na frente, como uma pessoa)
 function Tap($text) {
     Front-Game
-    $n = (Ui).SelectNodes("//node") | Where-Object { $_.text -eq $text } | Select-Object -First 1
-    if (-not $n) { throw "botao '$text' nao achado" }
-    $b = [regex]::Matches($n.bounds, "\d+") | ForEach-Object { [int]$_.Value }
-    & $adb shell input tap ([int](($b[0] + $b[2]) / 2)) ([int](($b[1] + $b[3]) / 2))
+    & $adb shell am broadcast -p $game -a dev.tinker.testgame.ACAO --es acao "'$text'" | Out-Null
     Start-Sleep -Milliseconds 700
 }
 # um passo do Tinker (escolher/buscar/refinar/desconhecido/comparar/escrever/congelar); devolve a contagem
 function Step($cmd) {
     & $adb shell rm -f /data/data/$app/files/missao.txt
     & $adb shell am start -f 0x10008000 -n "$app/.MainActivity" --es missao "'$cmd'" | Out-Null
-    for ($k = 0; $k -lt 120; $k++) {
+    for ($k = 0; $k -lt 360; $k++) {
         Start-Sleep -Milliseconds 500
         $t = & $adb shell cat /data/data/$app/files/missao.txt 2>$null
         if ($LASTEXITCODE -eq 0 -and $t) {

@@ -1,6 +1,11 @@
 package dev.tinker.testgame
 
 import android.app.Activity
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.Build
 import android.graphics.Color
 import android.os.Bundle
 import android.os.Handler
@@ -26,6 +31,8 @@ import kotlin.random.Random
  * - "Atualizar jogo" troca a ordem dos campos, como uma versão nova do jogo (o que estava salvo deixa de valer).
  * Tudo em memória nativa (fora do heap do Java, que move objetos), como num motor de jogo. Salva em SharedPreferences.
  * Não tem anti-cheat de propósito: o Tinker não é feito para escapar de proteção.
+ * Para o agente do PC: os botões também respondem a "am broadcast -a dev.tinker.testgame.ACAO --es acao '<texto do botão>'"
+ * e o que a tela mostra vai para files/estado.txt (o leitor de tela do Android trava com a tela mudando sem parar).
  */
 class GameActivity : Activity() {
     private var mem: ByteBuffer = fresh()
@@ -33,6 +40,12 @@ class GameActivity : Activity() {
     private lateinit var text: TextView
     private val ui = Handler(Looper.getMainLooper())
     private var fase = 1
+    private lateinit var prefs: android.content.SharedPreferences
+    private val actions = LinkedHashMap<String, () -> Unit>()
+    private var shown = ""
+    private val receiver = object : BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) { actions[i.getStringExtra("acao")]?.let { it(); save(); show() } }
+    }
     private var base = 0  // onde começam os campos: "Atualizar jogo" muda, como uma versão nova
     private val inv = fresh()  // 40 posições do inventário (Dword cada)
 
@@ -70,7 +83,7 @@ class GameActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val prefs = getSharedPreferences("jogo", MODE_PRIVATE)
+        prefs = getSharedPreferences("jogo", MODE_PRIVATE)
         gold = prefs.getInt("gold", Random.nextInt(1000, 9000))
         gems = prefs.getInt("gems", Random.nextInt(10, 90))
         hp = prefs.getFloat("hp", 87.5f)
@@ -81,30 +94,42 @@ class GameActivity : Activity() {
         wood = prefs.getInt("wood", Random.nextInt(5, 60))
         for (i in 0 until 40) inv.putInt(i * 4, Random.nextInt(0, 10))
         potions = prefs.getInt("potions", Random.nextInt(1, 9))
-        fun save() = prefs.edit().putInt("gold", gold).putInt("gems", gems).putFloat("hp", hp)
-            .putInt("points", points).putLong("diamonds", diamonds).putInt("xp", xp).putInt("wood", wood).putInt("potions", potions).apply()
         text = TextView(this).apply { textSize = 24f; setTextColor(Color.WHITE); gravity = Gravity.CENTER }
-        fun button(label: String, act: () -> Unit) = Button(this).apply { text = label; setOnClickListener { act(); save(); show() } }
-        setContentView(LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
+        actions["+1 ouro"] = { gold += 1; xp += Random.nextInt(3, 10) }
+        actions["+1 gema"] = { gems += 1 }
+        actions["-10 vida"] = { hp -= 10f }
+        actions["+5 pontos"] = { points += 5 }
+        actions["+1 diamante"] = { diamonds += 1 }
+        actions["+1 madeira"] = { wood += 1 }
+        actions["Usar poção"] = { if (potions > 0) potions -= 1 }
+        actions["Achar poção"] = { potions += 1 }
+        actions["Próxima fase"] = { nextLevel() }
+        actions["Atualizar jogo"] = { update() }
+        val grid = android.widget.GridLayout(this).apply { columnCount = 2 }
+        actions.forEach { (label, act) -> grid.addView(Button(this).apply { text = label; setOnClickListener { act(); save(); show() } }) }
+        setContentView(android.widget.ScrollView(this).apply {
             setBackgroundColor(Color.rgb(20, 30, 45))
-            addView(text)
-            addView(button("+1 ouro") { gold += 1; xp += Random.nextInt(3, 10) })
-            addView(button("+1 gema") { gems += 1 })
-            addView(button("-10 vida") { hp -= 10f })
-            addView(button("+5 pontos") { points += 5 })
-            addView(button("+1 diamante") { diamonds += 1 })
-            addView(button("+1 madeira") { wood += 1 })
-            addView(button("Usar poção") { if (potions > 0) potions -= 1 })
-            addView(button("Achar poção") { potions += 1 })
-            addView(button("Próxima fase") { nextLevel() })
-            addView(button("Atualizar jogo") { update() })
+            addView(LinearLayout(this@GameActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_HORIZONTAL
+                addView(text)
+                addView(grid)
+            })
         })
+        val filter = IntentFilter("dev.tinker.testgame.ACAO")
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED) else registerReceiver(receiver, filter)
         show()
         ui.post(object : Runnable { override fun run() { show(); ui.postDelayed(this, 500) } })
         ui.post(object : Runnable { override fun run() { energy += 1; ui.postDelayed(this, 1000) } })
     }
+
+    override fun onDestroy() {
+        unregisterReceiver(receiver)
+        super.onDestroy()
+    }
+
+    private fun save() = prefs.edit().putInt("gold", gold).putInt("gems", gems).putFloat("hp", hp)
+        .putInt("points", points).putLong("diamonds", diamonds).putInt("xp", xp).putInt("wood", wood).putInt("potions", potions).apply()
 
     /** Fase nova: os valores vão para outra memória e a antiga é apagada, como quando o jogo recria o jogador. */
     private fun nextLevel() {
@@ -127,6 +152,10 @@ class GameActivity : Activity() {
     }
 
     private fun show() {
-        text.text = "Fase $fase · versão ${if (base == 0) 1 else 2}\nOuro: $gold\nGemas: $gems\nVida: ${"%.1f".format(hp)}\nEnergia: $energy\nPontos: $points\nDiamantes: $diamonds\nMadeira: $wood\nPoções: $potions"
+        val t = "Fase $fase · versão ${if (base == 0) 1 else 2}\nOuro: $gold\nGemas: $gems\nVida: ${"%.1f".format(hp)}\nEnergia: $energy\nPontos: $points\nDiamantes: $diamonds\nMadeira: $wood\nPoções: $potions"
+        if (t == shown) return  // a tela só muda quando um valor muda
+        shown = t
+        text.text = t
+        java.io.File(filesDir, "estado.txt").writeText(t)
     }
 }
