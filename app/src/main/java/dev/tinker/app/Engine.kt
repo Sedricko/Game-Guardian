@@ -3733,6 +3733,7 @@ class Engine private constructor(private val app: Context) {
     /** Muda a velocidade (1 = normal) e trava para o jogo não voltar sozinho; 1 solta. */
     suspend fun setGameSpeed(addrs: List<String>, factor: String): String {
         val f = normalizeNumbers(factor).toFloatOrNull()?.takeIf { it > 0f && it <= 100f } ?: return "Velocidade inválida: use de 0.1 a 100."
+        if (addrs.size > 4) return "Achei ${addrs.size} lugares com cara de velocidade: é demais para mudar todos sem risco. Abra uma fase e procure de novo."
         // solta a trava antes de escrever: senão ela põe a velocidade antiga de volta logo depois
         withContext(Dispatchers.Main) { removeSaved(Session.saved.filter { it.name == SPEED_NAME }) }
         call { d -> addrs.forEach { d.send("unfreeze $it f32", quiet = true); d.send("write $it f32 $f") } }
@@ -4309,6 +4310,8 @@ class Engine private constructor(private val app: Context) {
         val total = call { d -> d.send("list 20000", quiet = true).lines }
         val hits = total.map { it.split(' ') }.filter { it.size >= 4 && (readable(it[3], it[1])?.toDoubleOrNull()?.let { v -> kotlin.math.abs(v - want) < 0.001 } == true) }
         if (hits.isEmpty()) return "Nenhum dos ${total.size} resultados vale $from agora."
+        // centenas de lugares com o mesmo número é quase sempre coincidência: escrever estragaria dados do jogo
+        if (hits.size > 200) return "${hits.size} resultados valem $from: é muito para ser só o que você quer. Refine a busca antes."
         return "Dos ${total.size}, ${hits.size} valiam $from: " + writeMany(hits.map { it[0] to it[1] }, to)
     }
 
