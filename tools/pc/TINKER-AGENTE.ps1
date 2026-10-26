@@ -356,7 +356,7 @@ function Run-Missions($v) {
         if ($c -lt 1) { throw "nao achou a velocidade ($($script:last -replace "`n", ' | '))" }
         Step "velocidade 3" | Out-Null
         $t0 = Val "Tempo"; Start-Sleep 4; $d = (Val "Tempo") - $t0
-        Step "velocidade 1" | Out-Null
+        Step "velocidade 1" | Out-Null; Start-Sleep 1
         if ((Val "Velocidade") -ne 1) { throw "a velocidade nao voltou ao normal" }
         if ($d -lt 8) { throw "em 3x o tempo andou so $d em 4 s (normal seria 4)" }
         "achou $c lugar(es); em 3x o tempo andou $([math]::Round($d, 1)) em 4 s"

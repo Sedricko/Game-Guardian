@@ -3645,11 +3645,10 @@ class Engine private constructor(private val app: Context) {
     /** Muda a velocidade (1 = normal) e trava para o jogo não voltar sozinho; 1 solta. */
     suspend fun setGameSpeed(addrs: List<String>, factor: String): String {
         val f = normalizeNumbers(factor).toFloatOrNull()?.takeIf { it > 0f && it <= 100f } ?: return "Velocidade inválida: use de 0.1 a 100."
-        call { d -> addrs.forEach { d.send("write $it f32 $f") } }
-        withContext(Dispatchers.Main) {
-            removeSaved(Session.saved.filter { it.name == SPEED_NAME })
-            if (f != 1f) addSaved(addrs.map { Hit(it, "f32", "A", f.toString()) }, frozen = true, name = SPEED_NAME)
-        }
+        // solta a trava antes de escrever: senão ela põe a velocidade antiga de volta logo depois
+        withContext(Dispatchers.Main) { removeSaved(Session.saved.filter { it.name == SPEED_NAME }) }
+        call { d -> addrs.forEach { d.send("unfreeze $it f32", quiet = true); d.send("write $it f32 $f") } }
+        if (f != 1f) withContext(Dispatchers.Main) { addSaved(addrs.map { Hit(it, "f32", "A", f.toString()) }, frozen = true, name = SPEED_NAME) }
         return if (f == 1f) "Velocidade normal." else "Jogo em ${f}x (travado em Salvos → $SPEED_NAME; 1x solta)."
     }
 
