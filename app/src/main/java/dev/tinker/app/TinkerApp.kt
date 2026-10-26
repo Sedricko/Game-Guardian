@@ -61,12 +61,22 @@ object Diag {
             val done = CountDownLatch(1)
             main.post { done.countDown() }
             if (!done.await(700, TimeUnit.MILLISECONDS)) {
+                // ainda travada depois de 1,5 s: guarda onde a thread da tela está parada (uma vez por lugar), para achar a causa
+                val where = if (done.await(800, TimeUnit.MILLISECONDS)) null else stuckAt(Looper.getMainLooper().thread.stackTrace)
                 done.await()
                 add("AVISO: a tela travou por ${SystemClock.uptimeMillis() - sent} ms")
+                if (where != null && stuckSeen.add(where.substringBefore('\n'))) add("Onde a tela travou:\n$where")
             }
             Thread.sleep(1000)
         }
     }, "tinker-vigia").apply { isDaemon = true }.start()
+
+    private val stuckSeen = HashSet<String>()
+
+    /** As linhas do Tinker na pilha da tela (as do Android e do Compose não dizem qual código nosso travou). */
+    private fun stuckAt(st: Array<StackTraceElement>): String? =
+        st.filter { it.className.startsWith("dev.tinker") }.take(8).joinToString("\n") { "  ${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }
+            .ifEmpty { st.take(6).joinToString("\n") { "  ${it.className}.${it.methodName}:${it.lineNumber}" } }.ifEmpty { null }
 
     /** Quantas coisas aconteceram (fora as do próprio envio do relatório): o envio a cada 10 min só vai se mudou. */
     @Volatile var activity = 0L
