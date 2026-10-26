@@ -28,6 +28,8 @@ import kotlin.random.Random
  * - XP escondido (não aparece na tela): sobe um tanto sorteado a cada ouro, só se acha por "valor desconhecido";
  * - madeira mostrada como inteiro mas guardada como Float (comum no Unity);
  * - poções num inventário de 40 posições com números pequenos repetidos (a busca acha centenas);
+ * - tempo (Float, segundos) que corre 10 vezes por segundo e abates (Dword) que sobem de 1 em intervalos curtos e
+ *   irregulares, como um cronômetro e um contador de mortes de verdade;
  * - "Atualizar jogo" troca a ordem dos campos, como uma versão nova do jogo (o que estava salvo deixa de valer).
  * Tudo em memória nativa (fora do heap do Java, que move objetos), como num motor de jogo. Salva em SharedPreferences.
  * Não tem anti-cheat de propósito: o Tinker não é feito para escapar de proteção.
@@ -77,6 +79,12 @@ class GameActivity : Activity() {
     private var wood: Int
         get() = mem.getFloat(base + 44).toInt()
         set(v) { mem.putFloat(base + 44, v.toFloat()) }
+    private var time: Float
+        get() = mem.getFloat(base + 48)
+        set(v) { mem.putFloat(base + 48, v) }
+    private var kills: Int
+        get() = mem.getInt(base + 52)
+        set(v) { mem.putInt(base + 52, v) }
     private var potions: Int
         get() = inv.getInt(7 * 4)
         set(v) { inv.putInt(7 * 4, v) }
@@ -121,6 +129,10 @@ class GameActivity : Activity() {
         show()
         ui.post(object : Runnable { override fun run() { show(); ui.postDelayed(this, 500) } })
         ui.post(object : Runnable { override fun run() { energy += 1; ui.postDelayed(this, 1000) } })
+        time = 0f
+        kills = 0
+        ui.post(object : Runnable { override fun run() { time += 0.1f; ui.postDelayed(this, 100) } })
+        ui.post(object : Runnable { override fun run() { kills += 1; ui.postDelayed(this, Random.nextLong(300, 1200)) } })
     }
 
     override fun onDestroy() {
@@ -143,16 +155,16 @@ class GameActivity : Activity() {
 
     /** "Versão nova" do jogo: os campos andam 56 bytes (ida e volta) e vão para outra memória. */
     private fun update() {
-        val vals = listOf(gold, gems, energy, points, xp, wood); val h = hp; val dm = diamonds
+        val vals = listOf(gold, gems, energy, points, xp, wood, kills); val h = hp; val dm = diamonds; val tm = time
         val old = mem
         mem = fresh()
         for (i in 0 until 160) old.put(i, 0)
         base = if (base == 0) 56 else 0
-        gold = vals[0]; gems = vals[1]; energy = vals[2]; points = vals[3]; xp = vals[4]; wood = vals[5]; hp = h; diamonds = dm
+        gold = vals[0]; gems = vals[1]; energy = vals[2]; points = vals[3]; xp = vals[4]; wood = vals[5]; kills = vals[6]; hp = h; diamonds = dm; time = tm
     }
 
     private fun show() {
-        val t = "Fase $fase · versão ${if (base == 0) 1 else 2}\nOuro: $gold\nGemas: $gems\nVida: ${"%.1f".format(hp)}\nEnergia: $energy\nPontos: $points\nDiamantes: $diamonds\nMadeira: $wood\nPoções: $potions"
+        val t = "Fase $fase · versão ${if (base == 0) 1 else 2}\nOuro: $gold\nGemas: $gems\nVida: ${"%.1f".format(hp)}\nEnergia: $energy\nPontos: $points\nDiamantes: $diamonds\nMadeira: $wood\nPoções: $potions\nTempo: ${"%.1f".format(java.util.Locale.ROOT, time)}\nAbates: $kills"
         if (t == shown) return  // a tela só muda quando um valor muda
         shown = t
         text.text = t
