@@ -471,7 +471,8 @@ function Run-Missions($v) {
     $fails = ($script:mres | Where-Object { $_ -like "FALHA*" }) -join "`n"
     # o Tinker ou o jogo fecharam durante as missoes: o Android guarda o motivo no buffer de crash
     $crash = (& $adb logcat -d -b crash) -join "`n"
-    if ($crash) { $fails += "`n=== fechou durante as missoes ===`n" + $crash.Substring(0, [Math]::Min($crash.Length, 3000)) }
+    # so queda do Tinker ou do Jogo de Teste (o Magisk e outros apps do emulador tambem caem as vezes)
+    if ($crash -match "dev\.tinker") { $fails += "`n=== fechou durante as missoes ===`n" + $crash.Substring(0, [Math]::Min($crash.Length, 3000)) }
     Post-Sheet "agente PC: missoes $ok de $($script:mres.Count) ok" $fails ("$health`n" + ($script:mres -join "`n")) $v
 }
 
@@ -521,7 +522,7 @@ function Test-Version {
     if (-not $out) { $out = "o autoteste nao terminou em 4 min" }
     $first = ($out -split "`n")[0]
     $fails = (($out -split "`n") | Where-Object { $_ -like "FALHA*" }) -join "`n"
-    if ($crash) { $fails += "`n=== app fechou ===`n" + $crash.Substring(0, [Math]::Min($crash.Length, 4000)) }
+    if ($crash -match "dev\.tinker") { $fails += "`n=== app fechou ===`n" + $crash.Substring(0, [Math]::Min($crash.Length, 4000)) }
     Say $first
     if ($fails) { Say $fails }
     Post-Sheet "agente PC: $first" $fails ($out + "`n`n=== crash ===`n" + $crash) $v
