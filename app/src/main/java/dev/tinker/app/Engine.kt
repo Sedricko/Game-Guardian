@@ -647,15 +647,18 @@ class Engine private constructor(private val app: Context) {
         // salvos com pid continuam congelados: ficam parados até voltar sozinhos quando o jogo reabrir
         Session.saved.replaceAll { if (it.pid == 0) it.copy(frozen = false) else it }
         Session.status = "O jogo fechou. Veja a aba Registro para o motivo."
-        // fechou menos de 1 min depois de ligar um patch: o patch é suspeito e não volta sozinho
-        if (System.currentTimeMillis() - lastPatchAt < 60_000 && Session.patches.any { it.enabled }) {
+        // quebrou (o Android registrou a falha deste processo) menos de 1 min depois de ligar um patch: o patch é suspeito e
+        // não volta sozinho. Fechar o jogo (deslizar, force-stop) não tem falha registrada e não conta
+        val crashes = runCatching { crashesOf(d.call("crashlog").lines, p.pkg) }.getOrDefault(emptyList())
+        val crashed = crashes.any { "${p.pid}" in it }
+        if (crashed && System.currentTimeMillis() - lastPatchAt < 60_000 && Session.patches.any { it.enabled }) {
             for (i in Session.patches.indices) if (Session.patches[i].enabled) Session.patches[i] = Session.patches[i].copy(enabled = false, suspect = true)
             storePatches()
             Diag.add("O jogo fechou logo depois de um patch de código: os patches ligados ficaram como suspeitos e desligados")
         }
         sendReport("o jogo fechou sozinho", auto = true)
         Diag.add("=== O jogo ${p.label} (PID ${p.pid}) fechou. Falhas registradas pelo Android: ===")
-        runCatching { dedupe(crashesOf(d.call("crashlog").lines, p.pkg)).forEach(Diag::add) }
+        dedupe(crashes).forEach(Diag::add)
         Diag.add("=== Últimas linhas do logcat do jogo ===")
         runCatching { dedupe(d.call("logs").lines).forEach(Diag::add) }
         Diag.add("=== Fim do relatório da queda ===")

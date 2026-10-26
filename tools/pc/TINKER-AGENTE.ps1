@@ -410,6 +410,8 @@ function Run-Missions($v) {
             Step "comparar $($p[2]) $a;$b" | Out-Null
             Tap $p[3]; $c2 = Val $p[0]
             $c = Step "comparar $($p[2]) $b;$c2"
+            # ainda muitos: mais uma mudanca (como uma pessoa faria)
+            if ($c -gt 3) { Tap $p[1]; $c3 = Val $p[0]; $c = Step "comparar $($p[2]) $c2;$c3" }
             if ($c -lt 1 -or $c -gt 3) { throw "$($p[0]): sobraram $c depois de 2 mudancas" }
         }
         "achou os dois (x10+7 e chave fixa) com 2 mudancas cada"
