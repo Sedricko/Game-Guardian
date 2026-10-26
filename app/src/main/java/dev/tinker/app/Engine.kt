@@ -218,6 +218,8 @@ val BOXED = setOf(
 
 /** IL2CPP (Unity): classe de um objeto e os campos dele, lidos da memória do jogo. start = começo do objeto. */
 data class Il2Field(val offset: Int, val code: Int, val name: String)
+/** Campo bool de "tem / desbloqueado" numa classe do jogo, com os objetos vivos dela. on: o valor que desbloqueia (isLocked = 0). */
+data class Unlock(val cls: String, val field: String, val offset: Int, val on: Int, val objs: List<String>)
 // extra: o que um campo aponta, por offset (texto de string, "7 itens" de array/lista)
 data class Il2Class(val name: String, val start: String, val fields: List<Il2Field>, val extra: Map<Int, String> = emptyMap())
 
@@ -1840,6 +1842,14 @@ class Engine private constructor(private val app: Context) {
             "terminar" -> finishTimers(timerHits)
             "quaisrodam" -> return whichRun(nativeFunctions(arg).second).let { r -> "ok ${r.size}\ncount ${r.size}\n" + r.joinToString("\n") { "roda ${it.first.name} ${it.second}" } }
             "loja" -> findShopPrices(arg)
+            // acha os campos de desbloquear, desbloqueia o da classe pedida, confere e volta como estava (a próxima rodada acha de novo)
+            "desbloquear" -> {
+                val u = findUnlocks().firstOrNull { it.cls == arg } ?: return "err nenhum campo de desbloquear em $arg"
+                val msg = unlock(u)
+                val now = call { d -> u.objs.map { d.send("read ${(it.toLong(16) + u.offset).toString(16)} i8", quiet = true).status } }
+                call { d -> u.objs.forEach { d.send("write ${(it.toLong(16) + u.offset).toString(16)} i8 ${1 - u.on}", quiet = true) } }
+                return "ok $msg\ncampo ${u.field}\ndepois ${now.joinToString(",")}"
+            }
             // "copiarficha 987654 111111": copia o objeto do 1º número no do 2º, confere e devolve o 2º (a próxima rodada acha de novo)
             "copiarficha" -> {
                 val (a, b) = w.drop(1).takeIf { it.size == 2 } ?: return "err use copiarficha <origem> <destino>"
@@ -3952,6 +3962,35 @@ class Engine private constructor(private val app: Context) {
         }
     }
 
+    /**
+     * 🔓 Campos bool que dizem se a pessoa tem o item (isUnlocked, owned, purchased, isLocked…) nas classes do jogo
+     * Unity, com os objetos vivos de cada uma. Só lê: desbloquear é outro toque.
+     */
+    suspend fun findUnlocks(): List<Unlock> {
+        val classes = call { d -> d.send("il2classes", quiet = true).lines }.filter { it.startsWith("class ") }.map { it.split(' ', limit = 5) }
+            .filter { it.size == 5 && LIBS.none { l -> it[1].startsWith(l) } && it[4].split(',').any(::unlockField) }.take(40)
+        val out = mutableListOf<Unlock>()
+        for (c in classes) call { d ->
+            val objs = runCatching { d.send("il2objs ${c[1]}", quiet = true).lines }.getOrDefault(emptyList())
+                .map { it.removePrefix("obj ") }.filter { it.toLongOrNull(16) != null }.take(200)
+            val first = objs.firstOrNull()?.toLong(16) ?: return@call
+            // o 1º campo do objeto fica depois de klass e monitor (2 ponteiros); 0x8 cobre os jogos 32 bits
+            val cls = listOf(0x10L, 0x8L).firstNotNullOfOrNull { o -> d.il2((first + o).toString(16))?.takeIf { it.start.toLong(16) == first } } ?: return@call
+            cls.fields.filter { it.code == 0x02 && unlockField(it.name) }.forEach { f ->
+                out += Unlock(cls.name, f.name, f.offset, if (lockedField(f.name)) 0 else 1, objs)
+            }
+        }
+        Diag.add("Desbloquear: ${out.size} campos (" + out.joinToString { "${it.cls}.${it.field} ×${it.objs.size}" } + ")")
+        return out
+    }
+
+    /** Escreve o valor que desbloqueia em todos os objetos vivos da classe. */
+    suspend fun unlock(u: Unlock): String = call { d ->
+        val n = u.objs.count { o -> runCatching { d.send("write ${(o.toLong(16) + u.offset).toString(16)} i8 ${u.on}", quiet = true) }.isSuccess }
+        Diag.add("Desbloquear ${u.cls}.${u.field} = ${u.on} em $n objetos")
+        "${u.cls}.${u.field} = ${if (u.on == 1) "sim" else "não"} em $n de ${u.objs.size} objetos. Se o jogo não mostrar, troque de tela ou reabra a loja."
+    }
+
     /** Dump das classes do próprio jogo (campos e métodos com onde ficam), como o dump.cs: vai para Download/Tinker. */
     suspend fun dumpIl2cpp(): Pair<String, File> {
         val pkg = gamePkg()
@@ -4759,6 +4798,12 @@ internal fun signature(raw: ByteArray, off: Int, vlen: Int): String {
     }
     return raw.indices.joinToString("") { if (wild[it]) "??" else "%02x".format(raw[it]) }
 }
+
+private val UNLOCK_FIELD = Regex("""(?i)unlock|locked|owned|purchas|bought|acquired|obtained|isbuy|isget""")
+/** Nome de campo de "tem o item / desbloqueado". */
+internal fun unlockField(name: String) = UNLOCK_FIELD.containsMatchIn(name)
+/** isLocked, locked: aqui desbloquear é 0 (isUnlocked, owned: 1). */
+internal fun lockedField(name: String) = Regex("""(?i)locked""").containsMatchIn(name) && !Regex("""(?i)unlocked""").containsMatchIn(name)
 
 /** "...A4" (ou "…a4") no refino = endereço termina em A4; null se não for isso. */
 internal fun addrEnd(text: String) = Regex("""(?:\.\.\.|…)\s*([0-9a-fA-F]{1,8})""").matchEntire(text.trim())?.groupValues?.get(1)?.lowercase()

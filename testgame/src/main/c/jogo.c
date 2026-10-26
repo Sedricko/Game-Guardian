@@ -76,6 +76,13 @@ static struct il2klass heroi_k;
 static struct il2fi heroi_f[4];
 __attribute__((used)) static uint64_t heroi[8], heroi2[8], heroi_nome[4], heroi_mochila[4];  // heroi2: destino do "copiar ficha"
 
+// Jogo.Arma { int dano; bool isUnlocked } em duas armas trancadas: o 🔓 Desbloquear acha o campo e liga nas duas
+static const char arma_nomes[] = "\0Arma\0Jogo";
+static struct il2ty t_bool = {0, 0x02u << 16};
+static struct il2klass arma_k;
+static struct il2fi arma_f[2];
+__attribute__((used)) static uint64_t armas[2][4];
+
 __attribute__((constructor)) static void fake_unity(void) {
     heroi_k = (struct il2klass){heroi_f, 0, heroi_nomes + 1, heroi_nomes + 7, {0, (void *)(uintptr_t)(0x12u << 16)}, heroi_f};
     heroi_f[0] = (struct il2fi){"ouro", &t_i4, &heroi_k, 0x10, 0};
@@ -96,4 +103,11 @@ __attribute__((constructor)) static void fake_unity(void) {
     *(void **)(o + 0x30) = heroi_mochila;
     *(void **)heroi2 = &heroi_k;
     *(int32_t *)((uint8_t *)heroi2 + 0x10) = 111111;
+    arma_k = (struct il2klass){arma_f, 0, arma_nomes + 1, arma_nomes + 6, {0, (void *)(uintptr_t)(0x12u << 16)}, arma_f};
+    arma_f[0] = (struct il2fi){"dano", &t_i4, &arma_k, 0x10, 0};
+    arma_f[1] = (struct il2fi){"isUnlocked", &t_bool, &arma_k, 0x14, 0};
+    for (int i = 0; i < 2; i++) {
+        *(void **)armas[i] = &arma_k;
+        *(int32_t *)((uint8_t *)armas[i] + 0x10) = 40 + i;
+    }
 }

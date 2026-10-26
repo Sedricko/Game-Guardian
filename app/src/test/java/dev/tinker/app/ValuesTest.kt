@@ -169,6 +169,14 @@ class ValuesTest {
     }
 
     @Test
+    fun camposDeDesbloquear() {
+        assertTrue(unlockField("isUnlocked") && unlockField("_owned") && unlockField("purchased") && unlockField("IsLocked"))
+        assertFalse(unlockField("gold") || unlockField("clock"))
+        assertTrue(lockedField("IsLocked"))
+        assertFalse(lockedField("isUnlocked") || lockedField("owned"))
+    }
+
+    @Test
     fun terminaEm() {
         assertEquals("a4", addrEnd("...A4"))
         assertEquals("1f0", addrEnd(" … 1F0 "))

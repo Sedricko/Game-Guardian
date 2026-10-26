@@ -400,6 +400,11 @@ function Run-Missions($v) {
         if ($script:last -notmatch "destino 987654") { throw "o destino nao ficou com o ouro da origem ($($script:last -replace "`n", ' | '))" }
         (($script:last -split "`n") | Select-Object -First 1)
     }
+    Mission "desbloquear: isUnlocked das armas (Unity)" {
+        Step "desbloquear Jogo.Arma" | Out-Null
+        if ($script:last -notmatch "campo isUnlocked" -or $script:last -notmatch "depois 1,1") { throw "nao desbloqueou as 2 armas ($($script:last -replace "`n", ' | '))" }
+        (($script:last -split "`n") | Select-Object -First 1)
+    }
     Mission "cronometro: terminar a construcao agora" {
         Tap "Construir"
         if ((Val "Obra") -lt 3600) { throw "a construcao nao comecou" }

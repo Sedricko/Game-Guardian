@@ -448,6 +448,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
         item { GameSpeed(engine, enabled, run) }
         item { Timers(engine, enabled, run) }
         item { ShopPrices(engine, enabled, run) }
+        if (Session.engine?.il2cpp == true) item { Unlocks(engine, enabled, run) }
         item { HiddenValue(engine, enabled, run) }
         item {
             Panel {
@@ -719,6 +720,26 @@ private fun ShopPrices(engine: Engine, enabled: Boolean, run: (suspend () -> Str
             }) { Text("Ler da tela") }
             Button(shape = MaterialTheme.shapes.medium, enabled = enabled && prices.isNotBlank(), onClick = { run { engine.findShopPrices(prices) } }) { Text("Achar preços") }
             OutlinedButton(shape = MaterialTheme.shapes.medium, enabled = enabled && (s.count ?: 0) in 1L..24L, onClick = { run { engine.writeAll("1") } }) { Text("Tudo por 1") }
+        }
+    }
+}
+
+/** 🔓 Desbloquear: campos "tem o item" (isUnlocked, owned, purchased) das classes Unity, um toque liga em todos os objetos. */
+@Composable
+private fun Unlocks(engine: Engine, enabled: Boolean, run: (suspend () -> String) -> Unit) {
+    var found by remember { mutableStateOf<List<Unlock>?>(null) }
+    Panel {
+        Text("🔓 Desbloquear (Unity)", style = MaterialTheme.typography.titleMedium)
+        Text("Acha campos como isUnlocked, owned e purchased nas classes do jogo. Abra a tela dos itens (loja, inventário) antes: só os objetos vivos aparecem.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Button(shape = MaterialTheme.shapes.medium, enabled = enabled, onClick = {
+            run { engine.findUnlocks().let { found = it; if (it.isEmpty()) "Nenhum campo de desbloquear nos objetos vivos agora." else "Achei ${it.size} campo(s)." } }
+        }) { Text("Achar o que desbloquear") }
+        found?.take(12)?.forEach { u ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("${u.cls.substringAfterLast('.')}.${u.field} · ${u.objs.size} objetos", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                OutlinedButton(shape = MaterialTheme.shapes.medium, enabled = enabled, onClick = { run { engine.unlock(u) } }) { Text("Desbloquear") }
+            }
         }
     }
 }
