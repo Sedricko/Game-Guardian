@@ -1913,7 +1913,8 @@ class Engine private constructor(private val app: Context) {
         check("painel de chaves") { if (Session.keySource.isBlank()) "sem link (cole em Ajustes → Assistente)" else syncKeys().also { require(it.startsWith("Painel de chaves")) { it } } }
         check("planilha (aprendizado)") { if (Session.keySource.isBlank()) "sem link (cole em Ajustes → Assistente)" else cloudPull().also { require(it.startsWith("Planilha")) { it } } }
         // uma pergunta curtinha de verdade em cada IA (1 pedido da cota de cada): responde e quanto demora
-        check("Gemini") { if (Session.geminiKeys.isEmpty()) "sem chave" else Assistant.pingGemini() }
+        // cota do dia acabou (429) é limite da chave, não defeito: aviso, não falha
+        check("Gemini") { if (Session.geminiKeys.isEmpty()) "sem chave" else runCatching { Assistant.pingGemini() }.getOrElse { if ("429" in it.message.orEmpty()) "sem cota agora (volta quando a cota renovar)" else throw it } }
         check("Groq") { if (Session.groqKeys.isEmpty()) "sem chave" else Assistant.pingGroq() }
         check("menu flutuante") { if (android.provider.Settings.canDrawOverlays(app)) "permitido" else error("sem permissão de sobreposição") }
         val ok = out.count { it.startsWith("OK") }
