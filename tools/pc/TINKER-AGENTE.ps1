@@ -386,6 +386,15 @@ function Run-Missions($v) {
         if ($script:last -notmatch "ueobj [0-9a-f]+ BP_Jogador_C Jogador") { throw "nao achou Jogador da classe BP_Jogador_C ($($script:last -replace "`n", ' | '))" }
         "achou $c objeto(s): $((($script:last -split "`n") | Select-Object -First 1))"
     }
+    Mission "ficha unity: texto, Vector3 e quantos itens" {
+        Step "ficha 987654" | Out-Null
+        $f = $script:last -replace "`n", ' | '
+        # so ASCII nos padroes: o acento do "Heroi" pode chegar trocado pelo adb
+        foreach ($e in @('Jogo\.Heroi', 'nome .+ = "Her.{1,3}i"', 'pos .+ = \(1\.5, 2, -3\)', 'mochila .+ = 7 itens', 'ouro .+ = 987654')) {
+            if ($script:last -notmatch $e) { throw "faltou /$e/ na ficha ($f)" }
+        }
+        "ficha certa: $f"
+    }
     Mission "cronometro: terminar a construcao agora" {
         Tap "Construir"
         if ((Val "Obra") -lt 3600) { throw "a construcao nao comecou" }

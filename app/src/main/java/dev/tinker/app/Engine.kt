@@ -1805,6 +1805,15 @@ class Engine private constructor(private val app: Context) {
             "terminar" -> finishTimers(timerHits)
             "quaisrodam" -> return whichRun(nativeFunctions(arg).second).let { r -> "ok ${r.size}\ncount ${r.size}\n" + r.joinToString("\n") { "roda ${it.first.name} ${it.second}" } }
             "loja" -> findShopPrices(arg)
+            // ficha do objeto onde está o número: classe IL2CPP e cada campo com o valor (texto, (x, y, z), N itens)
+            "ficha" -> {
+                search(setOf("i32"), arg)
+                for (h in list().second) {
+                    val c = il2cpp(h.addr) ?: continue
+                    return "ok ${c.name}\n" + ficha(c.start, 0x40, c, h.addr).joinToString("\n") { "campo ${it.label} = ${it.value}" }
+                }
+                return "err nenhum achado de $arg está dentro de um objeto IL2CPP"
+            }
             "despatch" -> "desfeitos ${clearMissionPatches()}"
             "desconhecido" -> startUnknown(setOf(w.getOrElse(1) { "i32" }))
             "comparar" -> compare(w[1], w.drop(2).joinToString(" "))
