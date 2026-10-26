@@ -98,6 +98,9 @@ class ValuesTest {
             byteArrayOf(0x78, 0x56, 0x34, 0x12, 0x7a, 0, 0, 0xb4.toByte())
         val sig = signature(raw, off = 8, vlen = 4)
         assertEquals("0102030405060708" + "????????" + "00000000" + "????????????????", sig)
+        // ponteiro de heap do x86_64 (0x74c2234e8d00, 47 bits) também vira ??
+        val x86 = byteArrayOf(0, 0x8d.toByte(), 0x4e, 0x23, 0xc2.toByte(), 0x74, 0, 0) + byteArrayOf(9, 9, 9, 9, 1, 2, 3, 4)
+        assertEquals("????????????????" + "????????" + "01020304", signature(x86, off = 8, vlen = 4))
         assertEquals("01??03", mergeSig("010203", "01ff03"))
         assertFalse(sigUseful("????????00000000"))
         assertTrue(sigUseful("0102030405060708090a0b0c????"))

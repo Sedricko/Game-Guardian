@@ -1726,7 +1726,8 @@ class Engine private constructor(private val app: Context) {
             "desconhecido" -> startUnknown(setOf(w.getOrElse(1) { "i32" }))
             "comparar" -> compare(w[1], w.drop(2).joinToString(" "))
             "escrever" -> writeAll(arg)
-            "congelar" -> list().second.take(1).also { withContext(Dispatchers.Main) { addSaved(it, frozen = true, name = "missão") } }.let { "congelado ${it.size}" }
+            // "congelar 10": trava no número escrito, mesmo que o jogo já tenha mudado ele de novo (valor que corre sozinho)
+            "congelar" -> list().second.take(1).map { if (arg.isEmpty()) it else it.copy(value = arg) }.also { withContext(Dispatchers.Main) { addSaved(it, frozen = true, name = "missão") } }.let { "congelado ${it.size}" }
             // tira os salvos de missões anteriores (cada rodada começa do zero)
             "limpar" -> Session.saved.filter { it.name.startsWith("missão") }.also { withContext(Dispatchers.Main) { removeSaved(it) } }.let { "limpos ${it.size}" }
             "salvar" -> list().second.take(1).also { withContext(Dispatchers.Main) { addSaved(it, name = "missão $arg") } }.let { "salvo ${it.size}" }
@@ -3215,8 +3216,10 @@ class Engine private constructor(private val app: Context) {
         if (r.status.toLongOrNull() != r.lines.size.toLong()) return null.also { why += "parecido: último valor em ${r.status} lugares" }
         val sig = item.sig.chunked(2)
         val words = (sig.size + 7) / 8
+        val align = minOf(TYPE_SIZES.getValue(item.type), 4).toLong()  // o jogo guarda número alinhado; achado torto é coincidência de bytes
         val scored = r.lines.mapNotNull { line ->
             val a = line.toLong(16)
+            if (a % align != 0L) return@mapNotNull null
             val start = a - item.sigOff
             val dump = runCatching { send("dump ${start.toString(16)} i64 $words", quiet = true).lines }.getOrNull()
             if (start < 0 || dump == null || dump.size != words) return@mapNotNull null
@@ -4347,7 +4350,8 @@ internal fun signature(raw: ByteArray, off: Int, vlen: Int): String {
     for (w in 0 until raw.size / 8) {
         var q = 0L
         for (k in 7 downTo 0) q = (q shl 8) or (raw[w * 8 + k].toLong() and 0xff)
-        if ((q and 0x00ffffffffffffffL) in 0x10000000L until 0x10000000000L) for (k in 0 until 8) wild[w * 8 + k] = true
+        // endereço (ponteiro) muda a cada vez que o jogo abre: até 47 bits (x86_64 e arm64 com 48 bits de endereço)
+        if ((q and 0x00ffffffffffffffL) in 0x10000000L until 0x800000000000L) for (k in 0 until 8) wild[w * 8 + k] = true
     }
     return raw.indices.joinToString("") { if (wild[it]) "??" else "%02x".format(raw[it]) }
 }

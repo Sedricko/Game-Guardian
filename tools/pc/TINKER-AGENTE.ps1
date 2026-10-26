@@ -257,7 +257,7 @@ function Run-Missions($v) {
     Mission "energia (muda sozinha; faixa + congelar)" {
         $e = Val "Energia"; $c = Step "buscar i32 $e~$($e + 3)"; $n = 0
         while ($c -gt 1 -and $n -lt 6) { Start-Sleep 2; $e = Val "Energia"; $c = Step "refinar $e~$($e + 3)"; $n++ }
-        Step "escrever 10" | Out-Null; Step "congelar" | Out-Null; Start-Sleep 4
+        Step "escrever 10" | Out-Null; Step "congelar 10" | Out-Null; Start-Sleep 4
         $e = Val "Energia"
         if ($e -gt 11) { throw "congelou mas a energia foi a $e" }
         "sobraram $c em $n refinos; congelada em $e"
@@ -267,7 +267,7 @@ function Run-Missions($v) {
         $t = Val "Tempo"; $c = Step "buscar f32 $(($t).ToString($inv))~$(($t + 3).ToString($inv))"; $n = 0
         while ($c -gt 1 -and $n -lt 6) { Start-Sleep 1; $t = Val "Tempo"; $c = Step "refinar $(($t).ToString($inv))~$(($t + 3).ToString($inv))"; $n++ }
         if ($c -lt 1) { throw "nao sobrou nenhum" }
-        Step "escrever 5" | Out-Null; Step "congelar" | Out-Null; Start-Sleep 3
+        Step "escrever 5" | Out-Null; Step "congelar 5" | Out-Null; Start-Sleep 3
         $t = Val "Tempo"
         if ($t -gt 6) { throw "sobraram $c em $n refinos, mas congelado o tempo foi a $t" }
         "sobraram $c em $n refinos; congelado em $t"
