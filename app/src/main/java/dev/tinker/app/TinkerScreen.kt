@@ -445,6 +445,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
     }
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { EasyMode(engine, enabled, run) }
+        item { GameSpeed(engine, enabled, run) }
         item {
             Panel {
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -645,6 +646,33 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
  * Modo fácil: o passo a passo para quem não sabe o que é Dword, Float ou cifrado. Só pergunta o que qualquer pessoa sabe
  * (o número da tela, se aumentou ou diminuiu); o tipo, o cifrado, o dobro e as cópias o Tinker resolve sozinho.
  */
+/** ⏩ Velocidade do jogo (Unity): acha a escala do tempo pelo relógio do Unity e muda com um toque. */
+@Composable
+private fun GameSpeed(engine: Engine, enabled: Boolean, run: (suspend () -> String) -> Unit) {
+    var addrs by remember { mutableStateOf<List<String>?>(null) }
+    Panel {
+        Text("⏩ Velocidade do jogo (Unity)", style = MaterialTheme.typography.titleMedium)
+        val a = addrs
+        if (a == null) {
+            Text("Acha onde o jogo guarda a velocidade do tempo. Fique no menu ou numa fase parada. Troca os resultados da busca.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Button(shape = MaterialTheme.shapes.medium, enabled = enabled, onClick = {
+                run { engine.findGameSpeed().let { addrs = it; if (it.isEmpty()) "Não achei a velocidade (jogo não é Unity, ou o relógio fica em outro formato)." else "Achei ${it.size} lugar(es) da velocidade." } }
+            }) { Text("Achar a velocidade") }
+        } else if (a.isEmpty()) {
+            Text("Não achei. Abra uma fase e tente de novo.", style = MaterialTheme.typography.bodySmall)
+            OutlinedButton(shape = MaterialTheme.shapes.medium, enabled = enabled, onClick = { addrs = null }) { Text("Tentar de novo") }
+        } else {
+            Text("${a.size} lugar(es). Escolha a velocidade (1x volta ao normal):", style = MaterialTheme.typography.bodySmall)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("0.5", "1", "2", "3", "5").forEach { f ->
+                    OutlinedButton(shape = MaterialTheme.shapes.medium, enabled = enabled, onClick = { run { engine.setGameSpeed(a, f) } }) { Text("${f}x") }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun EasyMode(engine: Engine, enabled: Boolean, run: (suspend () -> String) -> Unit) {
     val s = Session

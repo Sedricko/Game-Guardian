@@ -151,6 +151,8 @@ private fun x86Return(ret: Int, value: String): String? {
 }
 
 /** Função de uma lib do jogo, achada pelo nome na tabela de símbolos da própria lib (sem IDA nem Ghidra). */
+const val SPEED_NAME = "⏩ velocidade"
+
 data class NativeFn(val addr: String, val size: Long, val lib: String, val name: String)
 
 /** Onde fica um endereço de código: começo e fim da função, lib+deslocamento, arquitetura e nome (vazio se a lib não traz). */
@@ -1757,6 +1759,8 @@ class Engine private constructor(private val app: Context) {
                 ?: error("não achei a função $arg")
             "fixar" -> nativeFunctions(w[1]).second.firstOrNull { it.name == w[1] }?.let { patchNative(it, w.getOrElse(2) { "" }, apply = true, prefix = "missão ") }
                 ?: error("não achei a função ${w[1]}")
+            "velocidade" -> if (arg.isEmpty()) return findGameSpeed().also { speedAddrs = it }.let { "ok ${it.size}\ncount ${it.size}\n" + it.joinToString("\n") }
+                else setGameSpeed(speedAddrs, arg)
             "despatch" -> Session.patches.filter { it.name.startsWith("missão ") }.onEach { setPatch(it, false); withContext(Dispatchers.Main) { removePatch(it) } }.let { "desfeitos ${it.size}" }
             "desconhecido" -> startUnknown(setOf(w.getOrElse(1) { "i32" }))
             "comparar" -> compare(w[1], w.drop(2).joinToString(" "))
@@ -3598,6 +3602,43 @@ class Engine private constructor(private val app: Context) {
         return createPatch(m.code, hex, "$cls.${m.name} → $label", "${RET_NAMES[m.ret]} ${m.name}() passa a ${if (m.ret == 0x01) "voltar sem fazer nada" else "devolver $value"}", apply = false)
     }
 
+    /**
+     * Velocidade do jogo (Unity), sem injetar nada: o relógio do Unity guarda 0.99999994 e, 16 a 32 bytes depois, dois
+     * tempos em segundos (Double) que andam juntos; a escala do tempo (timeScale = 1.0) fica logo depois. Ideia do
+     * SpeedHackFinder (APEX[GG]v2). Usa a lista de resultados da busca.
+     */
+    suspend fun findGameSpeed(): List<String> = call { d ->
+        val n = d.send("search i32 1065353214").status.toLongOrNull() ?: 0
+        if (n == 0L || n > 50_000) return@call emptyList()
+        val found = LinkedHashSet<String>()
+        d.send("list ${minOf(n, 20_000)}", quiet = true).lines.forEach { line ->
+            val a = line.substringBefore(' ').toLongOrNull(16) ?: return@forEach
+            val w = runCatching { d.send("dump ${a.toString(16)} i32 48", quiet = true).lines.map { it.substringAfter(' ').toLongOrNull()?.toInt() } }.getOrNull()
+            if (w == null || w.size != 48 || w.any { it == null }) return@forEach
+            fun dbl(off: Int) = java.lang.Double.longBitsToDouble((w[off / 4]!!.toLong() and 0xffffffffL) or (w[off / 4 + 1]!!.toLong() shl 32))
+            for ((o1, o2) in listOf(20 to 28, 16 to 24, 24 to 32)) {
+                val t1 = dbl(o1)
+                val t2 = dbl(o2)
+                if (!(t1 > 100 && t1 < 1e6 && t2 > t1 && t2 < t1 + 250)) continue
+                (1..35).map { o1 + 4 * it }.filter { w[it / 4] == 0x3f800000 }.forEach { found += (a + it).toString(16) }
+                break
+            }
+        }
+        Diag.add("Velocidade do jogo: ${found.size} lugares (${found.joinToString { "0x$it" }})")
+        found.toList()
+    }
+
+    /** Muda a velocidade (1 = normal) e trava para o jogo não voltar sozinho; 1 solta. */
+    suspend fun setGameSpeed(addrs: List<String>, factor: String): String {
+        val f = normalizeNumbers(factor).toFloatOrNull()?.takeIf { it > 0f && it <= 100f } ?: return "Velocidade inválida: use de 0.1 a 100."
+        call { d -> addrs.forEach { d.send("write $it f32 $f") } }
+        withContext(Dispatchers.Main) {
+            removeSaved(Session.saved.filter { it.name == SPEED_NAME })
+            if (f != 1f) addSaved(addrs.map { Hit(it, "f32", "A", f.toString()) }, frozen = true, name = SPEED_NAME)
+        }
+        return if (f == 1f) "Velocidade normal." else "Jogo em ${f}x (travado em Salvos → $SPEED_NAME; 1x solta)."
+    }
+
     /** Funções com nome nas libs do jogo que contêm o texto (até 300) e quantas há ao todo. */
     suspend fun nativeFunctions(filter: String): Pair<Int, List<NativeFn>> = call { d ->
         val r = d.send("syms ${filter.filterNot { it.isWhitespace() }.ifEmpty { "*" }}", quiet = true)
@@ -3791,6 +3832,7 @@ class Engine private constructor(private val app: Context) {
     }
 
     @Volatile private var lastPatchAt = 0L
+    private var speedAddrs = emptyList<String>()  // achados da missão "velocidade"
 
     /** Liga (bytes novos) ou desliga (bytes originais) um patch; confere antes que o código ainda é o esperado. */
     suspend fun setPatch(p: CodePatch, on: Boolean): String {

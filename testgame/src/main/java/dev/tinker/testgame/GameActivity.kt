@@ -54,6 +54,12 @@ class GameActivity : Activity() {
     }
     private var base = 0  // onde começam os campos: "Atualizar jogo" muda, como uma versão nova
     private val inv = fresh()  // 40 posições do inventário (Dword cada)
+    // relógio como o do Unity: 0.99999994 no começo, dois tempos em segundos (Double) em +20 e +28 e a escala do
+    // tempo (timeScale, 1.0) logo depois; o tempo do jogo corre na velocidade dela (missão "velocidade do jogo")
+    private val clock = ByteBuffer.allocateDirect(256).order(ByteOrder.LITTLE_ENDIAN).apply {
+        putFloat(0, Float.fromBits(0x3F7FFFFE)); putDouble(20, 100.0); putDouble(28, 100.02); putFloat(44, 1f)
+    }
+    private val speed get() = clock.getFloat(44)
 
     private fun fresh(): ByteBuffer = ByteBuffer.allocateDirect(160).order(ByteOrder.LITTLE_ENDIAN)
 
@@ -135,7 +141,10 @@ class GameActivity : Activity() {
         ui.post(object : Runnable { override fun run() { energy += 1; ui.postDelayed(this, 1000) } })
         time = 0f
         kills = 0
-        ui.post(object : Runnable { override fun run() { time += 0.1f; ui.postDelayed(this, 100) } })
+        ui.post(object : Runnable { override fun run() {
+            clock.putDouble(20, clock.getDouble(20) + 0.1); clock.putDouble(28, clock.getDouble(20) + 0.02)
+            time += 0.1f * speed; ui.postDelayed(this, 100)
+        } })
         ui.post(object : Runnable { override fun run() { kills += 1; ui.postDelayed(this, Random.nextLong(300, 1200)) } })
     }
 
@@ -168,7 +177,7 @@ class GameActivity : Activity() {
     }
 
     private fun show() {
-        val t = "Fase $fase · versão ${if (base == 0) 1 else 2}\nOuro: $gold\nGemas: $gems\nVida: ${"%.1f".format(hp)}\nEnergia: $energy\nPontos: $points\nDiamantes: $diamonds\nMadeira: $wood\nPoções: $potions\nTempo: ${"%.1f".format(java.util.Locale.ROOT, time)}\nAbates: $kills"
+        val t = "Fase $fase · versão ${if (base == 0) 1 else 2}\nOuro: $gold\nGemas: $gems\nVida: ${"%.1f".format(hp)}\nEnergia: $energy\nPontos: $points\nDiamantes: $diamonds\nMadeira: $wood\nPoções: $potions\nTempo: ${"%.1f".format(java.util.Locale.ROOT, time)}\nAbates: $kills\nVelocidade: ${"%.1f".format(java.util.Locale.ROOT, speed)}"
         if (t == shown) return  // a tela só muda quando um valor muda
         shown = t
         text.text = t

@@ -325,6 +325,17 @@ function Run-Missions($v) {
         if (((Val "Ouro") - $o) -ne 1) { throw "desfez o patch mas o ouro nao voltou a subir de 1" }
         "achou pelo nome, viu a chamada, o patch deu +5 e desfazer voltou ao +1"
     }
+    Mission "velocidade do jogo (timeScale do Unity)" {
+        Step "limpar" | Out-Null  # solta o tempo congelado da missao do tempo
+        $c = Step "velocidade"
+        if ($c -lt 1) { throw "nao achou a velocidade ($($script:last -replace "`n", ' | '))" }
+        Step "velocidade 3" | Out-Null
+        $t0 = Val "Tempo"; Start-Sleep 4; $d = (Val "Tempo") - $t0
+        Step "velocidade 1" | Out-Null
+        if ((Val "Velocidade") -ne 1) { throw "a velocidade nao voltou ao normal" }
+        if ($d -lt 8) { throw "em 3x o tempo andou so $d em 4 s (normal seria 4)" }
+        "achou $c lugar(es); em 3x o tempo andou $([math]::Round($d, 1)) em 4 s"
+    }
     Mission "jogo atualizado (campos mudam de lugar)" {
         Tap "Atualizar jogo"
         $r = Narrow "i32" "Ouro" "+1 ouro" $int
