@@ -159,9 +159,15 @@ class GameActivity : Activity() {
         ui.post(object : Runnable { override fun run() { energy += 1; ui.postDelayed(this, 1000) } })
         time = 0f
         kills = 0
+        // como o Unity: o passo é o tempo real desde a última volta (com teto, como o maximumDeltaTime), não 0,1 fixo;
+        // com o emulador ocupado o laço roda menos vezes e o tempo do jogo atrasava (a missão da velocidade falhava)
+        var last = android.os.SystemClock.uptimeMillis()
         ui.post(object : Runnable { override fun run() {
-            clock.putDouble(20, clock.getDouble(20) + 0.1); clock.putDouble(28, clock.getDouble(20) + 0.02)
-            time += 0.1f * speed; tick(); ui.postDelayed(this, 100)
+            val now = android.os.SystemClock.uptimeMillis()
+            val dt = ((now - last) / 1000.0).coerceAtMost(0.5)
+            last = now
+            clock.putDouble(20, clock.getDouble(20) + dt); clock.putDouble(28, clock.getDouble(20) + 0.02)
+            time += dt.toFloat() * speed; tick(); ui.postDelayed(this, 100)
         } })
         ui.post(object : Runnable { override fun run() { kills += 1; ui.postDelayed(this, Random.nextLong(300, 1200)) } })
     }
