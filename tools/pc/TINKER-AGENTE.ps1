@@ -29,7 +29,7 @@ function Hdr($extra) {
 
 # APK do release: com token vai pela API (repositorio privado); o GitHub manda para o S3, que nao aceita o token junto
 function Get-Apk($asset, $out) {
-    if (-not (Hdr).ContainsKey("Authorization")) { Invoke-WebRequest $asset.browser_download_url -OutFile $out -UseBasicParsing; return }
+    if (-not $asset.url -or -not (Hdr).ContainsKey("Authorization")) { Invoke-WebRequest $asset.browser_download_url -OutFile $out -UseBasicParsing; return }
     $r = $null; $loc = $null
     try { $r = Invoke-WebRequest $asset.url -Headers (Hdr @{ "Accept" = "application/octet-stream" }) -MaximumRedirection 0 -UseBasicParsing -ErrorAction SilentlyContinue }
     catch { $loc = $_.Exception.Response.Headers["Location"] }
@@ -279,7 +279,18 @@ function Run-Missions($v) {
 }
 
 function Test-Version {
-    $rel = Invoke-RestMethod "https://api.github.com/repos/Sedricko/Game-Guardian/releases/latest" -Headers (Hdr)
+    try { $rel = Invoke-RestMethod "https://api.github.com/repos/Sedricko/Game-Guardian/releases/latest" -Headers (Hdr) }
+    catch {
+        # api.github.com fora (visto: DNS do PC nao resolvia so ele): a pagina do release em github.com diz a versao
+        $page = "https://github.com/Sedricko/Game-Guardian/releases/latest"
+        try { $loc = (Invoke-WebRequest $page -MaximumRedirection 0 -UseBasicParsing -ErrorAction SilentlyContinue).Headers.Location }
+        catch { $loc = $_.Exception.Response.Headers["Location"] }
+        if (-not ($loc -match "/tag/(v[^/]+)$")) { throw }
+        $t = $Matches[1]; $d = "https://github.com/Sedricko/Game-Guardian/releases/download/$t"
+        $rel = [pscustomobject]@{ tag_name = $t; assets = @(
+            [pscustomobject]@{ name = "Tinker-$($t.TrimStart('v')).apk"; browser_download_url = "$d/Tinker-$($t.TrimStart('v')).apk"; url = $null },
+            [pscustomobject]@{ name = "JogoTeste.apk"; browser_download_url = "$d/JogoTeste.apk"; url = $null }) }
+    }
     $v = $rel.tag_name.TrimStart("v")
     if ((Get-Content $done -ErrorAction SilentlyContinue) -eq $v) {
         if ((Get-Date).Minute % 10 -lt 2) { Say "sem versao nova (ultima testada: $v)" }  # sinal de vida a cada ~10 min
