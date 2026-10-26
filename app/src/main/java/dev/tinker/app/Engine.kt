@@ -3075,7 +3075,7 @@ class Engine private constructor(private val app: Context) {
                     }
                 }
                 else -> null
-            } ?: fromChains(item, pid, why) ?: (if (signature) fromIl2cpp(item, pid, why) ?: fromSignature(item, pid, why) ?: fromSimilar(item, pid, why) else null)
+            } ?: fromChains(item, pid, why) ?: (if (signature) fromIl2cpp(item, pid, why) ?: fromSignature(item, pid, why) ?: fromSimilar(item, pid, why) ?: fromSameAddress(item, pid, why) else null)
             when {
                 how != null -> back += "${label(item)} ($how)"
                 item.pid != 0 || item.chains.isNotEmpty() || item.sig.isNotEmpty() -> {
@@ -3246,24 +3246,49 @@ class Engine private constructor(private val app: Context) {
         val bytes = valueBytes(item) ?: return null
         val r = runCatching { send("aobfind $bytes", quiet = true) }.getOrNull() ?: return null
         if (r.status.toLongOrNull() != r.lines.size.toLong()) return null.also { why += "parecido: último valor em ${r.status} lugares" }
-        val sig = item.sig.chunked(2)
-        val words = (sig.size + 7) / 8
         val align = minOf(TYPE_SIZES.getValue(item.type), 4).toLong()  // o jogo guarda número alinhado; achado torto é coincidência de bytes
         val scored = r.lines.mapNotNull { line ->
             val a = line.toLong(16)
             if (a % align != 0L) return@mapNotNull null
-            val start = a - item.sigOff
-            val dump = runCatching { send("dump ${start.toString(16)} i64 $words", quiet = true).lines }.getOrNull()
-            if (start < 0 || dump == null || dump.size != words) return@mapNotNull null
-            val raw = ByteArray(words * 8)
-            dump.forEachIndexed { i, l -> val v = l.substringAfter(' ').toLongOrNull() ?: return@mapNotNull null; for (k in 0 until 8) raw[i * 8 + k] = (v shr (8 * k)).toByte() }
-            a to sig.indices.count { sig[it] != "??" && sig[it] == "%02x".format(raw[it]) }
+            sigScore(item, a)?.let { a to it }
         }.sortedByDescending { it.second }
-        val fixed = sig.count { it != "??" }
+        val fixed = item.sig.chunked(2).count { it != "??" }
         val best = scored.firstOrNull() ?: return null.also { why += "parecido: nenhum lugar com o último valor" }
         val second = scored.getOrNull(1)?.second ?: 0
         if (best.second < fixed / 2 || best.second - second < 4) return null.also { why += "parecido: melhor ${best.second} de $fixed bytes, segundo $second" }
         return "vizinhança parecida".takeIf { moveTo(item, best.first.toString(16), "Parecido").pid == pid }?.also { replace(item) { it.copy(trusted = false) } }
+    }
+
+    /** Quantos bytes fixos da assinatura batem em volta de a (null: memória que não deu para ler). */
+    private fun Daemon.sigScore(item: SavedItem, a: Long): Int? {
+        val sig = item.sig.chunked(2)
+        val words = (sig.size + 7) / 8
+        val start = a - item.sigOff
+        val dump = runCatching { send("dump ${start.toString(16)} i64 $words", quiet = true).lines }.getOrNull()
+        if (start < 0 || dump == null || dump.size != words) return null
+        val raw = ByteArray(words * 8)
+        dump.forEachIndexed { i, l -> val v = l.substringAfter(' ').toLongOrNull() ?: return null; for (k in 0 until 8) raw[i * 8 + k] = (v shr (8 * k)).toByte() }
+        return sig.indices.count { sig[it] != "??" && sig[it] == "%02x".format(raw[it]) }
+    }
+
+    /**
+     * Mesmo endereço: muitos jogos põem os dados no mesmo lugar a cada vez que abrem (lib, buffer nativo, heap igual).
+     * Vale se o número ali cabe no histórico e boa parte da vizinhança bate (o valor pode ter mudado logo antes de fechar).
+     */
+    private fun Daemon.fromSameAddress(item: SavedItem, pid: Int, why: MutableList<String>): String? {
+        if (!sigUseful(item.sig)) return null
+        val v = runCatching { send("read ${item.addr} ${item.type}", quiet = true).status }.getOrNull() ?: return null.also { why += "mesmo endereço: não existe mais" }
+        val score = sigScore(item, item.addr.toLong(16)) ?: return null
+        val fixed = item.sig.chunked(2).count { it != "??" }
+        // número grande quase igual ao último (mudou 1 ou 2 antes de fechar) já basta: lixo raramente cai tão perto
+        val now = readable(v, item.type)?.toDoubleOrNull()
+        val last = readable(item.value, item.type)?.toDoubleOrNull()
+        val close = now != null && last != null && kotlin.math.abs(last) >= 100 && kotlin.math.abs(now - last) <= maxOf(10.0, kotlin.math.abs(last) / 100)
+        if (!plausible(item, v) || (score < fixed / 3 && !close)) return null.also { why += "mesmo endereço: lê $v, vizinhança $score de $fixed bytes" }
+        // moveTo não muda nada quando o endereço é o mesmo: só passa a valer neste processo
+        replace(item) { it.copy(pid = currentPid, trusted = false) }
+        Diag.add("Mesmo endereço ${label(item)}: 0x${item.addr} (lê $v, vizinhança $score de $fixed bytes)")
+        return "mesmo endereço".takeIf { currentPid == pid }
     }
 
     /** Bytes do último valor como ficam na memória (só tipos simples). */
