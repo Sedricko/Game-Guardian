@@ -46,6 +46,10 @@ function Update-Self {
         $new = (Invoke-WebRequest "$raw/TINKER-AGENTE.ps1" -UseBasicParsing -Headers (Hdr)).Content
         if ($new -is [byte[]]) { $new = [Text.Encoding]::UTF8.GetString($new) }
         if ($new -and $new.Contains("Update-Self") -and (Norm $new) -ne (Norm (Get-Content $self -Raw -Encoding UTF8))) {
+            # script novo com erro de sintaxe derrubaria o agente ao reiniciar: fica com o de agora e avisa
+            $errs = $null
+            [void][System.Management.Automation.Language.Parser]::ParseInput((Norm $new), [ref]$null, [ref]$errs)
+            if ($errs) { Say "versao nova do agente com erro (linha $($errs[0].Extent.StartLineNumber): $($errs[0].Message)); continuo com a atual"; return }
             [IO.File]::WriteAllText($self, ((Norm $new) -replace "`n", "`r`n"), (New-Object Text.UTF8Encoding $true))
             Say "agente atualizado, reiniciando..."
             & powershell -NoProfile -ExecutionPolicy Bypass -File $self
@@ -386,7 +390,7 @@ function Run-Missions($v) {
         $c = Step "quaisrodam jogo_"
         if ($script:last -notmatch "roda jogo_tick \d+") { throw "nao viu o jogo_tick rodando ($($script:last -replace "`n", ' | '))" }
         if ($script:last -match "roda jogo_bonus_ouro") { throw "disse que o bonus rodou sem ninguem tocar no ouro" }
-        "rodaram $c: $((($script:last -split "`n") | Where-Object { $_ -like 'roda *' }) -join ', ')"
+        "rodaram ${c}: $((($script:last -split "`n") | Where-Object { $_ -like 'roda *' }) -join ', ')"
     }
     Mission "loja: precos por 1 (busca em grupo)" {
         $c = Step "loja 150 320 75"
