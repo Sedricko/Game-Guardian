@@ -1784,6 +1784,7 @@ class Engine private constructor(private val app: Context) {
             "cronometros" -> return findTimers().also { timerHits = it }.let { "ok ${it.size}\ncount ${it.size}\n" + it.joinToString("\n") { t -> "timer ${t.addr} ${t.leftSec}" } }
             "terminar" -> finishTimers(timerHits)
             "quaisrodam" -> return whichRun(nativeFunctions(arg).second).let { r -> "ok ${r.size}\ncount ${r.size}\n" + r.joinToString("\n") { "roda ${it.first.name} ${it.second}" } }
+            "loja" -> findShopPrices(arg)
             "despatch" -> "desfeitos ${clearMissionPatches()}"
             "desconhecido" -> startUnknown(setOf(w.getOrElse(1) { "i32" }))
             "comparar" -> compare(w[1], w.drop(2).joinToString(" "))
@@ -3685,6 +3686,24 @@ class Engine private constructor(private val app: Context) {
         timers.forEach { t -> d.send("write ${t.addr} ${t.type} ${if (t.ms) now else now / 1000}") }
         "${timers.size} cronômetro(s) terminados agora."
     }
+
+    /**
+     * 🛒 Preços da loja: os preços de uma loja ficam juntos na memória (uma lista de itens). Busca em grupo com os
+     * preços que aparecem, chegando de 64 até 1024 bytes de distância, até sobrar pouco. Depois "tudo por 1" escreve neles.
+     */
+    suspend fun findShopPrices(text: String): String {
+        val nums = Regex("""\d+""").findAll(text).map { it.value }.distinct().toList()
+        if (nums.size < 2) return "Digite pelo menos 2 preços que aparecem na loja (ex.: 150 320 75)."
+        for (type in listOf("i32", "f32")) for (dist in listOf(64, 256, 1024)) {
+            search(setOf(type), nums.joinToString(";") + "::$dist")
+            val n = Session.count ?: 0
+            if (n in 1L..(nums.size * 4L)) return "Achei os ${nums.size} preços juntos ($n resultados, ${if (type == "i32") "Dword" else "Float"}, até $dist bytes). Toque em Tudo por 1."
+        }
+        return "Não achei os preços juntos: confira os números (sem pontos) ou tente com outros itens da loja."
+    }
+
+    /** Números que aparecem na tela agora (para a loja e o Achar sozinho), sem repetir. */
+    suspend fun visibleNumbers(): List<Long> = screenNumbers().map { it.first }.distinct()
 
     /** Muda a velocidade (1 = normal) e trava para o jogo não voltar sozinho; 1 solta. */
     suspend fun setGameSpeed(addrs: List<String>, factor: String): String {

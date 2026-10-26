@@ -388,6 +388,15 @@ function Run-Missions($v) {
         if ($script:last -match "roda jogo_bonus_ouro") { throw "disse que o bonus rodou sem ninguem tocar no ouro" }
         "rodaram $c: $((($script:last -split "`n") | Where-Object { $_ -like 'roda *' }) -join ', ')"
     }
+    Mission "loja: precos por 1 (busca em grupo)" {
+        $c = Step "loja 150 320 75"
+        if ($c -lt 1) { throw "nao achou os precos ($($script:last -split "`n" | Select-Object -First 1))" }
+        Step "escrever 1" | Out-Null; Start-Sleep 1
+        $o = Val "Ouro"; Tap "Comprar espada"; Start-Sleep 1
+        $d = $o - (Val "Ouro")
+        if ($d -ne 1) { throw "a espada custou $d (esperava 1)" }
+        "achou $c; a espada saiu por 1"
+    }
     Mission "jogo atualizado (campos mudam de lugar)" {
         Tap "Atualizar jogo"
         $r = Narrow "i32" "Ouro" "+1 ouro" $int

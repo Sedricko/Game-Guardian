@@ -447,6 +447,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
         item { EasyMode(engine, enabled, run) }
         item { GameSpeed(engine, enabled, run) }
         item { Timers(engine, enabled, run) }
+        item { ShopPrices(engine, enabled, run) }
         item {
             Panel {
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -647,6 +648,32 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
  * Modo fácil: o passo a passo para quem não sabe o que é Dword, Float ou cifrado. Só pergunta o que qualquer pessoa sabe
  * (o número da tela, se aumentou ou diminuiu); o tipo, o cifrado, o dobro e as cópias o Tinker resolve sozinho.
  */
+/** 🛒 Preços da loja: com a loja aberta, os preços que aparecem viram uma busca em grupo; depois "tudo por 1". */
+@Composable
+private fun ShopPrices(engine: Engine, enabled: Boolean, run: (suspend () -> String) -> Unit) {
+    val s = Session
+    val scope = rememberCoroutineScope()
+    var prices by remember { mutableStateOf("") }
+    Panel {
+        Text("🛒 Preços da loja", style = MaterialTheme.typography.titleMedium)
+        Text("Abra a loja do jogo e digite 2 a 6 preços que aparecem (ou leia da tela). O Tinker acha a lista de preços e deixa tudo por 1.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        TinkerTextField(prices, { prices = it }, "Preços (ex.: 150 320 75)", Modifier.fillMaxWidth())
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(shape = MaterialTheme.shapes.medium, enabled = enabled, onClick = {
+                s.aiHidePanel = true
+                scope.launch {
+                    delay(800)
+                    prices = runCatching { engine.visibleNumbers().filter { it in 1..9_999_999 }.take(6).joinToString(" ") }.getOrDefault(prices)
+                    s.aiHidePanel = false
+                }
+            }) { Text("Ler da tela") }
+            Button(shape = MaterialTheme.shapes.medium, enabled = enabled && prices.isNotBlank(), onClick = { run { engine.findShopPrices(prices) } }) { Text("Achar preços") }
+            OutlinedButton(shape = MaterialTheme.shapes.medium, enabled = enabled && (s.count ?: 0) in 1L..24L, onClick = { run { engine.writeAll("1") } }) { Text("Tudo por 1") }
+        }
+    }
+}
+
 /** ⏱️ Cronômetros: acha as construções e esperas pela hora de terminar e termina agora. */
 @Composable
 private fun Timers(engine: Engine, enabled: Boolean, run: (suspend () -> String) -> Unit) {

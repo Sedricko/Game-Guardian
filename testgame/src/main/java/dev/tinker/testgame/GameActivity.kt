@@ -63,6 +63,10 @@ class GameActivity : Activity() {
     private val speed get() = clock.getFloat(44)
     // construção: a hora de terminar (ms desde 1970) num Long, como os jogos de espera (missão "cronômetros")
     private val build = ByteBuffer.allocateDirect(64).order(ByteOrder.LITTLE_ENDIAN)
+    // loja: itens de 16 bytes (código, preço, estoque); comprar a espada desconta o preço do ouro (missão "loja")
+    private val shop = ByteBuffer.allocateDirect(64).order(ByteOrder.LITTLE_ENDIAN).apply {
+        intArrayOf(150, 320, 75).forEachIndexed { i, p -> putInt(i * 16, i + 1); putInt(i * 16 + 4, p); putInt(i * 16 + 8, 9) }
+    }
     private val buildLeft get() = ((build.getLong(8) - System.currentTimeMillis()) / 1000).coerceAtLeast(0)
 
     private fun fresh(): ByteBuffer = ByteBuffer.allocateDirect(160).order(ByteOrder.LITTLE_ENDIAN)
@@ -126,6 +130,7 @@ class GameActivity : Activity() {
         actions["Usar poção"] = { if (potions > 0) potions -= 1 }
         actions["Achar poção"] = { potions += 1 }
         actions["Próxima fase"] = { nextLevel() }
+        actions["Comprar espada"] = { val p = shop.getInt(4); if (gold >= p) gold -= p }
         actions["Construir"] = { build.putLong(8, System.currentTimeMillis() + 2 * 3600_000L) }
         actions["Atualizar jogo"] = { update() }
         val grid = android.widget.GridLayout(this).apply { columnCount = 2 }
@@ -182,7 +187,7 @@ class GameActivity : Activity() {
     }
 
     private fun show() {
-        val t = "Fase $fase · versão ${if (base == 0) 1 else 2}\nOuro: $gold\nGemas: $gems\nVida: ${"%.1f".format(hp)}\nEnergia: $energy\nPontos: $points\nDiamantes: $diamonds\nMadeira: $wood\nPoções: $potions\nTempo: ${"%.1f".format(java.util.Locale.ROOT, time)}\nAbates: $kills\nVelocidade: ${"%.1f".format(java.util.Locale.ROOT, speed)}\nObra: $buildLeft"
+        val t = "Fase $fase · versão ${if (base == 0) 1 else 2}\nOuro: $gold\nGemas: $gems\nVida: ${"%.1f".format(hp)}\nEnergia: $energy\nPontos: $points\nDiamantes: $diamonds\nMadeira: $wood\nPoções: $potions\nTempo: ${"%.1f".format(java.util.Locale.ROOT, time)}\nAbates: $kills\nVelocidade: ${"%.1f".format(java.util.Locale.ROOT, speed)}\nObra: $buildLeft\nEspada: ${shop.getInt(4)}"
         if (t == shown) return  // a tela só muda quando um valor muda
         shown = t
         text.text = t
