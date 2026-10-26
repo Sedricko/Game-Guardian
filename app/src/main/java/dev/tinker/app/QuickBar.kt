@@ -42,6 +42,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 
@@ -139,6 +141,14 @@ fun QuickBar(engine: Engine, onDrag: (Float, Float) -> Unit, onKeyboard: (Boolea
                 enabled = enabled, contentPadding = small) { Text("❄") }
             if (n <= 5L) Text(s.results.take(5).joinToString("  ") { it.value }, Modifier.weight(1f), style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.primary, maxLines = 1)
+        }
+        // receitas do jogo: um toque aplica, sem abrir o painel (as que cabem numa linha; o resto fica em Salvos → Receitas)
+        if (s.recipes.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            s.recipes.take(6).forEach { r ->
+                FilledTonalButton(shape = MaterialTheme.shapes.medium, onClick = { act { engine.applyRecipe(r) } }, enabled = enabled, contentPadding = small) {
+                    Text("▶ ${r.name}", maxLines = 1)
+                }
+            }
         }
         if (own && pad) NumPad(onKey = { s.value = applyKey(s.value, it) }, onDone = { pad = false })
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, maxLines = 3) }

@@ -61,8 +61,8 @@ object Diag {
             val done = CountDownLatch(1)
             main.post { done.countDown() }
             if (!done.await(700, TimeUnit.MILLISECONDS)) {
-                // ainda travada depois de 1,5 s: guarda onde a thread da tela está parada (uma vez por lugar), para achar a causa
-                val where = if (done.await(800, TimeUnit.MILLISECONDS)) null else stuckAt(Looper.getMainLooper().thread.stackTrace)
+                // ainda travada depois de 1 s: guarda onde a thread da tela está parada (uma vez por lugar), para achar a causa
+                val where = if (done.await(300, TimeUnit.MILLISECONDS)) null else stuckAt(Looper.getMainLooper().thread.stackTrace)
                 done.await()
                 add("AVISO: a tela travou por ${SystemClock.uptimeMillis() - sent} ms")
                 if (where != null && stuckSeen.add(where.substringBefore('\n'))) add("Onde a tela travou:\n$where")
