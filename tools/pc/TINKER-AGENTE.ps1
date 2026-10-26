@@ -292,7 +292,13 @@ function Tap($text) {
 # um passo do Tinker (escolher/buscar/refinar/desconhecido/comparar/escrever/congelar); devolve a contagem
 function Step($cmd) {
     & $adb shell rm -f /data/data/$app/files/missao.txt
-    & $adb shell am start -f 0x10008000 -n "$app/.MainActivity" --es missao "'$cmd'" | Out-Null
+    $o = (& $adb shell am start -f 0x10008000 -n "$app/.MainActivity" --es missao "'$cmd'" 2>&1) -join " "
+    # o Android do emulador reiniciou (o sistema ainda nao acha os apps): espera ligar e deixa a missao tentar de novo
+    if ($o -match "does not exist|Can't find service") {
+        Say "o Android do emulador reiniciou no meio das missoes: esperando ligar"
+        & $adb wait-for-device; Wait-Booted | Out-Null
+        throw "o Android do emulador reiniciou no meio do passo '$cmd'"
+    }
     for ($k = 0; $k -lt 360; $k++) {
         Start-Sleep -Milliseconds 500
         $t = & $adb shell cat /data/data/$app/files/missao.txt 2>$null
