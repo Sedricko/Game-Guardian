@@ -199,6 +199,8 @@ function Top-Ui { Close-Pad; for ($k = 0; $k -lt 4; $k++) { & $adb shell input s
 # botao da fileira de ferramentas (rola para o lado): sem achar na tela, desliza a fileira ate 3 vezes
 function Tap-Chip($re) {
     Top-Ui
+    # com jogo escolhido ou deitado a fileira fica abaixo da dobra: rola ate ela aparecer
+    Find-Ui '(^|\s)(F.{1,2}cil|Velocidade|Cron.metros|Loja|Disfar.ado)$' 6 | Out-Null
     $n = Find-Ui $re 0
     for ($k = 0; $k -lt 3 -and -not $n; $k++) {
         $row = Find-Ui '(^|\s)(Loja|Velocidade|Cron.metros)$' 0
@@ -218,8 +220,8 @@ function Open-Tool($chip, $shows) {
 # janelas do Tinker sobre o jogo (bolinha, painel, barra rapida), pelo dumpsys: o uiautomator nao ve janela flutuante
 function Overlay-Frames {
     $d = (& $adb shell dumpsys window windows) -join "`n"
-    $d -split "Window #" | Where-Object { $_ -match "APPLICATION_OVERLAY" -and $_ -match "dev\.tinker\.app" -and $_ -match "mHasSurface=true" } | ForEach-Object {
-        if ($_ -match "\sframe=\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]") {
+    $d -split "Window #" | Where-Object { $_ -match "APPLICATION_OVERLAY|ty=2038" -and $_ -match "dev\.tinker\.app" -and $_ -notmatch "mHasSurface=false" } | ForEach-Object {
+        if ($_ -match "[\s{]frame=\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]") {
             $l = [int]$Matches[1]; $t = [int]$Matches[2]; $r = [int]$Matches[3]; $b = [int]$Matches[4]
             [pscustomobject]@{ x = ($l + $r) / 2; y = ($t + $b) / 2; w = $r - $l; h = $b - $t }
         }
@@ -227,11 +229,15 @@ function Overlay-Frames {
 }
 function Open-Bubble {
     & $adb shell am force-stop $app
-    Step "aba 0" | Out-Null; Start-Sleep 2
+    Step "aba 0" | Out-Null; Start-Sleep 3
     Tap-Ui "^⧉$" 0  # o botao do menu flutuante no topo do Tinker
     Start-Sleep 3
     $b = Overlay-Frames | Sort-Object { $_.w * $_.h } | Select-Object -First 1
-    if (-not $b) { throw "a bolinha nao apareceu (nenhuma janela do Tinker sobre o jogo)" }
+    if (-not $b) {
+        # o que o Android diz das janelas do Tinker, para saber por que nao achou
+        $d = (& $adb shell dumpsys window windows) -split "`n" | Where-Object { $_ -match "tinker|ty=|frame=|mHasSurface" } | Select-Object -First 40
+        throw "a bolinha nao apareceu (nenhuma janela do Tinker sobre o jogo); dumpsys: $(($d | ForEach-Object { $_.Trim() }) -join ' / ')"
+    }
     $b
 }
 
@@ -321,9 +327,11 @@ function Ui-Tour($v) {
         Snap "Com jogo Cronometros"
         Tap-Chip $tools[2][0]
     }
-    Check "Com jogo: Ficha do Jogo.Heroi pela lista de classes" {
+    Check "Com jogo: Ficha" {
         Step "aba 2" | Out-Null; Start-Sleep 2; Top-Ui
         Tap-Ui "^Ficha$" 0
+        # o Jogo de Teste e motor proprio (sem IL2CPP): a Ficha tem de dizer isso em vez de mostrar classes
+        if (Find-Ui "n.o tem classes IL2CPP" 2) { Snap "Com jogo Ficha"; return "motor proprio: a Ficha explica que nao ha classes" }
         Tap-Ui "Ver todas as classes" 3
         Tap-Ui "Heroi" 8
         if (-not (Wait-Ui "nome|ouro|Her.i" 10)) {

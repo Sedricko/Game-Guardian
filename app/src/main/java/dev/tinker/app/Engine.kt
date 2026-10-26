@@ -1389,7 +1389,8 @@ class Engine private constructor(private val app: Context) {
         if (w.firstOrNull() == "escolher") return "ok " + pickTestGame()
         // só troca a aba na tela (para o agente tirar print de cada uma)
         // o mesmo do botão "Configurar IA" das outras telas: os Ajustes abrem já na parte da IA
-        if (w.firstOrNull() == "ajustesia") return "ok\ncount 0".also { withContext(Dispatchers.Main) { Session.settingsAt = "ia"; Session.tab = TABS.indexOf("Ajustes") } }
+        // espera a tela antiga (o am start do agente recria a Activity) sair: senão é ela que gasta o pedido de rolar
+        if (w.firstOrNull() == "ajustesia") return "ok\ncount 0".also { delay(1500); withContext(Dispatchers.Main) { Session.settingsAt = "ia"; Session.tab = TABS.indexOf("Ajustes") } }
         if (w.firstOrNull() == "aba") return "ok ${TABS.getOrNull(w[1].toInt())}\ncount 0".also { withContext(Dispatchers.Main) { Session.tab = w[1].toInt().coerceIn(0, TABS.lastIndex) } }
         // o Tinker reabriu no meio da rodada (o Android fechou ele): volta a seguir o Jogo de Teste, nunca outro jogo
         if (Session.process == null) runCatching { pickTestGame() }
