@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.heightIn
@@ -490,7 +491,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                     Button(shape = MaterialTheme.shapes.medium, onClick = {
                         if ((s.count ?: 0) > 0) confirmNew = true else run { engine.search(s.types, s.value) }
                     }, enabled = enabled && s.value.isNotBlank() && !confirmNew, modifier = Modifier.weight(1f)) {
-                        Text("Nova busca")
+                        Text("Nova busca", maxLines = 1, softWrap = false)
                     }
                     FilledTonalButton(
                         shape = MaterialTheme.shapes.medium,
@@ -946,6 +947,7 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
     val label = if (chosen.isEmpty()) "todos" else "${chosen.size}"
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
+            Panel {
             // exportar/importar é raro: recolhido, os salvos e as ações do dia a dia ficam em cima
             TextButton(onClick = { porting = !porting }) { Text((if (porting) "▾ " else "▸ ") + "Exportar, importar ou restaurar apagado") }
             if (porting) FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -1019,6 +1021,7 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
                 listOf("Os ponteiros estão bons?", "Crie uma receita com os salvos", "Por que algum salvo não voltou?"),
                 context = { engine.savedContext() }, key = "salvos",
             )
+            }
         }
         if (s.process == null) {
             item {
@@ -1340,10 +1343,13 @@ private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
             CodeView(engine, center, run)
             return@Column
         }
+        Spacer(Modifier.height(8.dp))
+        Panel {
+        Text("Ir para um endereço", style = MaterialTheme.typography.titleSmall)
         if (center == "0") {
             Text(
                 if (s.process == null) "Escolha o jogo primeiro." else "Digite um endereço ou use \"Ver próximos\" num resultado da Busca ou dos Salvos.",
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         // endereço, Ir e ▲▼ numa linha; Buscar perto recolhido: a lista fica com o resto da tela
@@ -1371,6 +1377,7 @@ private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
         if (ownPad && hexPad) NumPad(onKey = { goTo = applyKey(goTo, it) }, onDone = { go() }, compact = landscape(), hex = true)
         TypeChips(type) { t -> s.view = center to t }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        }
         if (center != "0") {
             // bytes crus com o texto ao lado, como o Memory View do Cheat Engine
             var hex by remember { mutableStateOf<String?>(null) }
@@ -2630,14 +2637,16 @@ private fun LogTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, onE
     }
     Column(Modifier.padding(horizontal = 16.dp)) {
         TopArea {
+        Spacer(Modifier.height(8.dp))
+        Panel {
+        Text("Relatório e testes", style = MaterialTheme.typography.titleSmall)
         Text(
             "Tudo que o Tinker faz fica registrado. Se o jogo fechar, o motivo é anexado sozinho. " +
                 "O relatório junta registro, falhas do Android e logcat do jogo num arquivo .txt.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(vertical = 8.dp),
         )
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Button(shape = MaterialTheme.shapes.medium, onClick = {
                 fetch {
                     val file = engine.report()
@@ -2647,7 +2656,7 @@ private fun LogTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, onE
                     shareFile(context, file)
                 }
             }, enabled = !working) { Text("Compartilhar relatório") }
-            FilledTonalButton(shape = MaterialTheme.shapes.medium, onClick = {
+            OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = {
                 fetch {
                     val text = engine.report().readText()
                     // a área de transferência do Android aguenta ~1 MB; fica o final, que tem o mais recente
@@ -2657,7 +2666,7 @@ private fun LogTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, onE
                 }
             }, enabled = !working) { Text("Copiar tudo") }
             // confere tudo neste aparelho (só leituras) e manda o resultado para a planilha
-            FilledTonalButton(shape = MaterialTheme.shapes.medium, onClick = { fetch { info = "Testando…"; info = engine.selfTest() } }, enabled = !working) { Text("Autoteste") }
+            OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { fetch { info = "Testando…"; info = engine.selfTest() } }, enabled = !working) { Text("Autoteste") }
             OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { fetch { info = "Procurando…"; info = engine.checkUpdateNow() } }, enabled = !working) { Text("Procurar atualização") }
             OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { fetch { engine.crashLog() } }, enabled = !working) { Text("Ver falhas") }
             OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { fetch { engine.gameLog() } }, enabled = !working && Session.process != null) { Text("Ver logcat do jogo") }
@@ -2672,8 +2681,9 @@ private fun LogTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, onE
             listOf("O que aconteceu? Tem algum problema?", "Por que a busca não achou o valor?", "Que melhoria o Tinker precisa com base nisso?"),
             context = { engine.reportContext() }, key = "registro",
         )
-        if (working) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
-        info?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp)) }
+        if (working) LinearProgressIndicator(Modifier.fillMaxWidth())
+        info?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
+        }
         }
         // filtro: acompanhar só o que interessa (erros, a IA, a busca) sem rolar por tudo
         Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
