@@ -182,7 +182,15 @@ function Tap-Chip($re) {
     & $adb shell input tap ([int]$n.x) ([int]$n.y)
     Start-Sleep -Milliseconds 900
 }
-function Top-Ui { for ($k = 0; $k -lt 4; $k++) { & $adb shell input swipe 540 700 540 1900 200 }; Start-Sleep -Milliseconds 500 }
+# o teclado do Tinker (abre quando um campo pega o foco) cobre a metade de baixo: fecha pelo OK dele
+function Close-Pad {
+    $nodes = Ui-Nodes
+    if ($nodes | Where-Object { $_.t -eq "⌫" }) {
+        $ok = $nodes | Where-Object { $_.t -eq "OK" } | Select-Object -Last 1
+        if ($ok) { & $adb shell input tap ([int]$ok.x) ([int]$ok.y); Start-Sleep -Milliseconds 700 }
+    }
+}
+function Top-Ui { Close-Pad; for ($k = 0; $k -lt 4; $k++) { & $adb shell input swipe 540 700 540 1900 200 }; Start-Sleep -Milliseconds 500 }
 
 # volta por todo o app, como uma pessoa: cada aba, cada ferramenta, cada modo; confere que a tela abriu e o app nao fechou
 function Ui-Tour($v) {
