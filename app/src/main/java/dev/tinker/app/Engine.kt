@@ -3761,7 +3761,8 @@ class Engine private constructor(private val app: Context) {
      * devolve as que rodaram, mais chamadas primeiro. Mostra o mecanismo do jogo sem precisar ler o código.
      */
     suspend fun whichRun(fns: List<NativeFn>): List<Pair<NativeFn, Int>> =
-        fns.take(12).mapNotNull { f -> runCatching { traceCalls(f.addr, 3).first }.getOrNull()?.takeIf { it > 0 }?.let { f to it } }
+        // 1,5 s entre uma contagem e outra: seguidas, o Android do jogo se perdia no relógio e fechava o jogo (SIGABRT)
+        fns.take(12).mapIndexedNotNull { i, f -> if (i > 0) delay(1500); runCatching { traceCalls(f.addr, 3).first }.getOrNull()?.takeIf { it > 0 }?.let { f to it } }
             .sortedByDescending { it.second }.also { r -> Diag.add("Quais rodam: " + r.joinToString { "${it.first.name} ${it.second}x" }.ifEmpty { "nenhuma" }) }
 
     /** Em que função cai um endereço de código (null fora das libs do jogo). */
