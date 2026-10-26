@@ -395,6 +395,11 @@ function Run-Missions($v) {
         }
         "ficha certa: $f"
     }
+    Mission "copiar ficha: os numeros de um Heroi para outro" {
+        Step "copiarficha 987654 111111" | Out-Null
+        if ($script:last -notmatch "destino 987654") { throw "o destino nao ficou com o ouro da origem ($($script:last -replace "`n", ' | '))" }
+        (($script:last -split "`n") | Select-Object -First 1)
+    }
     Mission "cronometro: terminar a construcao agora" {
         Tap "Construir"
         if ((Val "Obra") -lt 3600) { throw "a construcao nao comecou" }

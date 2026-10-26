@@ -1159,6 +1159,34 @@ class Engine private constructor(private val app: Context) {
 
     private var classRefresh: kotlinx.coroutines.Job? = null
 
+    /** Outros objetos vivos da mesma classe (até 20), para copiar a ficha para eles. */
+    suspend fun classObjects(c: Il2Class): List<String> = call { d ->
+        runCatching { d.send("il2objs ${c.name}", quiet = true).lines }.getOrDefault(emptyList())
+            .map { it.removePrefix("obj ") }.filter { it.toLongOrNull(16) != null && it != c.start }.take(20)
+    }
+
+    /**
+     * Copia os números (int, float, bool…) de um objeto para outro da MESMA classe, como clonar a arma boa na ruim.
+     * Ponteiros, textos e listas ficam como estão: copiar ponteiro faria os dois objetos dividirem a mesma memória.
+     */
+    suspend fun copyFicha(from: Il2Class, to: String): String = call { d ->
+        val t = to.removePrefix("0x").lowercase().toLongOrNull(16) ?: return@call "Endereço inválido: $to"
+        val src = from.start.toLong(16)
+        if (t == src) return@call "É o mesmo objeto."
+        val f0 = from.fields.firstOrNull() ?: return@call "A classe não tem campos."
+        val dest = d.il2((t + f0.offset).toString(16))
+        if (dest == null || dest.start.toLong(16) != t || dest.name != from.name)
+            return@call "0x$to não é o começo de outro ${from.name}: só copio entre objetos da mesma classe."
+        var n = 0
+        for (f in from.fields) {
+            val type = il2Tinker(f.code) ?: continue
+            val v = runCatching { d.send("read ${(src + f.offset).toString(16)} $type", quiet = true).status }.getOrNull() ?: continue
+            if (runCatching { d.send("write ${(t + f.offset).toString(16)} $type $v", quiet = true) }.isSuccess) n++
+        }
+        Diag.add("Ficha ${from.name}: $n números copiados de 0x${from.start} para 0x$to")
+        "Copiei $n números de 0x${from.start} para 0x$to (${from.name}). Ponteiros, textos e listas ficaram como estavam."
+    }
+
     /** Atalho sem IA: cada objeto vivo da classe do salvo e o valor do campo nele (ex.: o jogo cria um RunData novo a cada corrida). */
     suspend fun liveValues(item: SavedItem): List<Pair<String, String>> = call { d ->
         val cls = item.il2.substringBeforeLast('+')
@@ -1805,6 +1833,21 @@ class Engine private constructor(private val app: Context) {
             "terminar" -> finishTimers(timerHits)
             "quaisrodam" -> return whichRun(nativeFunctions(arg).second).let { r -> "ok ${r.size}\ncount ${r.size}\n" + r.joinToString("\n") { "roda ${it.first.name} ${it.second}" } }
             "loja" -> findShopPrices(arg)
+            // "copiarficha 987654 111111": copia o objeto do 1º número no do 2º, confere e devolve o 2º (a próxima rodada acha de novo)
+            "copiarficha" -> {
+                val (a, b) = w.drop(1).takeIf { it.size == 2 } ?: return "err use copiarficha <origem> <destino>"
+                suspend fun obj(v: String): Pair<Il2Class, String>? {
+                    search(setOf("i32"), v)
+                    for (h in list().second) il2cpp(h.addr)?.let { return it to h.addr }
+                    return null
+                }
+                val (src, _) = obj(a) ?: return "err $a não está num objeto IL2CPP"
+                val (dst, at) = obj(b) ?: return "err $b não está num objeto IL2CPP"
+                val msg = copyFicha(src, dst.start)
+                val now = call { d -> d.send("read $at i32", quiet = true).status }
+                call { d -> d.send("write $at i32 $b", quiet = true) }
+                return "ok $msg\ndestino $now"
+            }
             // ficha do objeto onde está o número: classe IL2CPP e cada campo com o valor (texto, (x, y, z), N itens)
             "ficha" -> {
                 search(setOf("i32"), arg)

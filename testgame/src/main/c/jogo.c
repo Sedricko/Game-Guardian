@@ -74,7 +74,7 @@ static const char heroi_nomes[] = "\0Heroi\0Jogo";
 static struct il2ty t_i4 = {0, 0x08u << 16}, t_str = {0, 0x0eu << 16}, t_vec = {0, 0x11u << 16}, t_arr = {0, 0x1du << 16};
 static struct il2klass heroi_k;
 static struct il2fi heroi_f[4];
-__attribute__((used)) static uint64_t heroi[8], heroi_nome[4], heroi_mochila[4];
+__attribute__((used)) static uint64_t heroi[8], heroi2[8], heroi_nome[4], heroi_mochila[4];  // heroi2: destino do "copiar ficha"
 
 __attribute__((constructor)) static void fake_unity(void) {
     heroi_k = (struct il2klass){heroi_f, 0, heroi_nomes + 1, heroi_nomes + 7, {0, (void *)(uintptr_t)(0x12u << 16)}, heroi_f};
@@ -94,4 +94,6 @@ __attribute__((constructor)) static void fake_unity(void) {
     float pos[3] = {1.5f, 2, -3};
     memcpy(o + 0x20, pos, sizeof pos);
     *(void **)(o + 0x30) = heroi_mochila;
+    *(void **)heroi2 = &heroi_k;
+    *(int32_t *)((uint8_t *)heroi2 + 0x10) = 111111;
 }

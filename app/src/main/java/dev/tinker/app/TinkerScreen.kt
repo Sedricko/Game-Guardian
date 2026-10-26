@@ -1763,6 +1763,24 @@ private fun FichaView(engine: Engine, center: String, run: (suspend () -> String
     if (!none) FichaBody(engine, center, run)
 }
 
+/** Copiar os números desta ficha para outro objeto da mesma classe (clonar a arma boa na ruim). */
+@Composable
+private fun CopyFicha(engine: Engine, c: Il2Class, run: (suspend () -> String) -> Unit) {
+    var objs by remember(c.start) { mutableStateOf<List<String>?>(null) }
+    val scope = rememberCoroutineScope()
+    TextButton(onClick = { scope.launch { objs = if (objs == null) runCatching { engine.classObjects(c) }.getOrDefault(emptyList()) else null } }) {
+        Text((if (objs != null) "▾ " else "▸ ") + "Copiar os números para outro ${c.name.substringAfterLast('.')}")
+    }
+    objs?.let { list ->
+        if (list.isEmpty()) Text("Não achei outro objeto desta classe vivo agora.", style = MaterialTheme.typography.bodySmall)
+        else Text("Toque no objeto que vai receber os números (ponteiros, textos e listas não mudam):", style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            list.forEach { a -> OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { objs = null; run { engine.copyFicha(c, a) } }) { Text("0x$a") } }
+        }
+    }
+}
+
 /** Unreal: acha objetos pelo nome ou pela classe (Jogador, BP_Player_C) nas tabelas do próprio motor e abre a Ficha. */
 @Composable
 private fun UnrealOpener(engine: Engine) {
@@ -1997,6 +2015,7 @@ private fun FichaBody(engine: Engine, center: String, run: (suspend () -> String
         }
     }
     if (c != null) MethodsPanel(engine, c, run)
+    if (c != null) CopyFicha(engine, c, run)
     if (looked && c == null && (s.engine?.lua == true || s.view?.second in setOf("li", "lf"))) LuaPanel(engine, center, run)
     if (c != null && c.fields.size > 6) {
         TinkerTextField(filter, { filter = it }, "Filtrar campo (ex.: gem)", Modifier.fillMaxWidth())
