@@ -190,7 +190,7 @@ function Ui-Tour($v) {
         try { $r = & $b; $script:tourRes += "OK $name$(if ($r) { ": $r" })" }
         catch {
             # o que estava na tela, em texto (a print pode nao caber na celula da planilha)
-            $seen = (Ui-Nodes | ForEach-Object { $_.t } | Where-Object { $_ }) -join " | "
+            $seen = try { (Ui-Nodes | ForEach-Object { $_.t } | Where-Object { $_ }) -join " | " } catch { "nao li a tela" }
             $script:tourRes += "FALHA $name`: $($_.Exception.Message) [na tela: $($seen.Substring(0, [Math]::Min($seen.Length, 1500)))]"
             $script:tourShots += "`n=== $name ===`njpeg base64`n" + (Shot "tour")
         }
