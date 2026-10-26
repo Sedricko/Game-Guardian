@@ -15,10 +15,11 @@ struct klass { void *image, *gc; const char *name, *ns; void *pad[4]; struct fi 
 // MethodInfo do Unity 2018+: código, invoker, nome, classe dona, tipo de retorno
 struct mi { void *code, *invoker; const char *name; struct klass *klass; struct ty *ret; };
 static struct ty t_r4 = {0, 0x0cu << 16}, t_i4 = {0, 0x08u << 16}, t_static = {0, (0x08u << 16) | 0x10};
+static struct ty t_str = {0, 0x0eu << 16}, t_vec = {0, 0x11u << 16}, t_arr = {0, 0x1du << 16};
 static struct klass player;
 // nomes separados por \0, como no metadata do IL2CPP (o daemon procura \0Nome\0)
 static const char names[] = "\0Player\0Game";
-static struct fi player_fields[3];
+static struct fi player_fields[6];
 
 // em .data (dentro do arquivo do programa): base fixa, como a de uma .so de jogo
 static void *volatile root = (void *)1;
@@ -63,7 +64,10 @@ int main(void) {
     player = (struct klass){player_fields, 0, names + 1, names + 8, {0, (void *)(uintptr_t)(0x12u << 16)}, player_fields};
     player_fields[0] = (struct fi){"hp", &t_r4, &player, 0x10, 0};
     player_fields[1] = (struct fi){"gold", &t_i4, &player, 0x14, 0};
-    player_fields[2] = (struct fi){"instances", &t_static, &player, 0, 0};
+    player_fields[2] = (struct fi){"nick", &t_str, &player, 0x18, 0};
+    player_fields[3] = (struct fi){"pos", &t_vec, &player, 0x20, 0};
+    player_fields[4] = (struct fi){"bag", &t_arr, &player, 0x30, 0};
+    player_fields[5] = (struct fi){"instances", &t_static, &player, 0, 0};
     static struct mi m_gold, m_tick;
     static struct mi *player_methods[3];
     m_gold = (struct mi){(void *)never_called, 0, "get_gold", &player, &t_i4};
@@ -75,6 +79,17 @@ int main(void) {
     obj[0] = &player;
     *(float *)((char *)obj + 0x10) = 99.5f;
     *(int *)((char *)obj + 0x14) = 4321;
+    // nick: Il2CppString "Ação" (klass, monitor, tamanho, UTF-16); pos: Vector3 (1.5, 2, -3); bag: array com 7 itens
+    static const uint16_t acao[] = {'A', 0xe7, 0xe3, 'o'};
+    char *nick = calloc(1, 64);
+    *(int *)(nick + 16) = 4;
+    memcpy(nick + 20, acao, sizeof acao);
+    *(char **)((char *)obj + 0x18) = nick;
+    float *pos = (float *)((char *)obj + 0x20);
+    pos[0] = 1.5f; pos[1] = 2; pos[2] = -3;
+    char *bag = calloc(1, 64);
+    *(long *)(bag + 24) = 7;
+    *(char **)((char *)obj + 0x30) = bag;
     // como o "X8" do GameGuardian: valor ^ chave, com a chave 8 bytes depois
     volatile int *y = malloc(64);
     y[2] = 0x3B7E11C5;

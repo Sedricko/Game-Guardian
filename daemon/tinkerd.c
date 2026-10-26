@@ -1399,6 +1399,39 @@ static int read_klass(uint64_t k, klass_t *out) {
     return 0;
 }
 
+// O que o campo aponta, para a ficha: string (Il2CppString: tamanho e UTF-16 depois de klass e monitor) vira o texto;
+// array (Il2CppArray: max_length depois de klass, monitor e bounds) e List<T> (_items, _size) viram quantos itens.
+static void field_extra(uint64_t at, unsigned off, int code) {
+    uint64_t p, items;
+    int32_t n = -1, cap;
+    if (read_ptr(at, &p) || p < 0x10000) return;
+    if (code == 0x0e) {
+        uint16_t w[64];
+        char t[64 * 3 + 1], *o = t;
+        if (read_mem(p + 2 * psize, &n, 4) || n < 0 || n > 4096) return;
+        int k = n < 64 ? n : 64;
+        if (k && read_mem(p + 2 * psize + 4, w, (size_t)k * 2)) return;
+        for (int i = 0; i < k; i++) {  // UTF-8 para o app; controle e quebra de linha viram espaço
+            unsigned c = w[i];
+            if (c < 0x20) *o++ = ' ';
+            else if (c < 0x80) *o++ = (char)c;
+            else if (c < 0x800) { *o++ = (char)(0xc0 | c >> 6); *o++ = (char)(0x80 | (c & 0x3f)); }
+            else if (c >= 0xd800 && c < 0xe000) *o++ = '?';
+            else { *o++ = (char)(0xe0 | c >> 12); *o++ = (char)(0x80 | (c >> 6 & 0x3f)); *o++ = (char)(0x80 | (c & 0x3f)); }
+        }
+        *o = 0;
+        printf("text %x %d %s%s\n", off, n, t, n > 64 ? "…" : "");
+    } else if (code == 0x14 || code == 0x1d) {
+        if (read_mem(p + 3 * psize, &n, 4) || n < 0 || n > 10000000) return;
+        printf("count %x %d\n", off, n);
+    } else if (code == 0x15) {
+        // List<T>: _items (array) logo depois de klass e monitor, _size depois dele; só se o array confere
+        if (read_ptr(p + 2 * psize, &items) || items < 0x10000 || read_mem(p + 3 * psize, &n, 4)
+            || read_mem(items + 3 * psize, &cap, 4) || n < 0 || cap < n || cap > 10000000) return;
+        printf("count %x %d\n", off, n);
+    }
+}
+
 static void cmd_il2cpp(const char *addr) {
     psize = ptr_size();
     uint64_t a = strtoull(addr, NULL, 16), base = a & ~(uint64_t)(psize - 1), kp;
@@ -1424,7 +1457,9 @@ static void cmd_il2cpp(const char *addr) {
             if (read_ptr(f, &pn) || !ident(pn, nm, sizeof nm) || read_mem(f + 3 * psize, &off, 4)) continue;
             if (!read_ptr(f + psize, &pt) && pt >= 0x10000 && read_mem(pt + psize, &bits, 4)) bits = 0;
             if (bits & 0x10) continue;  // estático: fica fora do objeto
-            printf("field %x %02x %s\n", (unsigned)off, (bits >> 16) & 0xff, nm);
+            int code = (bits >> 16) & 0xff;
+            printf("field %x %02x %s\n", (unsigned)off, code, nm);
+            field_extra(s + (uint64_t)off, (unsigned)off, code);
         }
         puts("ok");
         return;

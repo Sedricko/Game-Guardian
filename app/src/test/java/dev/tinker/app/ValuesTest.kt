@@ -158,6 +158,11 @@ class ValuesTest {
         val named = fichaRows(0x1000, raw, 0xff8, il2)
         assertEquals(listOf("gold · int", "hp · float", "nome · string"), named.map { it.label })
         assertEquals(listOf("1331", "99.5"), named.take(2).map { it.value })
+        // string com o texto lido pelo daemon; struct de 3 decimais (Vector3) até o próximo campo
+        val vec = le(java.lang.Float.floatToIntBits(1.5f).toLong(), 4) + le(java.lang.Float.floatToIntBits(2f).toLong(), 4) +
+            le(java.lang.Float.floatToIntBits(-3f).toLong(), 4) + le(0, 4) + le(0, 8)
+        val unity = Il2Class("Game.Player", "1000", listOf(Il2Field(0, 0x11, "pos"), Il2Field(0xc, 0x0e, "nick")), mapOf(0xc to "\"Ação\""))
+        assertEquals(listOf("(1.5, 2, -3)", "\"Ação\""), fichaRows(0x1000, vec, 0x1000, unity).map { it.value })
     }
 
     @Test

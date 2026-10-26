@@ -221,6 +221,7 @@ code=$(printf '%s\n' "attach $pid" "aob 4889e5 code" | "$out/tinkerd" | tail -1)
 il=$(printf '%s\n' "attach $pid" "il2cpp $(printf '%x' $((0x$oaddr + 0x14)))" "il2cpp $iaddr" | "$out/tinkerd")
 echo "$il"
 grep -qx "class Game.Player $oaddr" <<<"$il" && grep -qx "field 10 0c hp" <<<"$il" && grep -qx "field 14 08 gold" <<<"$il" \
+    && grep -qx "field 18 0e nick" <<<"$il" && grep -qx "text 18 4 Ação" <<<"$il" && grep -qx "count 30 7" <<<"$il" \
     && ! grep -q instances <<<"$il" && grep -q "^err não achei a classe IL2CPP" <<<"$il" || { echo "FALHOU: il2cpp"; exit 1; }
 objs=$(printf '%s\n' "attach $pid" "il2objs Game.Player" "il2objs Game.Ninguem" "il2objs Outro.Player" "il2objs Player" | "$out/tinkerd")
 echo "$objs"
@@ -228,7 +229,7 @@ grep -qx "obj $oaddr" <<<"$objs" && [ "$(grep -c '^obj ' <<<"$objs")" -ge 2 ] &&
     || { echo "FALHOU: il2objs"; exit 1; }
 
 cl=$(printf '%s\n' "attach $pid" "il2classes" | "$out/tinkerd")
-grep -qE "^class Game.Player [0-9a-f]+ 3 hp,gold,instances$" <<<"$cl" || { echo "FALHOU: il2classes"; echo "$cl" | head; exit 1; }
+grep -qE "^class Game.Player [0-9a-f]+ 6 hp,gold,nick,pos,bag,instances$" <<<"$cl" || { echo "FALHOU: il2classes"; echo "$cl" | head; exit 1; }
 
 # Print da tela: no PC não há screencap → erro claro; com um screencap falso, o base64 volta igual ao arquivo
 sc=$(printf 'screencap\n' | "$out/tinkerd" | tail -1)

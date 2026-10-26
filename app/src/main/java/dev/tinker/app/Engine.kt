@@ -218,7 +218,8 @@ val BOXED = setOf(
 
 /** IL2CPP (Unity): classe de um objeto e os campos dele, lidos da memória do jogo. start = começo do objeto. */
 data class Il2Field(val offset: Int, val code: Int, val name: String)
-data class Il2Class(val name: String, val start: String, val fields: List<Il2Field>)
+// extra: o que um campo aponta, por offset (texto de string, "7 itens" de array/lista)
+data class Il2Class(val name: String, val start: String, val fields: List<Il2Field>, val extra: Map<Int, String> = emptyMap())
 
 /** Classe IL2CPP do jogo (para a lista): nome completo e quantos campos tem. */
 data class GameClass(val name: String, val fields: Int, val fieldNames: List<String> = emptyList())
@@ -1017,7 +1018,16 @@ class Engine private constructor(private val app: Context) {
             val f = l.removePrefix("field ").split(" ", limit = 3)
             Il2Field(f[0].toIntOrNull(16) ?: return@mapNotNull null, f[1].toIntOrNull(16) ?: 0, f.getOrElse(2) { "?" })
         }.sortedBy { it.offset }
-        return Il2Class(head[0], head.getOrElse(1) { addr }, fields)
+        val extra = r.lines.mapNotNull { l ->
+            val f = l.split(" ", limit = 4)
+            val off = f.getOrNull(1)?.toIntOrNull(16) ?: return@mapNotNull null
+            when (f[0]) {
+                "text" -> off to "\"${f.getOrElse(3) { "" }}\""
+                "count" -> off to "${f.getOrNull(2)} itens"
+                else -> null
+            }
+        }.toMap()
+        return Il2Class(head[0], head.getOrElse(1) { addr }, fields, extra)
     }
 
     /** Lê a ficha: `bytes` a partir de start, numa leitura só; os tipos vêm do IL2CPP quando há, senão são adivinhados. */
@@ -1031,7 +1041,11 @@ class Engine private constructor(private val app: Context) {
         }
         // sem IL2CPP, o offset conta do próprio valor (0 = ele; + depois, - antes)
         val base = il2?.start?.toLong(16) ?: center.toLong(16)
-        fichaRows(s0, raw, base, il2)
+        // texto e quantos itens mudam com o jogo: lê de novo junto com os números
+        val cls = il2?.let { c ->
+            c.fields.firstOrNull()?.let { d.il2((base + it.offset).toString(16)) }?.takeIf { it.start == c.start }?.let { c.copy(extra = it.extra) } ?: c
+        }
+        fichaRows(s0, raw, base, cls)
     }
 
     /** Salvo novo dentro de um objeto IL2CPP: ganha o nome do campo (ex.: Player.hp) se ainda não tem nome. */
@@ -4720,11 +4734,16 @@ internal fun fichaRows(start: Long, raw: ByteArray, base: Long, il2: Il2Class?):
     fun at(i: Int) = (start + i).toString(16)
     val rows = mutableListOf<FichaRow>()
     if (il2 != null) {
-        il2.fields.forEach { f ->
+        il2.fields.forEachIndexed { n, f ->
             val i = (base + f.offset - start).toInt()
             val t = il2Tinker(f.code)
-            if (i < 0 || i + 8 > raw.size) return@forEach
-            val v = when (t) {
+            if (i < 0 || i + 8 > raw.size) return@forEachIndexed
+            // struct pequeno até o próximo campo (Vector2/3, Color, Quaternion): os decimais lado a lado, se parecem decimais
+            val size = (il2.fields.getOrNull(n + 1)?.offset ?: (f.offset + 16)) - f.offset
+            val floats = if (f.code == 0x11 && size in 8..16 && i + size <= raw.size)
+                List(size / 4) { java.lang.Float.intBitsToFloat(u32(i + 4 * it).toInt()) }.takeIf { v -> v.all { it.isFinite() && kotlin.math.abs(it) < 1e7f } }
+            else null
+            val v = il2.extra[f.offset] ?: floats?.joinToString(", ", "(", ")") { readable(it.toString(), "f32") ?: "?" } ?: when (t) {
                 "f32" -> java.lang.Float.intBitsToFloat(u32(i).toInt()).toString()
                 "f64" -> java.lang.Double.longBitsToDouble(u64(i)).toString()
                 "i64" -> u64(i).toString()
@@ -4733,7 +4752,8 @@ internal fun fichaRows(start: Long, raw: ByteArray, base: Long, il2: Il2Class?):
                 "i32" -> u32(i).toInt().toString()
                 else -> "0x" + (u64(i) and 0x00ffffffffffffffL).toString(16)
             }
-            rows += FichaRow(at(i), f.offset.toLong(), t ?: "", "${f.name} · ${il2TypeName(f.code)}", readable(v, t ?: "i64") ?: "NaN")
+            val shown = if (il2.extra[f.offset] != null || floats != null) v else readable(v, t ?: "i64") ?: "NaN"
+            rows += FichaRow(at(i), f.offset.toLong(), t ?: "", "${f.name} · ${il2TypeName(f.code)}", shown)
         }
         return rows
     }
