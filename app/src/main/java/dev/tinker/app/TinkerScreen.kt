@@ -396,18 +396,16 @@ private fun ValueField(value: String, label: String, onChange: (String) -> Unit,
     val pressed by taps.collectIsPressedAsState()
     LaunchedEffect(pressed) { if (pressed && own) pad = true }
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        OutlinedTextField(
+        NoPhoneKeyboard(own) { OutlinedTextField(
             value = value,
             onValueChange = onChange,
             label = { Text(label) },
             singleLine = true,
-            readOnly = own,
             interactionSource = taps,
-            trailingIcon = if (own) { { PasteButton { onChange(value + it) } } } else null,
             textStyle = MaterialTheme.typography.titleLarge,
             keyboardOptions = KeyboardOptions(keyboardType = if (hex) KeyboardType.Ascii else keyboard),
             modifier = Modifier.fillMaxWidth(),
-        )
+        ) }
         if (own && pad) NumPad(onKey = { onChange(applyKey(value, it)) }, onDone = { pad = false }, compact = landscape(), hex = hex)
     }
 }
@@ -1360,11 +1358,10 @@ private fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
             if (a != null) { s.view = a to type; hexPad = false } else error = "Endereço inválido: $goTo"
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            OutlinedTextField(
+            Box(Modifier.weight(1f)) { NoPhoneKeyboard(ownPad) { OutlinedTextField(
                 value = goTo, onValueChange = { goTo = it.removePrefix("0x").trim() }, label = { Text("Endereço (7a0010+8)") },
-                singleLine = true, readOnly = ownPad, interactionSource = addrTaps, modifier = Modifier.weight(1f),
-                trailingIcon = if (ownPad) { { PasteButton { goTo = it.removePrefix("0x").trim() } } } else null,
-            )
+                singleLine = true, interactionSource = addrTaps, modifier = Modifier.fillMaxWidth(),
+            ) } }
             Button(shape = MaterialTheme.shapes.medium, onClick = { go() }, contentPadding = PaddingValues(horizontal = 12.dp)) { Text("Ir") }
             if (center != "0") {
                 HeaderButton("▲", "Anteriores") { shift-- }
@@ -1467,9 +1464,8 @@ private fun CodeView(engine: Engine, center: String, run: (suspend () -> String)
         if (a != null) { s.view = a to "i32"; pad = false } else error = "Endereço inválido: $goTo"
     }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        OutlinedTextField(goTo, { goTo = it.removePrefix("0x").trim() }, label = { Text("Endereço do código") }, singleLine = true,
-            readOnly = s.ownKeypad, interactionSource = taps, modifier = Modifier.weight(1f),
-            trailingIcon = if (s.ownKeypad) { { PasteButton { goTo = it.removePrefix("0x").trim() } } } else null)
+        Box(Modifier.weight(1f)) { NoPhoneKeyboard(s.ownKeypad) { OutlinedTextField(goTo, { goTo = it.removePrefix("0x").trim() }, label = { Text("Endereço do código") }, singleLine = true,
+            interactionSource = taps, modifier = Modifier.fillMaxWidth()) } }
         Button(shape = MaterialTheme.shapes.medium, onClick = { go() }, contentPadding = PaddingValues(horizontal = 12.dp)) { Text("Ir") }
     }
     if (s.ownKeypad && pad) NumPad(onKey = { goTo = applyKey(goTo, it) }, onDone = { go() }, compact = landscape(), hex = true)

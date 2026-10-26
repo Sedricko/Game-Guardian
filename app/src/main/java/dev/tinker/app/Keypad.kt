@@ -22,8 +22,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.material3.TextButton
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -132,23 +130,23 @@ fun TinkerTextField(
     val pressed by taps.collectIsPressedAsState()
     LaunchedEffect(pressed) { if (pressed && own) pad = true }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        OutlinedTextField(
+        NoPhoneKeyboard(own) { OutlinedTextField(
             value, onChange, label = { Text(label) }, placeholder = if (placeholder.isEmpty()) null else { { Text(placeholder) } },
-            singleLine = singleLine, readOnly = own, interactionSource = taps,
-            trailingIcon = if (own) { { PasteButton { onChange(value + it) } } } else null,
+            singleLine = singleLine, interactionSource = taps,
             textStyle = if (mono) LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace) else LocalTextStyle.current,
             modifier = Modifier.fillMaxWidth(),
-        )
+        ) }
         if (own && pad) TextPad(onKey = { onChange(applyKey(value, it)) }, onDone = { pad = false })
     }
 }
 
-/** Colar no campo: com o teclado do Tinker o campo é só leitura e o Android tira o "Colar" do menu de segurar. */
+/**
+ * Campo normal (cursor, segurar para Copiar e Colar do Android), mas sem o teclado do telefone: com o teclado do Tinker
+ * ligado, o pedido de teclado do campo é engolido aqui, e as teclas vêm do teclado do Tinker.
+ */
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
-fun PasteButton(onPaste: (String) -> Unit) {
-    val ctx = LocalContext.current
-    TextButton(onClick = {
-        ctx.getSystemService(android.content.ClipboardManager::class.java).primaryClip?.takeIf { it.itemCount > 0 }
-            ?.getItemAt(0)?.coerceToText(ctx)?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let(onPaste)
-    }) { Text("Colar") }
+fun NoPhoneKeyboard(block: Boolean, content: @Composable () -> Unit) {
+    if (!block) content()
+    else androidx.compose.ui.platform.InterceptPlatformTextInput(interceptor = { _, _ -> kotlinx.coroutines.awaitCancellation() }) { content() }
 }
