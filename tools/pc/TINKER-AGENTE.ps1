@@ -179,11 +179,33 @@ function Narrow($type, $label, $button, $fmt) {
     while ($c -gt 1 -and $n -lt 6) { Tap $button; $v = Val $label; $c = Step "refinar $(& $fmt $v)"; $n++ }
     @($c, $n, $first)
 }
+# uma missao que falha tenta de novo uma vez (o emulador as vezes trava segundos); as duas vao para o relatorio
 function Mission($name, [scriptblock]$body) {
     $t0 = Get-Date
     try { $r = & $body; $script:mres += "OK $name`: $r ($([int]((Get-Date) - $t0).TotalSeconds) s)" }
-    catch { $script:mres += "FALHA $name`: $($_.Exception.Message) ($([int]((Get-Date) - $t0).TotalSeconds) s)" }
+    catch {
+        $e1 = $_.Exception.Message
+        Say "  falhou ($e1), tentando de novo"
+        $died = -not (& $adb shell pidof $app)
+        try {
+            Front-Game; Start-Sleep 2
+            Step "escolher" | Out-Null
+            $r = & $body
+            $script:mres += "OK $name`: $r (na 2a tentativa; 1a: $e1$(if ($died) { '; o Tinker tinha fechado' })) ($([int]((Get-Date) - $t0).TotalSeconds) s)"
+        } catch { $script:mres += "FALHA $name`: $($_.Exception.Message) (1a: $e1) ($([int]((Get-Date) - $t0).TotalSeconds) s)" }
+    }
     Say ($script:mres[-1])
+}
+
+# emulador sobrecarregado derruba as missoes: mede quanto um comando simples demora e espera o PC aliviar (ate 5 min)
+function Wait-Responsive {
+    for ($k = 0; $k -lt 10; $k++) {
+        $ms = (Measure-Command { & $adb shell "dumpsys window displays > /dev/null" }).TotalMilliseconds
+        if ($ms -lt 1500) { return "emulador respondendo em $([int]$ms) ms" }
+        Say "emulador lento ($([int]$ms) ms para um comando simples); esperando 30 s. Feche programas pesados no PC."
+        Start-Sleep 30
+    }
+    "emulador lento ($([int]$ms) ms) mesmo depois de 5 min"
 }
 
 # menu flutuante desligado nas missoes: a bolinha/painel cobriria os botoes do jogo
@@ -202,6 +224,9 @@ function Set-NoOverlay {
 
 function Run-Missions($v) {
     $script:mres = @()
+    $health = Wait-Responsive
+    Say $health
+    & $adb logcat -b crash -c
     Set-NoOverlay
     & $adb shell am force-stop $game
     & $adb shell pm clear $game | Out-Null  # valores novos sorteados a cada rodada
@@ -351,7 +376,10 @@ function Run-Missions($v) {
     }
     $ok = ($script:mres | Where-Object { $_ -like "OK*" }).Count
     $fails = ($script:mres | Where-Object { $_ -like "FALHA*" }) -join "`n"
-    Post-Sheet "agente PC: missoes $ok de $($script:mres.Count) ok" $fails ($script:mres -join "`n") $v
+    # o Tinker ou o jogo fecharam durante as missoes: o Android guarda o motivo no buffer de crash
+    $crash = (& $adb logcat -d -b crash) -join "`n"
+    if ($crash) { $fails += "`n=== fechou durante as missoes ===`n" + $crash.Substring(0, [Math]::Min($crash.Length, 3000)) }
+    Post-Sheet "agente PC: missoes $ok de $($script:mres.Count) ok" $fails ("$health`n" + ($script:mres -join "`n")) $v
 }
 
 function Test-Version {
