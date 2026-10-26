@@ -4287,6 +4287,18 @@ class Engine private constructor(private val app: Context) {
         if (fail == 0) "${targets.size} valores alterados." else "${targets.size - fail} alterados, $fail não couberam no tipo ou falharam."
     }
 
+    /**
+     * Muda só os resultados que valem `from` agora (ex.: todos os inimigos com 100 de vida viram 1), sem refinar e
+     * perder a lista. Até 20 mil resultados; números decimais com tolerância de 0,001.
+     */
+    suspend fun writeWhere(from: String, to: String): String {
+        val want = normalizeNumbers(from).toDoubleOrNull() ?: return "\"$from\" não é um número."
+        val total = call { d -> d.send("list 20000", quiet = true).lines }
+        val hits = total.map { it.split(' ') }.filter { it.size >= 4 && (readable(it[3], it[1])?.toDoubleOrNull()?.let { v -> kotlin.math.abs(v - want) < 0.001 } == true) }
+        if (hits.isEmpty()) return "Nenhum dos ${total.size} resultados vale $from agora."
+        return "Dos ${total.size}, ${hits.size} valiam $from: " + writeMany(hits.map { it[0] to it[1] }, to)
+    }
+
     // ---- editar em sequência (como no GameGuardian): cada resultado ganha um número (100, 101, 102…); o que aparecer
     // no jogo diz qual endereço é o certo. "Descobrir pela tela" lê a tela sozinho e volta tudo como estava. ----
 

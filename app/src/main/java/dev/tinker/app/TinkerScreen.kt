@@ -594,6 +594,17 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                         editingAll = false
                         run { if (chosen.isEmpty()) engine.writeAll(v) else engine.writeMany(chosen.map { it.addr to it.type }, v) }
                     }, onCancel = { editingAll = false })
+                    // só os que valem X agora (todos os inimigos com 100 de vida), sem refinar e perder a lista
+                    var whereFrom by remember { mutableStateOf("") }
+                    var whereTo by remember { mutableStateOf("") }
+                    Text("Só os que valem agora:", style = MaterialTheme.typography.labelLarge)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        ValueField(whereFrom, "Valem", { whereFrom = it }, Modifier.weight(1f), keyboard = KeyboardType.Number)
+                        Text("→")
+                        ValueField(whereTo, "Viram", { whereTo = it }, Modifier.weight(1f), keyboard = KeyboardType.Number)
+                        OutlinedButton(shape = MaterialTheme.shapes.medium, enabled = whereFrom.isNotBlank() && whereTo.isNotBlank() && !s.busy,
+                            onClick = { editingAll = false; run { engine.writeWhere(whereFrom, whereTo) } }) { Text("Mudar") }
+                    }
                     // como no GameGuardian: cada um ganha um número (100, 101, 102…) e o que aparecer no jogo é o certo
                     val seqTargets = (if (chosen.isEmpty()) s.results else chosen).map { it.addr to it.type }
                     Text("Em sequência (${seqTargets.size} endereços, +1 em cada):", style = MaterialTheme.typography.labelLarge)
