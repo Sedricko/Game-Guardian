@@ -18,13 +18,14 @@ Responder sempre em **português do Brasil**, curto e direto. O usuário testa n
 | Parte | Arquivo | O que faz |
 |---|---|---|
 | Daemon root | `daemon/tinkerd.c` | Protocolo texto stdin/stdout: search/refine/read/write/dump, ponteiros, AOB, IL2CPP (`il2cpp`, `il2classes`, `il2objs`, `il2methods`), `where`, `watch` e `trace` (ptrace + registradores de hardware), `photo*`, `backup`/`backups`/`restoresave` |
-| Motor | `app/.../Engine.kt` | Sessão (`Session`), chamadas ao daemon (`call { d -> }`), salvos, receitas, patches, planilha, IA |
-| Tela | `TinkerScreen.kt` | Abas Busca, Salvos, Memória (Endereços / Ficha / Código), Registro, Ajustes + Ajuda |
+| Motor | `Engine.kt` | A classe `Engine`: chamadas ao daemon (`call { d -> }`), busca, salvos, receitas, patches, ferramentas, planilha, IA |
+| Dados | `Model.kt`, `Session.kt`, `Values.kt` | Tipos e classes de dados; o estado da tela (`Session`); funções puras (conversões, assinatura, ficha, save, JSON, `friendly()` dos erros) |
+| Tela | `TinkerScreen.kt` (painel, abas, cabeçalho, componentes comuns) + um arquivo por aba: `SearchTab.kt`, `Tools.kt` (🧰), `SavedTab.kt`, `MemoryTab.kt`, `LogTab.kt`, `SettingsTab.kt` (com a Ajuda gerada) | |
 | Outros | `Assistant.kt` + `AiBox.kt` (IA Gemini/Groq), `Arm64.kt` (decodificador), `Keypad.kt`, `QuickBar.kt` (barra rápida), `OverlayService.kt` (painel flutuante), `TinkerApp.kt` (`Diag` e vigia da tela) |
 | Ajuda e tutorial | `docs/tutorial/ajuda.py` → `gerar.py` | Fonte única: gera a Ajuda do app e `Tinker-tutorial.pdf` |
 | Planilha | `docs/painel-chaves/Code.gs`, `Painel.html`, `LEIAME.md` | App da Web: chaves, Pedidos, Aparelhos, Buscas, Relatórios, Problemas, Salvos, Receitas, Patches |
 
-Versões: `app/build.gradle.kts` (`versionCode`/`versionName`), `VERSAO` no Code.gs, `SCRIPT_VERSION` no Engine.kt (versão **mínima** do script que o app exige).
+Versões: `app/build.gradle.kts` (`versionCode`/`versionName`), `VERSAO` no Code.gs, `SCRIPT_VERSION` no Model.kt (versão **mínima** do script que o app exige).
 ## O que o app faz (estado 2.68, 26/10/2026)
 O texto completo de cada opção está em `docs/tutorial/ajuda.py` (fonte única da Ajuda do app e do PDF
 `docs/tutorial/Tinker-tutorial.pdf`). Aqui fica só o que importa para mexer no código:
@@ -54,6 +55,8 @@ O texto completo de cada opção está em `docs/tutorial/ajuda.py` (fonte única
 - CI também testa o daemon contra a lib do jogo em 32 bits (gcc-multilib); YAML: comando com `: ` vai em bloco `|`.
 
 ## Armadilhas já resolvidas (não repetir)
+- Erro para o usuário sempre por `friendly(msg)` (Values.kt): nunca mostrar `e.message` cru. O original vai para o `Diag`.
+- `private` de topo só vale no próprio arquivo: ao mudar uma função de arquivo, o que o outro arquivo usa vira `internal`.
 - `Engine.call { d -> }` **não é suspend dentro do bloco**: nada de `delay`/`withContext` lá dentro; divida em várias chamadas.
 - Texto começando com `= + - @` vira fórmula na planilha: usar `texto_()` (apóstrofo) em tudo que se grava.
 - Linhas esticadas na planilha: `linhaFina_()` (CLIP, altura 21).

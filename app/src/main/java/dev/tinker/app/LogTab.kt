@@ -45,7 +45,7 @@ internal fun LogTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, on
     var logFilter by remember { mutableStateOf(LOG_FILTERS[0].first) }
     fun fetch(work: suspend () -> Unit) = scope.launch {
         working = true
-        runCatching { work() }.onFailure { onError(it.message ?: "Erro") }
+        runCatching { work() }.onFailure { onError(friendly(it.message)) }
         working = false
     }
     Column(Modifier.padding(horizontal = 16.dp)) {
@@ -82,7 +82,7 @@ internal fun LogTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, on
             OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { fetch { info = "Testando…"; info = engine.selfTest() } }, enabled = !working) { Text("Autoteste") }
             OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { fetch { info = "Procurando…"; info = engine.checkUpdateNow() } }, enabled = !working) { Text("Procurar atualização") }
             OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { fetch { engine.crashLog() } }, enabled = !working) { Text("Ver falhas") }
-            OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { fetch { engine.gameLog() } }, enabled = !working && Session.process != null) { Text("Ver logcat do jogo") }
+            OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { fetch { engine.gameLog() } }, enabled = !working && Session.process != null) { Text("Ver mensagens do jogo") }
             // dois toques: apagar o registro não tem volta
             if (confirmClear) {
                 Button(shape = MaterialTheme.shapes.medium, onClick = { Diag.clear(); info = "Registro apagado."; confirmClear = false }) { Text("Apagar mesmo") }

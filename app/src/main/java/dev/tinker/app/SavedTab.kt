@@ -54,12 +54,12 @@ internal fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, 
     val context = LocalContext.current
     var info by remember { mutableStateOf<String?>(null) }
     fun import(text: String) {
-        info = runCatching { engine.importSaved(text) }.getOrElse { "Não importou: ${it.message}" }
+        info = runCatching { engine.importSaved(text) }.getOrElse { "Não importou. ${friendly(it.message)}" }
     }
     // abrir arquivo só existe na tela principal: o painel flutuante não recebe resultado de outra tela
     val openFile = if (!overlay) androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
-    ) { uri -> uri?.let { u -> runCatching { context.contentResolver.openInputStream(u)!!.use { it.reader().readText() } }.onSuccess(::import).onFailure { info = "Não leu o arquivo: ${it.message}" } } } else null
+    ) { uri -> uri?.let { u -> runCatching { context.contentResolver.openInputStream(u)!!.use { it.reader().readText() } }.onSuccess(::import).onFailure { info = "Não leu o arquivo. ${friendly(it.message)}" } } } else null
     var editing by remember { mutableStateOf<String?>(null) }
     var editingMany by remember { mutableStateOf(false) }
     var porting by remember { mutableStateOf(false) }
@@ -115,7 +115,7 @@ internal fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, 
                     scope.launch {
                         runCatching { engine.deletedInSheet() }
                             .onSuccess { gone = it; info = if (it.isEmpty()) "Nenhum salvo apagado deste jogo na planilha." else null }
-                            .onFailure { info = "Não li a planilha: ${it.message}" }
+                            .onFailure { info = "Não li a planilha. ${friendly(it.message)}" }
                     }
                 }) { Text("Restaurar apagado") }
             }
@@ -199,7 +199,7 @@ internal fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, 
                 if (chosen.isNotEmpty()) OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { naming = true }) { Text("Criar receita (${chosen.size})") }
                 // dois marcados: ficha de um ao lado da do outro, como o "Structure compare" do Cheat Engine
                 if (chosen.size == 2) OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = {
-                    scope.launch { compareText = runCatching { engine.compareObjects(chosen[0], chosen[1]) }.getOrElse { "Não comparou: ${it.message}" } }
+                    scope.launch { compareText = runCatching { engine.compareObjects(chosen[0], chosen[1]) }.getOrElse { "Não comparou. ${friendly(it.message)}" } }
                 }) { Text("Comparar (2)") }
             }
             compareText?.let { t ->
@@ -295,7 +295,7 @@ internal fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, 
                     InlineEditor(readable(item.value, item.type) ?: "", "Novo valor", onSave = { v -> editing = null; run { engine.setSaved(listOf(item), v) } }, onCancel = { editing = null }) {
                         TextButton(onClick = { engine.removeSaved(listOf(item)); editing = null }) { Text("Remover") }
                         TextButton(onClick = { s.view = item.addr to plain(item.type); s.fichaMode = false; s.codeMode = false; s.tab = TAB_MEMORY; editing = null }) { Text("Ver próximos") }
-                        TextButton(onClick = { s.view = item.addr to plain(item.type); s.fichaMode = true; s.codeMode = false; s.tab = TAB_MEMORY; editing = null }) { Text("Explorar ficha") }
+                        TextButton(onClick = { s.view = item.addr to plain(item.type); s.fichaMode = true; s.codeMode = false; s.tab = TAB_MEMORY; editing = null }) { Text("Ver ficha") }
                         // todos os objetos do mesmo formato (no DYSMANTLE, todos os slots do inventário) vão para a Busca
                         TextButton(onClick = { editing = null; run { engine.findSimilar(item).also { s.tab = 0 } } }, enabled = !old && !s.busy) { Text("Achar parecidos") }
                         // qual instrução do jogo muda este valor (o painel sai da frente para a pessoa jogar)

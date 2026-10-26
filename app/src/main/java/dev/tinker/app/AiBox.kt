@@ -108,7 +108,7 @@ fun AiBox(
     if (!Assistant.ready()) {
         Text("Para usar, coloque uma chave do Gemini ou do Groq (as duas são grátis).", style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Button(shape = MaterialTheme.shapes.medium, onClick = { s.tab = TABS.indexOf("Ajustes") }) { Text("Configurar IA") }
+        Button(shape = MaterialTheme.shapes.medium, onClick = { s.settingsAt = "ia"; s.tab = TABS.indexOf("Ajustes") }) { Text("Configurar IA") }
         return
     }
     val going = turns.isNotEmpty()

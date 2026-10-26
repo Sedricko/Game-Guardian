@@ -42,6 +42,7 @@ object Session {
     var watchHits by mutableStateOf<Pair<String, List<Triple<String, Int, String>>>?>(null)  // último "o que escreve aqui"
     var fichaMode by mutableStateOf(false)  // aba Memória: lista de endereços (false) ou ficha do objeto (true)
     var tab by mutableIntStateOf(0)  // índice em TABS
+    var settingsAt by mutableStateOf("")  // "ia": os Ajustes abrem já na parte da IA
     val saved = mutableStateListOf<SavedItem>()
     val recipes = mutableStateListOf<Recipe>()
     val aiProposals = mutableStateListOf<AiProposal>()

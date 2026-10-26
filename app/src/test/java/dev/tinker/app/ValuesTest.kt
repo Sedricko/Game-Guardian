@@ -177,6 +177,15 @@ class ValuesTest {
     }
 
     @Test
+    fun errosEmFraseHumana() {
+        assertEquals("O jogo fechou. Abra o jogo e escolha ele de novo no Tinker.", friendly("processo 123 não existe"))
+        assertTrue(friendly("O daemon fechou.").startsWith("A conexão com o root caiu"))
+        assertTrue(friendly("valor inválido: abc").startsWith("Não entendi o valor"))
+        assertEquals("Não li o código.", friendly("não li o código"))
+        assertTrue(friendly(null).startsWith("Algo deu errado"))
+    }
+
+    @Test
     fun faixaParaFrente() {
         assertEquals("19~24", ahead(19))
         assertEquals("1000~1050", ahead(1000))

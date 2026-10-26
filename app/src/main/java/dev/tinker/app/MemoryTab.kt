@@ -86,7 +86,7 @@ internal fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
                 }
                 rows = new
                 error = null
-            }.onFailure { error = it.message }
+            }.onFailure { error = friendly(it.message) }
             delay(1000)
         }
     }
@@ -145,7 +145,7 @@ internal fun MemoryView(engine: Engine, run: (suspend () -> String) -> Unit) {
             val hexScope = rememberCoroutineScope()
             TextButton(onClick = {
                 if (hex != null) hex = null
-                else hexScope.launch { hex = runCatching { engine.hexView(center, 16) }.getOrElse { "Não leu: ${it.message}" } }
+                else hexScope.launch { hex = runCatching { engine.hexView(center, 16) }.getOrElse { "Não leu. ${friendly(it.message)}" } }
             }) { Text((if (hex != null) "▾ " else "▸ ") + "Ver bytes (hexadecimal)") }
             hex?.let { Text(it, fontFamily = FontFamily.Monospace, fontSize = 10.sp, lineHeight = 13.sp, softWrap = false, modifier = Modifier.horizontalScroll(rememberScrollState())) }
             // editar direto nos bytes, como o hex editor do GG e do Cheat Engine
@@ -223,7 +223,7 @@ private fun CodeView(engine: Engine, center: String, run: (suspend () -> String)
     LaunchedEffect(pressed) { if (pressed && s.ownKeypad) pad = true }
     LaunchedEffect(center) {
         if (center == "0") return@LaunchedEffect
-        runCatching { engine.codeAt(center) }.onSuccess { rows = it; error = null }.onFailure { error = it.message }
+        runCatching { engine.codeAt(center) }.onSuccess { rows = it; error = null }.onFailure { error = friendly(it.message) }
     }
     Text("Instruções do jogo (ARM64). Ache o endereço com \"O que escreve aqui?\" num salvo, procure uma função pelo nome, ou digite um.",
         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -265,9 +265,9 @@ private fun CodeView(engine: Engine, center: String, run: (suspend () -> String)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         // NOP: a instrução deixa de fazer qualquer coisa (o jeito mais comum de "não descontar")
                         Button(shape = MaterialTheme.shapes.medium, onClick = { open = null; run { engine.createPatch(r.addr, "1f2003d5", "NOP em ${r.where.ifEmpty { r.addr }}", "era ${r.text}") } },
-                            enabled = r.word != null && r.word != ARM64_NOP && !s.busy) { Text("Trocar por NOP") }
+                            enabled = r.word != null && r.word != ARM64_NOP && !s.busy) { Text("Desligar esta instrução") }
                         TextButton(onClick = { s.status = copyAddress(ctx, r.addr) }) { Text("Copiar endereço") }
-                        if (r.where.isNotEmpty()) TextButton(onClick = { s.status = copyAddress(ctx, r.where) }) { Text("Copiar lib+desloc.") }
+                        if (r.where.isNotEmpty()) TextButton(onClick = { s.status = copyAddress(ctx, r.where) }) { Text("Copiar posição na lib") }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         ValueField(bytes, "Bytes novos (8 dígitos por instrução)", { bytes = it.filter { c -> c.isLetterOrDigit() }.lowercase().take(32) },
@@ -295,7 +295,7 @@ private fun NativeFunctions(engine: Engine, run: (suspend () -> String) -> Unit)
     var open by remember { mutableStateOf<String?>(null) }
     var calls by remember { mutableStateOf<List<Pair<String, String>>?>(null) }
     fun find() = scope.launch {
-        runCatching { engine.nativeFunctions(filter) }.onSuccess { found = it; open = null }.onFailure { s.status = it.message ?: "erro" }
+        runCatching { engine.nativeFunctions(filter) }.onSuccess { found = it; open = null }.onFailure { s.status = friendly(it.message) }
     }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         TinkerTextField(filter, { filter = it }, "Função pelo nome (ex.: gold, AddCoins)", Modifier.weight(1f))
@@ -371,7 +371,7 @@ private fun FichaView(engine: Engine, center: String, run: (suspend () -> String
     }
     Column(Modifier.fillMaxWidth().heightIn(max = max).clipToBounds().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         ClassOpener(engine)
-        if (none) Text("Digite o nome de uma classe ou de um campo do jogo (ex.: PlayerData, gold) ou abra a ficha de um salvo (Salvos → Explorar ficha).",
+        if (none) Text("Digite o nome de uma classe ou de um campo do jogo (ex.: PlayerData, gold) ou abra a ficha de um salvo (Salvos → Ver ficha).",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     if (!none) FichaBody(engine, center, run)
@@ -405,7 +405,7 @@ private fun UnrealOpener(engine: Engine) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         TinkerTextField(filter, { filter = it }, "Objeto da Unreal (ex.: Player, Character)", Modifier.weight(1f))
         OutlinedButton(shape = MaterialTheme.shapes.medium, enabled = !s.busy && filter.isNotBlank(), contentPadding = PaddingValues(horizontal = 12.dp),
-            onClick = { scope.launch { found = runCatching { engine.unrealObjects(filter) }.getOrElse { (it.message ?: "erro") to emptyList() } } }) { Text("Procurar") }
+            onClick = { scope.launch { found = runCatching { engine.unrealObjects(filter) }.getOrElse { friendly(it.message) to emptyList() } } }) { Text("Procurar") }
     }
     val (msg, list) = found ?: return
     Text(msg, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -457,7 +457,7 @@ private fun ClassOpener(engine: Engine) {
                 }
                 // ficha pelo primeiro campo (+0x10, ou +0x8 em 32 bits): o começo do objeto não está dentro de nenhum campo
                 found.singleOrNull()?.let { s.view = (it.toLong(16) + (s.engine?.header ?: 0x10L)).toString(16) to "i32" }
-            }.onFailure { info = it.message }
+            }.onFailure { info = friendly(it.message) }
             loading = false
         }
     }
@@ -481,7 +481,7 @@ private fun ClassOpener(engine: Engine) {
             info = "Listando as classes do jogo…"
             scope.launch {
                 runCatching { engine.listClasses() }.onSuccess { all = it; info = "${it.size} classes com campos (as do jogo primeiro). Digite acima para filtrar." }
-                    .onFailure { info = it.message; listing = false }
+                    .onFailure { info = friendly(it.message); listing = false }
                 loading = false
             }
         }
@@ -491,10 +491,10 @@ private fun ClassOpener(engine: Engine) {
         loading = true
         info = "Montando o dump (classes, campos e métodos)… pode levar um minuto"
         scope.launch {
-            runCatching { engine.dumpIl2cpp() }.onSuccess { (msg, file) -> info = msg; shareFile(context, file) }.onFailure { info = it.message }
+            runCatching { engine.dumpIl2cpp() }.onSuccess { (msg, file) -> info = msg; shareFile(context, file) }.onFailure { info = friendly(it.message) }
             loading = false
         }
-    }, enabled = s.process != null && !loading) { Text("📄 Exportar dump das classes (.cs)") }
+    }, enabled = s.process != null && !loading) { Text("📄 Exportar a lista de classes (.cs)") }
     if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
     info?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     val names = remember(all) { all?.map { it.name }?.toSet() ?: emptySet() }
@@ -604,7 +604,7 @@ private fun FichaBody(engine: Engine, center: String, run: (suspend () -> String
                 }
                 rows = new
                 error = null
-            }.onFailure { error = it.message }
+            }.onFailure { error = friendly(it.message) }
             delay(1000)
         }
     }
@@ -714,7 +714,7 @@ private fun MethodsPanel(engine: Engine, c: Il2Class, run: (suspend () -> String
     TextButton(onClick = {
         shown = !shown
         if (shown && methods == null) scope.launch {
-            runCatching { engine.il2Methods(c.start) }.onSuccess { methods = it; error = null }.onFailure { error = it.message }
+            runCatching { engine.il2Methods(c.start) }.onSuccess { methods = it; error = null }.onFailure { error = friendly(it.message) }
         }
     }) { Text((if (shown) "▾ " else "▸ ") + "⚙ Métodos da classe" + (methods?.let { " (${it.size})" } ?: "")) }
     if (!shown) return
@@ -740,8 +740,8 @@ private fun MethodsPanel(engine: Engine, c: Il2Class, run: (suspend () -> String
                         when (m.ret) {
                             0x01 -> OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { open = null; run { engine.patchReturn(m, c.name, "") } }) { Text("Não fazer nada") }
                             0x02 -> {
-                                OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { open = null; run { engine.patchReturn(m, c.name, "true") } }) { Text("Sempre true") }
-                                OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { open = null; run { engine.patchReturn(m, c.name, "false") } }) { Text("Sempre false") }
+                                OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { open = null; run { engine.patchReturn(m, c.name, "true") } }) { Text("Sempre sim (true)") }
+                                OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { open = null; run { engine.patchReturn(m, c.name, "false") } }) { Text("Sempre não (false)") }
                             }
                         }
                     }
@@ -768,7 +768,7 @@ private fun LuaPanel(engine: Engine, center: String, run: (suspend () -> String)
     var open by remember(center) { mutableStateOf<String?>(null) }
     LaunchedEffect(center) {
         while (true) {
-            runCatching { engine.luaTable(center) }.onSuccess { (v, f) -> ver = v; fields = f; error = null }.onFailure { error = it.message; fields = emptyList() }
+            runCatching { engine.luaTable(center) }.onSuccess { (v, f) -> ver = v; fields = f; error = null }.onFailure { error = friendly(it.message); fields = emptyList() }
             delay(1500)
         }
     }

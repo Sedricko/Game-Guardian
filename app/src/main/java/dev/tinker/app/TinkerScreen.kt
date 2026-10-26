@@ -85,8 +85,8 @@ fun rememberRun(engine: Engine, onError: (String?) -> Unit): (suspend () -> Stri
                 s.count = count
                 s.results = hits
             } catch (e: Exception) {
-                val msg = e.message ?: "Erro desconhecido"
-                onError(if (msg.startsWith("valor inválido")) "$msg. Use um número (20000 ou 20.000), uma faixa (100~200) ou vários com ; (20000;50000)." else msg)
+                Diag.add("Erro na ação: ${e.javaClass.simpleName}: ${e.message}")
+                onError(friendly(e.message))
             } finally {
                 s.busy = false
             }
@@ -107,7 +107,7 @@ fun TinkerPanel(
     var picking by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     // "o jogo fechou" de um comando já está no cartão "Reabrir o jogo?": não repete em vermelho
-    val run = rememberRun(engine) { error = if (it == "o jogo fechou") null else it }
+    val run = rememberRun(engine) { error = if (it == friendly("o jogo fechou")) null else it }  // o jogo fechou: a pergunta "Reabrir?" já avisa
     // abriu o Tinker com o jogo da última vez aberto: já escolhe ele (e os salvos voltam sozinhos)
     LaunchedEffect(Unit) { if (s.process == null) runCatching { engine.followGame(startDaemon = true) }.getOrNull()?.let { s.status = it } }
     // a IA vai tocar no jogo: o painel sai da frente (a conversa continua; a bolinha abre de novo para ver ou parar)
@@ -410,7 +410,7 @@ internal fun saveToDownloads(context: Context, file: File, mime: String = "text/
         val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)!!
         context.contentResolver.openOutputStream(uri)!!.use { out -> file.inputStream().use { it.copyTo(out) } }
         uri
-    }.onFailure { Diag.add("Não salvou em Downloads: ${it.message}") }.getOrNull()
+    }.onFailure { Diag.add("Não salvou em Downloads. ${friendly(it.message)}") }.getOrNull()
 }
 
 internal fun shareFile(context: Context, file: File, mime: String = "text/plain") {

@@ -484,3 +484,27 @@ internal fun JSONObject.toPatch(): CodePatch? = runCatching {
         optString("ctx", "").lowercase().takeIf { Regex("""([0-9a-f]{8}){9,24}""").matches(it) }.orEmpty(),
         sym = optString("sym", "").takeIf { Regex("""[A-Za-z0-9_.$@:]{1,160}""").matches(it) }.orEmpty())
 }.getOrNull()
+
+/**
+ * Erro técnico (daemon, su, Android) em frase para quem joga: o que houve e o que fazer. A mensagem original vai para o
+ * Registro, para investigar.
+ */
+internal fun friendly(msg: String?): String {
+    val m = msg?.trim().orEmpty()
+    return when {
+        m.isEmpty() -> "Algo deu errado. Tente de novo; se repetir, veja o motivo na aba Registro."
+        m.startsWith("valor inválido") || m.startsWith("número inválido") ->
+            "Não entendi o valor. Use um número (20000 ou 20.000), uma faixa (100~200) ou vários com ; (20000;50000)."
+        m.startsWith("Sem root") -> "O Tinker precisa de root. Abra o Magisk, permita o Tinker e tente de novo."
+        m == "O daemon fechou." || m == "daemon parado" || "Broken pipe" in m || "Stream closed" in m ->
+            "A conexão com o root caiu. Tente de novo; se continuar, feche e abra o Tinker."
+        (m.startsWith("processo ") && m.endsWith("não existe")) || m == "o jogo fechou" ->
+            "O jogo fechou. Abra o jogo e escolha ele de novo no Tinker."
+        m == "nenhum jogo escolhido" -> "Escolha o jogo primeiro: toque no nome no topo do painel."
+        m == "sem memória" -> "Faltou memória no aparelho para isso. Refine mais ou busque em menos regiões (Ajustes)."
+        m.startsWith("sem espaço") -> "Falta espaço no aparelho (${m.substringAfter(": ")}). Libere espaço e tente de novo."
+        m.startsWith("refine mais antes") -> "São resultados demais para mudar de uma vez. Refine mais um pouco."
+        "timed out" in m.lowercase() || "timeout" in m.lowercase() -> "Demorou demais para responder. Tente de novo com o jogo aberto."
+        else -> m.replaceFirstChar { it.uppercase() }.let { if (it.last() in ".!?)") it else "$it." }
+    }
+}

@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AssistChip
@@ -64,13 +65,111 @@ internal fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit,
     var newKey by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
     var confirmKill by remember { mutableStateOf(false) }
-    LaunchedEffect(s.process) {
-        if (s.process != null) runCatching { s.regions = engine.regions() }.onFailure { onError(it.message ?: "Erro") }
+    val list = rememberLazyListState()
+    // "Configurar IA" (das outras telas) abre os Ajustes já na parte da IA
+    LaunchedEffect(s.settingsAt) {
+        if (s.settingsAt == "ia") {
+            // antes da IA: menu flutuante, busca, ponteiros, jogo (com jogo escolhido), título das regiões e uma linha por região
+            list.scrollToItem(3 + (if (s.process != null) 1 else 0) + 1 + s.regions.size)
+            s.settingsAt = ""
+        }
     }
-    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        // organizado por assunto; a Ajuda fica no fim
-        // a IA primeiro: é o que se configura uma vez e o botão "Configurar IA" das outras telas traz para cá
+    LaunchedEffect(s.process) {
+        if (s.process != null) runCatching { s.regions = engine.regions() }.onFailure { onError(friendly(it.message)) }
+    }
+    LazyColumn(state = list, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // o do dia a dia primeiro (menu flutuante, busca, ponteiros, jogo, regiões); a IA e a biblioteca depois; a Ajuda no fim
         item {
+            Panel {
+                Text("Menu flutuante", style = MaterialTheme.typography.titleSmall)
+                Toggle("Abrir o menu flutuante ao iniciar", "Como o GameGuardian: abrir o Tinker já deixa a bolinha sobre o jogo.", s.autoOverlay) {
+                    s.autoOverlay = it; engine.saveSettings()
+                }
+                if (overlay) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Tamanho do painel: ${PANEL_SIZES[s.panelSize].second}", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                        OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = onResize) { Text("Trocar") }
+                    }
+                    Text("Em pé o tamanho é a altura; com o jogo deitado é a largura, e o painel fica de lado (o jogo continua à vista).",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Lado com o jogo deitado: ${if (s.panelLeft) "esquerda" else "direita"}", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                        OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { s.panelLeft = !s.panelLeft; engine.saveSettings() }) { Text("Trocar") }
+                    }
+                    Text("Transparência", style = MaterialTheme.typography.bodyMedium)
+                    Slider(value = s.alpha, onValueChange = { s.alpha = it }, onValueChangeFinished = engine::saveSettings, valueRange = 0.35f..1f)
+                }
+            }
+        }
+        item {
+            Panel {
+                Text("Busca", style = MaterialTheme.typography.titleSmall)
+                Toggle("Pausar o jogo durante a busca e o refino", "O valor não muda no meio da busca.", s.autoPause) { s.autoPause = it; engine.saveSettings() }
+                Toggle("Atualizar e testar sozinho", "Com versão nova, baixa e instala sozinho (root), reabre e roda o autoteste; o resultado vai para a planilha. Nunca mexe em jogo.", s.autoUpdate) {
+                    s.autoUpdate = it; engine.saveSettings()
+                }
+                if (s.autoUpdate) OutlinedTextField(s.githubToken, { s.githubToken = it.trim(); engine.saveSettings() }, label = { Text("Token do GitHub (só se o repositório for privado)") },
+                    singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+                Toggle("Teclado do Tinker", "Números e letras dentro do painel; o teclado do telefone abre por cima do jogo e esconde o valor.", s.ownKeypad) {
+                    s.ownKeypad = it; engine.saveSettings()
+                }
+                Toggle("Procurar valores cifrados (🔒)", "Acha moedas e vida protegidas com chave (comum em jogos Unity). Deixa a busca um pouco mais lenta.", s.findEncrypted) {
+                    s.findEncrypted = it; engine.saveSettings()
+                }
+            }
+        }
+        item {
+            Panel {
+                Text("Ponteiros e restauração", style = MaterialTheme.typography.titleSmall)
+                Text("Ao reabrir o jogo, os salvos voltam sozinhos pelo ponteiro, pelo consenso dos caminhos, pelo histórico do valor e pela assinatura.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Toggle("Preparar ponteiros ao salvar", "Para o salvo voltar sozinho quando o jogo reabrir. Pausa o jogo alguns segundos depois de salvar.", s.autoPointers) {
+                    s.autoPointers = it; engine.saveSettings()
+                }
+                Toggle("Ponteiros só nas libs do jogo", "Base em libil2cpp, libunity e outras do jogo; as do sistema costumam dar caminhos que quebram.", s.gameLibsOnly) {
+                    s.gameLibsOnly = it; engine.saveSettings()
+                }
+            }
+        }
+        if (s.process != null) {
+            item {
+                Panel {
+                    Text("Jogo", style = MaterialTheme.typography.titleSmall)
+                    OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = {
+                        if (confirmKill) run { engine.killGame() }
+                        confirmKill = !confirmKill
+                    }, enabled = !s.busy) { Text(if (confirmKill) "Toque de novo para fechar o jogo" else "Fechar jogo", maxLines = 1) }
+                }
+            }
+        }
+        item {
+            Text("Regiões de memória", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
+            Text(
+                if (s.process == null) "Escolha o jogo para ver as regiões de memória."
+                else "Marque onde a busca procura; menos regiões = busca mais rápida.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        items(s.regions, key = { it.code }) { r ->
+            Card(
+                shape = MaterialTheme.shapes.medium,
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(r.code, Modifier.width(40.dp), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, maxLines = 1)
+                    Column(Modifier.weight(1f)) {
+                        Text(REGION_NAMES[r.code] ?: r.code, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("${r.count} blocos · ${formatBytes(r.bytes)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                    }
+                    Checkbox(checked = r.enabled, onCheckedChange = { on ->
+                        scope.launch { runCatching { s.regions = engine.setRegion(r.code, on) }.onFailure { onError(friendly(it.message)) } }
+                    })
+                }
+            }
+        }
+        item(key = "ia") {
             Panel {
                 Text("Assistente (IA)", style = MaterialTheme.typography.titleSmall)
                 Text("O botão ✨ na Busca, na Ficha, na lista de classes e no Registro manda o que está na tela para a IA e mostra a resposta: " +
@@ -170,7 +269,7 @@ internal fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit,
                 val openMemory = if (!overlay) androidx.activity.compose.rememberLauncherForActivityResult(
                     androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
                 ) { uri -> uri?.let { u -> keyInfo = runCatching { clipCtx.contentResolver.openInputStream(u)!!.use { it.reader().readText() } }
-                    .map(engine::importMemory).getOrElse { "Não leu o arquivo: ${it.message}" } } } else null
+                    .map(engine::importMemory).getOrElse { "Não leu o arquivo. ${friendly(it.message)}" } } } else null
                 TextButton(onClick = { showLessons = !showLessons }) {
                     Text((if (showLessons) "▾ " else "▸ ") + "O que a IA aprendeu" + if (Session.pendingLessons.isNotEmpty()) " (${Session.pendingLessons.size} para aprovar)" else "")
                 }
@@ -228,96 +327,6 @@ internal fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit,
                 }
             }
         }
-        item {
-            Panel {
-                Text("Menu flutuante", style = MaterialTheme.typography.titleSmall)
-                Toggle("Abrir o menu flutuante ao iniciar", "Como o GameGuardian: abrir o Tinker já deixa a bolinha sobre o jogo.", s.autoOverlay) {
-                    s.autoOverlay = it; engine.saveSettings()
-                }
-                if (overlay) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Tamanho do painel: ${PANEL_SIZES[s.panelSize].second}", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                        OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = onResize) { Text("Trocar") }
-                    }
-                    Text("Em pé o tamanho é a altura; com o jogo deitado é a largura, e o painel fica de lado (o jogo continua à vista).",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Lado com o jogo deitado: ${if (s.panelLeft) "esquerda" else "direita"}", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                        OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { s.panelLeft = !s.panelLeft; engine.saveSettings() }) { Text("Trocar") }
-                    }
-                    Text("Transparência", style = MaterialTheme.typography.bodyMedium)
-                    Slider(value = s.alpha, onValueChange = { s.alpha = it }, onValueChangeFinished = engine::saveSettings, valueRange = 0.35f..1f)
-                }
-            }
-        }
-        item {
-            Panel {
-                Text("Busca", style = MaterialTheme.typography.titleSmall)
-                Toggle("Pausar o jogo durante a busca e o refino", "O valor não muda no meio da busca.", s.autoPause) { s.autoPause = it; engine.saveSettings() }
-                Toggle("Atualizar e testar sozinho", "Com versão nova, baixa e instala sozinho (root), reabre e roda o autoteste; o resultado vai para a planilha. Nunca mexe em jogo.", s.autoUpdate) {
-                    s.autoUpdate = it; engine.saveSettings()
-                }
-                if (s.autoUpdate) OutlinedTextField(s.githubToken, { s.githubToken = it.trim(); engine.saveSettings() }, label = { Text("Token do GitHub (só se o repositório for privado)") },
-                    singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
-                Toggle("Teclado do Tinker", "Números e letras dentro do painel; o teclado do telefone abre por cima do jogo e esconde o valor.", s.ownKeypad) {
-                    s.ownKeypad = it; engine.saveSettings()
-                }
-                Toggle("Procurar valores cifrados (🔒)", "Acha moedas e vida protegidas com chave (comum em jogos Unity). Deixa a busca um pouco mais lenta.", s.findEncrypted) {
-                    s.findEncrypted = it; engine.saveSettings()
-                }
-            }
-        }
-        item {
-            Panel {
-                Text("Ponteiros e restauração", style = MaterialTheme.typography.titleSmall)
-                Text("Ao reabrir o jogo, os salvos voltam sozinhos pelo ponteiro, pelo consenso dos caminhos, pelo histórico do valor e pela assinatura.",
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Toggle("Preparar ponteiros ao salvar", "Para o salvo voltar sozinho quando o jogo reabrir. Pausa o jogo alguns segundos depois de salvar.", s.autoPointers) {
-                    s.autoPointers = it; engine.saveSettings()
-                }
-                Toggle("Ponteiros só nas libs do jogo", "Base em libil2cpp, libunity e outras do jogo; as do sistema costumam dar caminhos que quebram.", s.gameLibsOnly) {
-                    s.gameLibsOnly = it; engine.saveSettings()
-                }
-            }
-        }
-        if (s.process != null) {
-            item {
-                Panel {
-                    Text("Jogo", style = MaterialTheme.typography.titleSmall)
-                    OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = {
-                        if (confirmKill) run { engine.killGame() }
-                        confirmKill = !confirmKill
-                    }, enabled = !s.busy) { Text(if (confirmKill) "Toque de novo para fechar o jogo" else "Fechar jogo", maxLines = 1) }
-                }
-            }
-        }
-        item {
-            Text("Regiões de memória", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
-            Text(
-                if (s.process == null) "Escolha o jogo para ver as regiões de memória."
-                else "Marque onde a busca procura; menos regiões = busca mais rápida.",
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        items(s.regions, key = { it.code }) { r ->
-            Card(
-                shape = MaterialTheme.shapes.medium,
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(r.code, Modifier.width(40.dp), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, maxLines = 1)
-                    Column(Modifier.weight(1f)) {
-                        Text(REGION_NAMES[r.code] ?: r.code, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text("${r.count} blocos · ${formatBytes(r.bytes)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-                    }
-                    Checkbox(checked = r.enabled, onCheckedChange = { on ->
-                        scope.launch { runCatching { s.regions = engine.setRegion(r.code, on) }.onFailure { onError(it.message ?: "Erro") } }
-                    })
-                }
-            }
-        }
         item { HelpPanel() }
     }
 }
@@ -349,10 +358,10 @@ private val HELP = listOf(
     Triple("Salvos", "Salvar e congelar", "Salvar põe o resultado na lista do jogo; Congelar reescreve o valor várias vezes por segundo. Em Salvos: dar nome, editar vários, exportar e importar. Marque dois salvos para ver a distância entre eles."),
     Triple("Salvos", "Ponteiros e reabrir o jogo", "Quando o jogo reinicia, os endereços mudam. Ao salvar, o Tinker já busca os ponteiros e aprende a assinatura; ao reabrir o jogo, cada salvo volta sozinho (ponteiro → caminhos → assinatura), e os da mesma ficha vêm junto pelo offset (↳ Ouro +0x8). Vários caminhos? Abra o salvo, digite o valor do jogo e Filtrar pelo valor. ⚠ = salvo de outra vez do jogo, não é lido nem escrito até voltar. ↻ procura na hora."),
     Triple("Salvos", "Receitas", "Marque os campos e toque em Criar receita: guarda cada campo pelo nome da classe (Unity), senão pelo ponteiro, senão pela assinatura. Aplicar escreve tudo de uma vez (e congela os ❄); \"ao abrir\" aplica sozinha quando o jogo carrega. Também na barra rápida. Copiar manda como texto; Colar lista recebe."),
-    Triple("Salvos", "Código e patches", "Para o recurso não diminuir: no salvo, O que escreve aqui? e gaste o recurso em 15 s. Aparece a instrução que muda o valor; Ver código abre Memória → Código. Tocar numa instrução troca por NOP ou outros bytes: vira um patch em Salvos → Patches, com liga/desliga, que volta sozinho ao reabrir. Se o jogo cair logo depois, o patch fica suspeito e desligado."),
+    Triple("Salvos", "Código e patches", "Para o recurso não diminuir: no salvo, O que escreve aqui? e gaste o recurso em 15 s. Aparece a instrução que muda o valor; Ver código abre Memória → Código. Tocar numa instrução: Desligar esta instrução (NOP) ou trocar os bytes; vira um patch em Salvos → Patches, com liga/desliga, que volta sozinho ao reabrir. Se o jogo cair logo depois, o patch fica suspeito e desligado."),
     Triple("Memória", "Endereços e Buscar perto", "Ver próximos mostra os valores vizinhos; Ir para endereço aceita 7a0010+8. Buscar perto procura um valor (a prata) nas linhas em volta de um ou vários endereços (o ouro)."),
-    Triple("Memória", "Ficha do objeto", "Num salvo, Explorar ficha (ou Memória → Ficha): os campos em volta do valor, ao vivo; o que muda fica destacado. Em jogo Unity, com os nomes do jogo (Player.hp), o texto das strings (\"Herói\"), Vector3 como (x, y, z) e listas com quantos itens. Nos outros, com o tipo adivinhado. Abra pela classe: digite PlayerData e Abrir, ou Ver todas as classes. Copiar os números para outro objeto da mesma classe clona um item (ponteiros e textos não mudam)."),
-    Triple("Memória", "Métodos (Unity)", "Na Ficha, ⚙ Métodos da classe: Contar chamadas (quantas vezes roda em 10 s) e Sempre devolver (número, true/false ou Não fazer nada), que vira um patch desligado. Exportar dump gera um .cs com classes, campos e métodos."),
+    Triple("Memória", "Ficha do objeto", "Num salvo, Ver ficha (ou Memória → Ficha): os campos em volta do valor, ao vivo; o que muda fica destacado. Em jogo Unity, com os nomes do jogo (Player.hp), o texto das strings (\"Herói\"), Vector3 como (x, y, z) e listas com quantos itens. Nos outros, com o tipo adivinhado. Abra pela classe: digite PlayerData e Abrir, ou Ver todas as classes. Copiar os números para outro objeto da mesma classe clona um item (ponteiros e textos não mudam)."),
+    Triple("Memória", "Métodos (Unity)", "Na Ficha, ⚙ Métodos da classe: Contar chamadas (quantas vezes roda em 10 s) e Sempre devolver (número, sim/não ou Não fazer nada), que vira um patch desligado. Exportar a lista de classes gera um .cs com classes, campos e métodos."),
     Triple("Memória", "Funções da lib (sem IDA)", "Memória → Código: digite parte do nome (gold, AddCoins) e Procurar: as funções com nome das libs do jogo. Ver código, Quem ela chama, Contar chamadas, Sempre devolver ou Não fazer nada (patch). Quais rodam quando eu jogo? conta até 12 de uma vez."),
     Triple("Memória", "Unreal e Lua", "Unreal: na Ficha, digite o nome do objeto ou da classe (Player, BP_Player_C) e Procurar, pelas tabelas do próprio motor. Lua (xLua): abra um resultado 🌙 na Ficha: a tabela do Lua aparece com o nome de cada campo; \"tabela ›\" abre a outra."),
     Triple("Registro", "O jogo fechou", "Quase sempre é edição num endereço errado ou de outro tipo: refine até sobrar 1 antes de editar. O Tinker percebe a queda, pergunta se reabre e, reabrindo, os salvos voltam sozinhos. O motivo fica no Registro."),
@@ -371,7 +380,7 @@ private fun GroqModels(engine: Engine) {
     var info by remember { mutableStateOf<String?>(null) }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text("Modelo: ${s.groqModel.ifEmpty { "escolhido sozinho" }}", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-        OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { info = "Vendo os modelos…"; scope.launch { info = engine.detectGroqModels() } }, enabled = s.groqKeys.isNotEmpty()) { Text("Detectar") }
+        OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { info = "Vendo os modelos…"; scope.launch { info = engine.detectGroqModels() } }, enabled = s.groqKeys.isNotEmpty()) { Text("Ver modelos") }
     }
     info?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
     if (s.groqModels.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -394,7 +403,7 @@ private fun GeminiModels(engine: Engine) {
         if (checking || s.geminiKey.isBlank()) return
         checking = true
         info = "Vendo quais modelos a chave pode usar…"
-        scope.launch { info = runCatching { engine.detectGeminiModels() }.getOrElse { it.message }; checking = false }
+        scope.launch { info = runCatching { engine.detectGeminiModels() }.getOrElse { friendly(it.message) }; checking = false }
     }
     // chave nova (colada ou digitada): espera parar de mudar e detecta sozinho
     LaunchedEffect(s.geminiKey) {
@@ -405,7 +414,7 @@ private fun GeminiModels(engine: Engine) {
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text("Modelo: ${s.geminiModel}", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-        OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = ::detect, enabled = !checking && s.geminiKey.isNotBlank()) { Text("Detectar") }
+        OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = ::detect, enabled = !checking && s.geminiKey.isNotBlank()) { Text("Ver modelos") }
     }
     if (checking) LinearProgressIndicator(Modifier.fillMaxWidth())
     info?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }

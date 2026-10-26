@@ -3596,7 +3596,7 @@ class Engine private constructor(private val app: Context) {
         val uri = runCatching { memoryUri(true, name, "text/plain") }.getOrNull()
         if (uri != null) app.contentResolver.openOutputStream(uri, "wt")?.use { it.write(file.readBytes()) }
         Diag.add("Dump IL2CPP: ${lines.size} classes em Download/Tinker/$name")
-        return "Dump pronto: ${lines.size} classes" + (if (uri != null) " em Download/Tinker/$name" else "") to file
+        return "Lista de classes pronta: ${lines.size} classes" + (if (uri != null) ", salva em Download/Tinker/$name" else "") to file
     }
 
     /** "O que escreve aqui": observa o endereço por alguns segundos e devolve as instruções que escreveram nele (pc, vezes, lib+desloc.). */

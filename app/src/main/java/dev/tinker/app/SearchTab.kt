@@ -499,7 +499,7 @@ private fun SaveEditorPanel(engine: Engine, run: (suspend () -> String) -> Unit)
     val edits = remember(file) { mutableStateMapOf<SaveField, String>() }
     TextButton(onClick = {
         open = !open
-        if (open && files == null) scope.launch { runCatching { engine.saveFiles() }.onSuccess { files = it }.onFailure { info = it.message } }
+        if (open && files == null) scope.launch { runCatching { engine.saveFiles() }.onSuccess { files = it }.onFailure { info = friendly(it.message) } }
     }, enabled = s.process != null) { Text((if (open) "▾ " else "▸ ") + "💾 Editor de save (jogo offline)") }
     if (!open) return
     Panel {
@@ -514,7 +514,7 @@ private fun SaveEditorPanel(engine: Engine, run: (suspend () -> String) -> Unit)
                 list.take(80).forEach { (f, size) ->
                     TextButton(onClick = {
                         scope.launch {
-                            runCatching { engine.readSave(f) }.onSuccess { file = f; text = it; info = null }.onFailure { info = it.message }
+                            runCatching { engine.readSave(f) }.onSuccess { file = f; text = it; info = null }.onFailure { info = friendly(it.message) }
                         }
                     }) { Text("$f · ${if (size >= 1024) "${size / 1024} KB" else "$size B"}", fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                 }
@@ -566,7 +566,7 @@ private fun ActivityPanel(engine: Engine, enabled: Boolean) {
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             FilledTonalButton(shape = MaterialTheme.shapes.medium, enabled = enabled, onClick = {
-                scope.launch { info = runCatching { engine.activityStart() }.getOrElse { it.message }; rows = emptyList() }
+                scope.launch { info = runCatching { engine.activityStart() }.getOrElse { friendly(it.message) }; rows = emptyList() }
             }) { Text("Começar") }
             OutlinedButton(shape = MaterialTheme.shapes.medium, enabled = enabled, onClick = {
                 scope.launch {
@@ -574,7 +574,7 @@ private fun ActivityPanel(engine: Engine, enabled: Boolean) {
                         rows = r
                         info = if (r.sumOf { it.second } == 0L) "Nada escrito desde Começar: carregue algo no jogo e veja de novo."
                             else if (how == "soft") "Páginas escritas desde Começar:" else "Memória nova escrita desde Começar (este aparelho não marca cada página):"
-                    }.onFailure { info = it.message }
+                    }.onFailure { info = friendly(it.message) }
                 }
             }) { Text("Ver") }
         }
@@ -616,7 +616,7 @@ internal fun NearSearch(engine: Engine, centers: List<String>, initialType: Stri
     val size = TYPE_SIZES.getValue(type)
     fun go(work: suspend () -> List<Hit>) = scope.launch {
         working = true
-        runCatching { found = work() }.onFailure { onError(it.message ?: "Erro") }
+        runCatching { found = work() }.onFailure { onError(friendly(it.message)) }
         working = false
     }
     Panel {

@@ -90,19 +90,19 @@ AJUDA = [
  "rápida. Copiar manda como texto; Colar lista recebe."),
 ("Salvos", "Código e patches",
  "Para o recurso não diminuir: no salvo, O que escreve aqui? e gaste o recurso em 15 s. Aparece a instrução que muda o valor; Ver "
- "código abre Memória → Código. Tocar numa instrução troca por NOP ou outros bytes: vira um patch em Salvos → Patches, com "
+ "código abre Memória → Código. Tocar numa instrução: Desligar esta instrução (NOP) ou trocar os bytes; vira um patch em Salvos → Patches, com "
  "liga/desliga, que volta sozinho ao reabrir. Se o jogo cair logo depois, o patch fica suspeito e desligado."),
 ("Memória", "Endereços e Buscar perto",
  "Ver próximos mostra os valores vizinhos; Ir para endereço aceita 7a0010+8. Buscar perto procura um valor (a prata) nas linhas em "
  "volta de um ou vários endereços (o ouro)."),
 ("Memória", "Ficha do objeto",
- "Num salvo, Explorar ficha (ou Memória → Ficha): os campos em volta do valor, ao vivo; o que muda fica destacado. Em jogo Unity, com "
+ "Num salvo, Ver ficha (ou Memória → Ficha): os campos em volta do valor, ao vivo; o que muda fica destacado. Em jogo Unity, com "
  "os nomes do jogo (Player.hp), o texto das strings (\"Herói\"), Vector3 como (x, y, z) e listas com quantos itens. Nos outros, com o "
  "tipo adivinhado. Abra pela classe: digite PlayerData e Abrir, ou Ver todas as classes. Copiar os números para outro objeto da mesma "
  "classe clona um item (ponteiros e textos não mudam)."),
 ("Memória", "Métodos (Unity)",
- "Na Ficha, ⚙ Métodos da classe: Contar chamadas (quantas vezes roda em 10 s) e Sempre devolver (número, true/false ou Não fazer "
- "nada), que vira um patch desligado. Exportar dump gera um .cs com classes, campos e métodos."),
+ "Na Ficha, ⚙ Métodos da classe: Contar chamadas (quantas vezes roda em 10 s) e Sempre devolver (número, sim/não ou Não fazer "
+ "nada), que vira um patch desligado. Exportar a lista de classes gera um .cs com classes, campos e métodos."),
 ("Memória", "Funções da lib (sem IDA)",
  "Memória → Código: digite parte do nome (gold, AddCoins) e Procurar: as funções com nome das libs do jogo. Ver código, Quem ela "
  "chama, Contar chamadas, Sempre devolver ou Não fazer nada (patch). Quais rodam quando eu jogo? conta até 12 de uma vez."),
