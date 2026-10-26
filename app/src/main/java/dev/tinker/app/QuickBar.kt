@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -91,17 +92,17 @@ fun QuickBar(engine: Engine, onDrag: (Float, Float) -> Unit, onKeyboard: (Boolea
             )
             TextButton(onClick = { act { if (s.paused) engine.resume() else engine.pause() } }, enabled = enabled, contentPadding = PaddingValues(0.dp),
                 modifier = Modifier.size(48.dp)) { Text(if (s.paused) "▶" else "⏸", fontSize = 18.sp) }
-            OutlinedTextField(
-                s.value, { s.value = it }, singleLine = true, placeholder = { Text("Valor") }, readOnly = own,
+            // a janela pega o foco no toque (para o campo ter cursor e o Copiar/Colar do Android); com o teclado do Tinker,
+            // o do telefone não abre e o do Tinker aparece
+            Box(Modifier.weight(1f)) { NoPhoneKeyboard(own) { OutlinedTextField(
+                s.value, { s.value = it }, singleLine = true, placeholder = { Text("Valor") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
-                // com o teclado do Tinker o toque só abre ele (a janela nem pega o foco); sem, pede o teclado do telefone
-                // no primeiro toque, antes do campo tentar pegar o foco
-                modifier = Modifier.weight(1f).pointerInput(own) {
-                    awaitEachGesture { awaitFirstDown(pass = PointerEventPass.Initial); if (own) pad = true else onKeyboard(true) }
+                modifier = Modifier.fillMaxWidth().pointerInput(own) {
+                    awaitEachGesture { awaitFirstDown(pass = PointerEventPass.Initial); onKeyboard(true); if (own) pad = true }
                 }
                     // saiu do campo (tocou fora, fechou o teclado): o jogo volta a receber as teclas
                     .onFocusChanged { if (!it.isFocused) onKeyboard(false) },
-            )
+            ) } }
             if (n > 0) FilledTonalButton(shape = MaterialTheme.shapes.medium, onClick = { act { engine.refine(s.value) } }, enabled = enabled && s.value.isNotBlank(), contentPadding = small) { Text("Refinar") }
             else Button(shape = MaterialTheme.shapes.medium, onClick = { act { engine.search(s.types, s.value) } }, enabled = enabled && s.value.isNotBlank(), contentPadding = small) { Text("Buscar") }
         }
