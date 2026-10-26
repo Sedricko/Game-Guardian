@@ -173,9 +173,11 @@ function Tap-Ui($re, $scrolls = 6) {
 function Tap-Chip($re) {
     Top-Ui
     $n = Find-Ui $re 0
-    if (-not $n) {
-        $row = Find-Ui '(^|\s)Loja$' 0
-        if ($row) { & $adb shell input swipe 1300 ([int]$row.y) 200 ([int]$row.y) 300; Start-Sleep -Milliseconds 700 }
+    # a fileira rola para o lado: desliza ate 3 vezes (uma so deixava o ultimo botao ainda fora da tela)
+    for ($k = 0; $k -lt 3 -and -not $n; $k++) {
+        $row = Find-Ui '(^|\s)(Loja|Velocidade|Cron.metros)$' 0
+        if (-not $row) { break }
+        & $adb shell input swipe 1300 ([int]$row.y) 100 ([int]$row.y) 300; Start-Sleep -Milliseconds 700
         $n = Find-Ui $re 0
     }
     if (-not $n) { throw "nao achei o botao '$re' na fileira de ferramentas" }
