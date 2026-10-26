@@ -2328,6 +2328,7 @@ class Engine private constructor(private val app: Context) {
                 Diag.add("Achar sozinho: $target em ${spots.size} lugar(es) da tela, ${Session.count} resultados")
                 var place = spots.first()
                 var last = start
+                var misses = 0
                 val end = System.currentTimeMillis() + 10 * 60_000L
                 while (System.currentTimeMillis() < end) {
                     val count = Session.count ?: 0L
@@ -2342,7 +2343,15 @@ class Engine private constructor(private val app: Context) {
                     if (cur == last) continue
                     val r = aiBusy { resultsText(refine(followRange(last, cur))) }
                     Diag.add("Achar sozinho: $last → $cur, ${Session.count} resultados")
-                    if ((Session.count ?: 0L) == 0L) aiBusy { resultsText(undo()) }.also { Diag.add("Achar sozinho: nenhum ficou ($r), desfeito") }
+                    if ((Session.count ?: 0L) == 0L) {
+                        aiBusy { resultsText(undo()) }.also { Diag.add("Achar sozinho: nenhum ficou ($r), desfeito") }
+                        // 2 seguidos sem nada: o número já tinha mudado entre ler a tela e buscar, e o certo ficou de fora; busca de novo
+                        if (++misses >= 2) {
+                            misses = 0
+                            aiBusy { resultsText(search(types, cur.toString())) }
+                            Diag.add("Achar sozinho: busquei de novo com $cur, ${Session.count} resultados")
+                        }
+                    } else misses = 0
                     last = cur
                 }
                 val finalists = list().second
