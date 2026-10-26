@@ -799,11 +799,7 @@ private fun AobSearch(engine: Engine, enabled: Boolean, run: (suspend () -> Stri
     var where by remember { mutableStateOf("data") }
     TextButton(onClick = { open = !open }) { Text((if (open) "▾ " else "▸ ") + "Busca por bytes (AOB) ou texto") }
     if (!open) return
-    OutlinedTextField(
-        pattern, { pattern = it }, label = { Text("Bytes (ex.: 1F 20 03 D5 ?? ?? 00 B9)") }, singleLine = true,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii), textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace),
-        modifier = Modifier.fillMaxWidth(),
-    )
+    TinkerTextField(pattern, { pattern = it }, "Bytes (ex.: 1F 20 03 D5 ?? ?? 00 B9)", Modifier.fillMaxWidth(), mono = true)
     // Xa = código do jogo; Xs = código do sistema (como no GameGuardian); quase tudo que importa fica no Xa
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         listOf("data" to "Dados", "xa" to "Código do jogo (Xa)", "xs" to "Código do sistema (Xs)").forEach { (k, l) ->
@@ -814,7 +810,7 @@ private fun AobSearch(engine: Engine, enabled: Boolean, run: (suspend () -> Stri
     // texto (nome de item, apelido): tenta UTF-8 e, se não achar, UTF-16; texto tem letras, então teclado do telefone
     var text by remember { mutableStateOf("") }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedTextField(text, { text = it }, label = { Text("Texto (ex.: Madeira)") }, singleLine = true, modifier = Modifier.weight(1f))
+        TinkerTextField(text, { text = it }, "Texto (ex.: Madeira)", Modifier.weight(1f))
         Button(shape = MaterialTheme.shapes.medium, onClick = { run { engine.searchText(text) } }, enabled = enabled && text.length >= 3) { Text("Buscar texto") }
     }
 }
@@ -1089,7 +1085,7 @@ private fun SavedTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, r
                 // nome tem letras: teclado do telefone (o do Tinker só tem números)
                 var name by remember { mutableStateOf("") }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    OutlinedTextField(name, { name = it }, label = { Text("Nome da receita") }, singleLine = true, modifier = Modifier.weight(1f))
+                    TinkerTextField(name, { name = it }, "Nome da receita", Modifier.weight(1f))
                     Button(shape = MaterialTheme.shapes.medium, onClick = { naming = false; info = engine.createRecipe(chosen, name); selected = emptySet() }) { Text("Criar") }
                     TextButton(onClick = { naming = false }) { Text("✕") }
                 }
@@ -1273,7 +1269,7 @@ private fun Recipes(engine: Engine, run: (suspend () -> String) -> Unit, onInfo:
 private fun FolderEditor(current: String, existing: List<String>, onSave: (String) -> Unit) {
     var name by remember(current) { mutableStateOf(current) }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Pasta (ex.: Materiais)") }, singleLine = true, modifier = Modifier.weight(1f))
+        TinkerTextField(name, { name = it }, "Pasta (ex.: Materiais)", Modifier.weight(1f))
         TextButton(onClick = { onSave(name) }, enabled = name != current) { Text("Mover") }
     }
     // pastas que já existem: um toque move para ela
@@ -1287,7 +1283,7 @@ private fun FolderEditor(current: String, existing: List<String>, onSave: (Strin
 private fun NameEditor(current: String, onSave: (String) -> Unit) {
     var name by remember(current) { mutableStateOf(current) }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Nome (ex.: Ouro)") }, singleLine = true, modifier = Modifier.weight(1f))
+        TinkerTextField(name, { name = it }, "Nome (ex.: Ouro)", Modifier.weight(1f))
         TextButton(onClick = { onSave(name) }, enabled = name != current) { Text("Salvar nome") }
     }
 }
@@ -1581,7 +1577,7 @@ private fun ClassOpener(engine: Engine) {
         }
     }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        OutlinedTextField(cls, { cls = it }, label = { Text("Classe ou campo") }, placeholder = { Text("PlayerData, gold") }, singleLine = true, modifier = Modifier.weight(1f))
+        TinkerTextField(cls, { cls = it }, "Classe ou campo", Modifier.weight(1f), placeholder = "PlayerData, gold")
         Button(shape = MaterialTheme.shapes.medium, onClick = { open(cls) }, enabled = !loading && s.process != null && cls.isNotBlank(), contentPadding = PaddingValues(horizontal = 12.dp)) { Text("Abrir") }
         if (cls.isNotBlank()) TextButton(onClick = { copy(cls) }, contentPadding = PaddingValues(0.dp), modifier = Modifier.size(48.dp)) { Text("⧉", fontSize = 18.sp) }
     }
@@ -1750,7 +1746,7 @@ private fun FichaBody(engine: Engine, center: String, run: (suspend () -> String
     if (c != null) MethodsPanel(engine, c, run)
     if (looked && c == null && (s.engine?.lua == true || s.view?.second in setOf("li", "lf"))) LuaPanel(engine, center, run)
     if (c != null && c.fields.size > 6) {
-        OutlinedTextField(filter, { filter = it }, label = { Text("Filtrar campo (ex.: gem)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        TinkerTextField(filter, { filter = it }, "Filtrar campo (ex.: gem)", Modifier.fillMaxWidth())
     }
     items?.let { list ->
         Text("Lista com ${list.size} itens${if (list.size == 200) " (mostrando os 200 primeiros)" else ""}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
@@ -1838,7 +1834,7 @@ private fun MethodsPanel(engine: Engine, c: Il2Class, run: (suspend () -> String
     if (!shown) return
     error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
     val list = methods ?: return LinearProgressIndicator(Modifier.fillMaxWidth())
-    if (list.size > 8) OutlinedTextField(filter, { filter = it }, label = { Text("Filtrar método (ex.: get_)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+    if (list.size > 8) TinkerTextField(filter, { filter = it }, "Filtrar método (ex.: get_)", Modifier.fillMaxWidth())
     Column(Modifier.fillMaxWidth().heightIn(max = 300.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         list.filter { filter.isBlank() || it.name.contains(filter.trim(), ignoreCase = true) }.take(200).forEach { m ->
             val ret = RET_NAMES[m.ret] ?: "objeto"
@@ -1962,7 +1958,7 @@ private fun SaveEditorPanel(engine: Engine, run: (suspend () -> String) -> Unit)
             val fields = remember(t) { saveFields(t) }
             Text("$file · ${fields.size} números", style = MaterialTheme.typography.labelLarge)
             if (fields.isEmpty()) Text("Sem números legíveis neste arquivo.", style = MaterialTheme.typography.bodySmall)
-            if (fields.size > 8) OutlinedTextField(filter, { filter = it }, label = { Text("Filtrar (ex.: gold)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            if (fields.size > 8) TinkerTextField(filter, { filter = it }, "Filtrar (ex.: gold)", Modifier.fillMaxWidth())
             Column(Modifier.fillMaxWidth().heightIn(max = 300.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 fields.filter { filter.isBlank() || it.key.contains(filter.trim(), ignoreCase = true) }.take(200).forEach { f ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2315,7 +2311,7 @@ private fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit, 
                 }
                 if (s.autoUpdate) OutlinedTextField(s.githubToken, { s.githubToken = it.trim(); engine.saveSettings() }, label = { Text("Token do GitHub (só se o repositório for privado)") },
                     singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
-                Toggle("Teclado do Tinker", "Números, ~ e ; dentro do painel; o teclado do telefone abre por cima do jogo e esconde o valor.", s.ownKeypad) {
+                Toggle("Teclado do Tinker", "Números e letras dentro do painel; o teclado do telefone abre por cima do jogo e esconde o valor.", s.ownKeypad) {
                     s.ownKeypad = it; engine.saveSettings()
                 }
                 Toggle("Procurar valores cifrados (🔒)", "Acha moedas e vida protegidas com chave (comum em jogos Unity). Deixa a busca um pouco mais lenta.", s.findEncrypted) {
@@ -2748,7 +2744,7 @@ private fun Picker(engine: Engine, onBack: () -> Unit, onPick: (GameProcess) -> 
             Text("Escolha o jogo", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
             TextButton(onClick = onBack) { Text("Voltar") }
         }
-        OutlinedTextField(value = filter, onValueChange = { filter = it }, placeholder = { Text("Buscar app") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        TinkerTextField(filter, { filter = it }, "Buscar app", Modifier.fillMaxWidth())
         val list = apps
         when {
             list == null -> Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }

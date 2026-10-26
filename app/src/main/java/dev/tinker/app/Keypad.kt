@@ -11,7 +11,17 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -68,5 +78,64 @@ fun NumPad(onKey: (String) -> Unit, onDone: () -> Unit, modifier: Modifier = Mod
                 }
             }
         }
+    }
+}
+
+private val ABC = listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")
+private val SYM = listOf("1234567890", "-_./:@#?!", "()+*=,'\"%")
+
+/** Teclado de letras do Tinker: o do telefone abre por cima do jogo e esconde o que você quer ver. */
+@Composable
+fun TextPad(onKey: (String) -> Unit, onDone: () -> Unit, modifier: Modifier = Modifier) {
+    var shift by remember { mutableStateOf(false) }
+    var sym by remember { mutableStateOf(false) }
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        (if (sym) SYM else ABC).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                row.forEach { c ->
+                    val k = if (shift) c.uppercase() else c.toString()
+                    PadKey(k, Modifier.weight(1f)) { onKey(k); shift = false }
+                }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            PadKey(if (sym) "ABC" else "123", Modifier.weight(1.4f)) { sym = !sym }
+            if (!sym) PadKey(if (shift) "⇧ ✓" else "⇧", Modifier.weight(1.2f)) { shift = !shift }
+            PadKey("espaço", Modifier.weight(3f)) { onKey(" ") }
+            PadKey("⌫", Modifier.weight(1.2f)) { onKey("⌫") }
+            PadKey("OK", Modifier.weight(1.4f), ok = true) { onDone() }
+        }
+    }
+}
+
+@Composable
+private fun PadKey(label: String, modifier: Modifier, ok: Boolean = false, onClick: () -> Unit) {
+    Box(
+        modifier.height(44.dp).clip(MaterialTheme.shapes.small)
+            .background(if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) { Text(label, fontSize = 16.sp, color = if (ok) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface) }
+}
+
+/** Campo de texto com o teclado do Tinker (Ajustes → Teclado do Tinker); desligado, é o campo normal com o do telefone. */
+@Composable
+fun TinkerTextField(
+    value: String, onChange: (String) -> Unit, label: String, modifier: Modifier = Modifier,
+    placeholder: String = "", mono: Boolean = false, singleLine: Boolean = true,
+) {
+    val own = Session.ownKeypad
+    var pad by remember { mutableStateOf(false) }
+    val taps = remember { MutableInteractionSource() }
+    val pressed by taps.collectIsPressedAsState()
+    LaunchedEffect(pressed) { if (pressed && own) pad = true }
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        OutlinedTextField(
+            value, onChange, label = { Text(label) }, placeholder = if (placeholder.isEmpty()) null else { { Text(placeholder) } },
+            singleLine = singleLine, readOnly = own, interactionSource = taps,
+            textStyle = if (mono) LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace) else LocalTextStyle.current,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (own && pad) TextPad(onKey = { onChange(applyKey(value, it)) }, onDone = { pad = false })
     }
 }

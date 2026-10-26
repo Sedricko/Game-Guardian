@@ -184,7 +184,7 @@ fun AiBox(
         // o que a IA olhou sozinha na memória (procurar classe, abrir objeto, buscar)
         steps.takeLast(8).forEach { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            OutlinedTextField(question, { question = it }, label = { Text(if (going) "Responder ou perguntar mais" else "Sua pergunta") }, modifier = Modifier.weight(1f))
+            TinkerTextField(question, { question = it }, if (going) "Responder ou perguntar mais" else "Sua pergunta", Modifier.weight(1f), singleLine = false)
             Button(shape = MaterialTheme.shapes.medium, onClick = { ask(question, fresh = false) }, enabled = !loading && question.isNotBlank()) { Text(if (going) "Enviar" else "Perguntar") }
         }
         if (going && !loading) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
