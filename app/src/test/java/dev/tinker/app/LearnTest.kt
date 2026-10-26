@@ -1,0 +1,32 @@
+package dev.tinker.app
+
+import org.junit.Assert.assertEquals
+import org.junit.Test
+
+class LearnTest {
+    private val all = SEED + TECHNIQUES
+
+    @Test fun usaOQueOClaudeEnsinou() {
+        assertEquals("i32", pickType(all, "jogo.a", "Moedas:").first)
+        assertEquals("f32", pickType(all, "jogo.a", "Vida").first)
+        assertEquals(null, pickType(all, "jogo.a", "Xyzzy").first)
+    }
+
+    @Test fun aprendeComOAcertoEComOErro() {
+        // vida no jogo nativo é Dword: errou como Float, acertou como Dword
+        var k = record(emptyList(), "jogo.a", "Vida", "f32", ok = false, ms = 0, at = "")
+        assertEquals("i32", pickType(all + k, "jogo.a", "Vida").first)  // o Float que errou sai da frente
+        k = record(k, "jogo.a", "Vida", "i32", ok = true, ms = 4000, at = "")
+        assertEquals("i32", pickType(all + k, "jogo.a", "vida").first)
+        // outro jogo aproveita o que este acertou
+        assertEquals("i32", pickType(all + k, "jogo.b", "Vida").first)
+        assertEquals(4000L, k.first { it.type == "i32" }.ms)
+    }
+
+    @Test fun juntarNaoSomaEmDobro() {
+        val a = record(emptyList(), "jogo.a", "Ouro", "i32", ok = true, ms = 10, at = "")
+        val b = record(a, "jogo.a", "Ouro", "i32", ok = true, ms = 10, at = "")
+        assertEquals(2, mergeKnow(a, b).single().wins)
+        assertEquals(2, mergeKnow(b, b).single().wins)
+    }
+}

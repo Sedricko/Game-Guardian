@@ -52,7 +52,7 @@ class Engine private constructor(private val app: Context) {
             .putBoolean("autoOverlay", Session.autoOverlay).putBoolean("ownKeypad", Session.ownKeypad).putBoolean("autoUpdate", Session.autoUpdate).putString("githubToken", Session.githubToken).putFloat("alpha", Session.alpha).putInt("panelSize2", Session.panelSize).putBoolean("panelLeft", Session.panelLeft)
             .remove("aiKey").putString("aiProvider", Session.aiProvider).putBoolean("aiReserve", Session.aiReserve)
             .putString("groqKeys", Session.groqKeys.joinToString("\n")).putInt("groqKeyIndex", Session.groqKeyIndex).putString("groqModel", Session.groqModel)
-            .putString("sheetGroqKeys", Session.sheetGroqKeys.joinToString("\n")).putBoolean("aiCanTest", Session.aiCanTest).putBoolean("aiAuto", Session.aiAuto).putBoolean("aiControl", Session.aiControl)
+            .putString("sheetGroqKeys", Session.sheetGroqKeys.joinToString("\n")).putBoolean("aiCanTest", Session.aiCanTest).putBoolean("aiAuto", Session.aiAuto).putBoolean("aiControl", Session.aiControl).putBoolean("offlineAgent", Session.offlineAgent)
             .putString("geminiKeys", Session.geminiKeys.joinToString("\n")).putInt("geminiKeyIndex", Session.geminiKeyIndex)
             .putString("keySource", Session.keySource).putString("sheetKeys", Session.sheetKeys.joinToString("\n"))
             .putString("geminiModel", Session.geminiModel).putBoolean("geminiAuto", Session.geminiAutoModel).putBoolean("watchFields", Session.watchFields)
@@ -87,6 +87,7 @@ class Engine private constructor(private val app: Context) {
         Session.aiCanTest = prefs.getBoolean("aiCanTest", false)
         Session.aiAuto = prefs.getBoolean("aiAuto", false)
         Session.aiControl = prefs.getBoolean("aiControl", false)
+        Session.offlineAgent = prefs.getBoolean("offlineAgent", true)
         // antes era uma chave só ("geminiKey"): vira a primeira da lista
         Session.geminiKeys = (prefs.getString("geminiKeys", null) ?: prefs.getString("geminiKey", "")).orEmpty().split('\n').filter { it.isNotBlank() }
         Session.geminiKeyIndex = prefs.getInt("geminiKeyIndex", 0).coerceIn(0, (Session.geminiKeys.size - 1).coerceAtLeast(0))
@@ -905,10 +906,12 @@ class Engine private constructor(private val app: Context) {
             val lessons = lessonsFile.takeIf { it.exists() }?.readText()?.takeLast(3000).orEmpty()
             val server = runCatching { serverHints() }.getOrDefault("")
             val sheet = sheetAnalysis()
+            val known = savedPkg?.let { g -> knowledge().filter { it.game == g }.joinToString("\n") { "${it.name}: ${TYPE_NAMES[it.type] ?: it.type}, ${it.wins} acertos, ${it.fails} erros" } }.orEmpty()
             withContext(Dispatchers.Main) { context() } +
                 (if (lessons.isBlank()) "" else "\n\n=== Suas lições (aprendidas em conversas anteriores, valem para qualquer jogo) ===\n$lessons") +
                 (if (notes.isBlank()) "" else "\n\n=== Suas anotações deste jogo (de outras conversas) ===\n$notes") +
                 (if (server.isBlank()) "" else "\n\n=== Sinais de que o servidor ou o antitrapaça confere valores (logcat do jogo) ===\n$server") +
+                (if (known.isBlank()) "" else "\n\n=== O que o agente offline já achou neste jogo pelo nome da tela (use primeiro) ===\n$known") +
                 (if (sheet.isBlank()) "" else "\n\n=== Análises feitas na planilha para este jogo (as mais novas primeiro) ===\n$sheet")
         }
         // Gemini lento demais (o relatório mostrou 40–100 s por rodada): esta pergunta vai no Groq; a medida do Gemini
@@ -1025,6 +1028,7 @@ class Engine private constructor(private val app: Context) {
     fun memoryJson(): String = JSONObject().put("tinker", "memoria-ia").put("versao", 2).put("apagados", JSONArray(deleted().toList()))
         .put("criado", java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US).format(java.util.Date()))
         .put("licoes", lessons())
+        .put("aprende", knowJson())
         .put("jogos", JSONObject().apply {
             library().forEach { g ->
                 put(g.pkg, JSONObject().put("nome", g.name).put("notas", g.notes).put("receitas", jsonFile("recipes-${g.pkg}.json"))
@@ -1044,6 +1048,8 @@ class Engine private constructor(private val app: Context) {
         val j = runCatching { JSONObject(text) }.getOrNull()?.takeIf { it.optString("tinker") == "memoria-ia" }
             ?: return "Não é uma memória do Tinker (arquivo tinker-memoria-ia.json)."
         lessonsFile.writeText(mergeLines(lessons(), j.optString("licoes")))
+        // o que o Claude ensinou vem sempre do código (versão nova atualiza); só o aprendido jogando é juntado
+        j.optJSONArray("aprende")?.let { a -> storeKnowledge(mergeKnow(knowledge(), (0 until a.length()).mapNotNull { a.optJSONObject(it)?.toKnow() }.filter { it.game != "*" && PKG.matches(it.game) })) }
         // apagado em outra instância: apaga aqui também (e não volta)
         val gone = j.optJSONArray("apagados")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty().filter { it.isNotEmpty() }
         if (gone.isNotEmpty()) {
@@ -1391,6 +1397,9 @@ class Engine private constructor(private val app: Context) {
         // o mesmo do botão "Configurar IA" das outras telas: os Ajustes abrem já na parte da IA
         // espera a tela antiga (o am start do agente recria a Activity) sair: senão é ela que gasta o pedido de rolar
         if (w.firstOrNull() == "ajustesia") return "ok\ncount 0".also { delay(1500); withContext(Dispatchers.Main) { Session.settingsAt = "ia"; Session.tab = TABS.indexOf("Ajustes") } }
+        // o que o agente offline sabe de um nome neste jogo: "ok <tipo> <acertos> <erros>" (para a missão conferir que ele aprendeu)
+        if (w.firstOrNull() == "aprendido") return knowledge().filter { it.game == savedPkg && it.name == learnKey(arg) }.let { l ->
+            "ok ${pickType(knowAll(), savedPkg.orEmpty(), arg).first ?: "auto"} ${l.sumOf { it.wins }} ${l.sumOf { it.fails }}\ncount ${l.sumOf { it.wins }}" }
         if (w.firstOrNull() == "aba") return "ok ${TABS.getOrNull(w[1].toInt())}\ncount 0".also { withContext(Dispatchers.Main) { Session.tab = w[1].toInt().coerceIn(0, TABS.lastIndex) } }
         // o Tinker reabriu no meio da rodada (o Android fechou ele): volta a seguir o Jogo de Teste, nunca outro jogo
         if (Session.process == null) runCatching { pickTestGame() }
@@ -1409,7 +1418,7 @@ class Engine private constructor(private val app: Context) {
             // 🎯 Achar sozinho no Jogo de Teste: põe o jogo na frente, lê a tela e refina sozinho (até 2 minutos)
             "sozinho" -> {
                 withContext(Dispatchers.Main) { app.packageManager.getLaunchIntentForPackage(TEST_GAME)?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)?.let(app::startActivity) }
-                autoFindStart(w[1], setOf(w.getOrElse(2) { "i32" }), waitMs = 2500)
+                autoFindStart(w[1], setOf(w.getOrElse(2) { "i32" }), waitMs = 2500)  // "auto" deixa o agente offline escolher o tipo
                 val end = System.currentTimeMillis() + 120_000
                 while (autoJob?.isActive == true && System.currentTimeMillis() < end) delay(500)
                 delay(300)  // a última frase chega pela thread da tela
@@ -1869,6 +1878,29 @@ class Engine private constructor(private val app: Context) {
 
     @Volatile private var autoJob: kotlinx.coroutines.Job? = null
 
+    // ---- agente offline (Learn.kt): o que o Achar sozinho pelo nome acertou e errou, por jogo e tipo ----
+    private val learnFile get() = File(app.filesDir, "aprende.json")
+    private fun Know.toJson() = JSONObject().put("jogo", game).put("nome", name).put("tipo", type).put("acertos", wins).put("erros", fails)
+        .put("ms", ms).put("dicas", tips).put("origem", from).put("quando", at)
+    private fun JSONObject.toKnow() = Know(optString("jogo"), optString("nome"), optString("tipo"), optInt("acertos"), optInt("erros"), optLong("ms"),
+        optString("dicas"), optString("origem", "aprendeu"), optString("quando"))
+    private fun knowledge(): List<Know> = runCatching { JSONArray(learnFile.readText()).let { a -> (0 until a.length()).map { a.getJSONObject(it).toKnow() } } }.getOrDefault(emptyList())
+    /** O que o agente sabe: o que o Claude ensinou (tipos e técnicas) mais o que ele aprendeu jogando. */
+    fun knowAll(): List<Know> = SEED + TECHNIQUES + knowledge()
+    private fun knowJson() = JSONArray().apply { knowAll().forEach { put(it.toJson()) } }
+    private fun storeKnowledge(l: List<Know>) {
+        learnFile.writeText(JSONArray().apply { l.filter { it.game != "*" }.forEach { put(it.toJson()) } }.toString())
+        backupMemorySoon()
+    }
+    @Synchronized private fun learnResult(label: String, type: String, ok: Boolean, ms: Long) {
+        val g = savedPkg ?: return
+        // procura pelo tipo base: o 🔒 e o ×2 aparecem sozinhos na busca normal (cifrados ligados)
+        val base = type.removePrefix("x").substringBefore('@').removeSuffix("x2")
+        val at = java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.US).format(java.util.Date())
+        storeKnowledge(record(knowledge(), g, label, base, ok, ms, at))
+        Diag.add("Agente offline ${if (ok) "acertou" else "errou"}: ${learnKey(label)} como $base")
+    }
+
     fun autoFindStop() {
         autoJob?.cancel()
         autoJob = null
@@ -1886,6 +1918,12 @@ class Engine private constructor(private val app: Context) {
         val label = value.trim().takeIf { screenNumber(it) == null && it.any(Char::isLetter) }
         val target = screenNumber(value) ?: if (label != null) 0L else run { Session.autoFind = null; Session.status = "Digite o número que aparece na tela, ou o nome escrito ao lado dele."; return }
         fun say(t: String) { scope.launch(Dispatchers.Main) { if (autoJob != null) Session.autoFind = t } }
+        // agente offline: pelo nome, vai direto no tipo que já acertou (ou que se sabe); a pessoa escolheu um tipo: vale o dela
+        val t0 = System.currentTimeMillis()
+        val (knownType, tips) = if (label != null && Session.offlineAgent) pickType(knowAll(), savedPkg.orEmpty(), label) else null to ""
+        val useTypes = if (knownType != null && types == setOf("auto")) setOf(knownType) else types
+        var usedType = useTypes.singleOrNull() ?: "auto"
+        fun fail(t: String) { if (label != null) learnResult(label, usedType, false, 0); say(t + if (tips.isEmpty()) "" else "\nDica do agente offline: $tips") }
         autoJob = scope.launch {
             try {
                 withContext(Dispatchers.Main) { Session.autoFind = "Procurando $target na tela…"; Session.aiHidePanel = true }
@@ -1901,7 +1939,13 @@ class Engine private constructor(private val app: Context) {
                 val start = byLabel?.first ?: near?.first ?: target
                 // pelo nome o número costuma andar sozinho (abates, tempo): até a busca terminar ele já passou do que a tela
                 // mostrou; uma faixa para frente não deixa o certo de fora (refinar depois corta os outros)
-                aiBusy { resultsText(search(types, if (byLabel != null || near != null) ahead(start) else start.toString())) }
+                val first = if (byLabel != null || near != null) ahead(start) else start.toString()
+                aiBusy { resultsText(search(useTypes, first)) }
+                if (useTypes != types && (Session.count ?: 0L) == 0L) {
+                    // o tipo aprendido errou neste jogo: guarda o erro e busca como a pessoa pediu
+                    learnResult(label!!, usedType, false, 0); usedType = types.singleOrNull() ?: "auto"
+                    aiBusy { resultsText(search(types, first)) }
+                }
                 Diag.add("Achar sozinho: $target em ${spots.size} lugar(es) da tela, ${Session.count} resultados")
                 var place = spots.first()
                 var last = start
@@ -1932,8 +1976,10 @@ class Engine private constructor(private val app: Context) {
                     last = cur
                 }
                 val finalists = list().second
-                if (finalists.size > 3) { say("10 minutos e ainda ${Session.count} resultados: o número mudou pouco. Continue pela busca normal."); return@launch }
-                if (finalists.isEmpty()) { say("Nenhum resultado ficou: o número da tela pode não estar guardado como número. Tente outro valor."); return@launch }
+                if (finalists.size > 3) { fail("10 minutos e ainda ${Session.count} resultados: o número mudou pouco. Continue pela busca normal."); return@launch }
+                if (finalists.isEmpty()) { fail("Nenhum resultado ficou: o número da tela pode não estar guardado como número. Tente outro valor."); return@launch }
+                // o agente aprende o tipo: com 1 a 3 do mesmo tipo já se sabe (o teste depois só escolhe o endereço)
+                finalists.map { it.type }.distinct().singleOrNull()?.let { t -> if (label != null) learnResult(label, t, true, System.currentTimeMillis() - t0) }
                 if (!Session.aiCanTest) { say("Sobraram ${finalists.size}. Ligue \"IA pode testar valores\" em Ajustes para eu descobrir o verdadeiro, ou abra cada um na Ficha."); return@launch }
                 for (h in finalists) {
                     say("Testando 0x${h.addr}…")

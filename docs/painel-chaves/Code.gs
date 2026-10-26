@@ -2,7 +2,7 @@
 // A planilha nunca fica pública: o link só devolve as chaves ativas para quem tem o token.
 
 // Versão do script: sobe a cada mudança. O Tinker mostra no registro e avisa quando a planilha está numa anterior.
-const VERSAO = 16;
+const VERSAO = 17;
 
 const ABA = 'Chaves';
 const COLS = ['Chave', 'Nome', 'Ativa', 'Situação', 'Atualizado', 'Provedor'];
@@ -303,6 +303,12 @@ function legivel_(m) {
       r.apagado ? 'apagado no app' : 'ativo']));
   });
   tabela_(LEGIVEL, aprendizado);
+  // o que o agente offline sabe: o que o Claude ensinou (jogo *) e o que ele aprendeu jogando, com acertos e erros
+  const agente = [['Jogo', 'Nome na tela', 'Tipo', 'Acertos', 'Erros', 'Tempo médio (s)', 'Técnicas', 'Origem', 'Quando']];
+  lista_(m.aprende).slice().sort((x, y) => (String(x.jogo) === '*') - (String(y.jogo) === '*') || String(y.quando).localeCompare(String(x.quando)))
+    .forEach(k => agente.push([k.jogo === '*' ? '(todos os jogos)' : nome(k.jogo), String(k.nome || '').replace(/^#/, 'técnica: '), k.tipo || '',
+      Number(k.acertos) || 0, Number(k.erros) || 0, k.ms ? Math.round(Number(k.ms) / 1000) : '', k.dicas || '', k.origem || '', k.quando || '']));
+  tabela_('Agente offline', agente);
   tabela_('Salvos', salvos);
   tabela_('Receitas', receitas);
   tabela_('Patches', patches);
@@ -365,7 +371,8 @@ function juntarMemoria_(velha, nova) {
   // lições e notas apagadas na planilha (pela pessoa ou pelo Claude a pedido dela): ficam numa lista e não voltam do app
   const linhasApagadas = Array.from(new Set(lista2_(velha.linhasApagadas).concat(lista2_(nova.linhasApagadas)).map(String))).slice(-500);
   const foraL = new Set(linhasApagadas);
-  const m = { tinker: 'memoria-ia', versao: 2, licoes: juntarLinhas_(velha.licoes, nova.licoes, foraL), jogos: {}, apagados: apagados, linhasApagadas: linhasApagadas };
+  const m = { tinker: 'memoria-ia', versao: 2, licoes: juntarLinhas_(velha.licoes, nova.licoes, foraL), jogos: {}, apagados: apagados, linhasApagadas: linhasApagadas,
+    aprende: juntarAprende_(velha.aprende, nova.aprende) };
   const pkgs = new Set(Object.keys(velha.jogos || {}).concat(Object.keys(nova.jogos || {})));
   pkgs.forEach(pkg => {
     const a = (velha.jogos || {})[pkg] || {}, b = (nova.jogos || {})[pkg] || {};
@@ -385,6 +392,18 @@ function juntarMemoria_(velha, nova) {
       salvos: salvos.map(v => Object.assign(v, { apagado: fora.has(v.id) })) };
   });
   return m;
+}
+
+// agente offline: o mesmo jogo+nome+tipo fica com o que tem mais tentativas (o app manda tudo de novo a cada vez: somar contaria em dobro)
+function juntarAprende_(a, b) {
+  const por = {};
+  lista_(a).concat(lista_(b)).forEach(k => {
+    if (!k || typeof k !== 'object') return;
+    const id = [k.jogo, k.nome, k.tipo].join('|');
+    const n = x => (Number(x.acertos) || 0) + (Number(x.erros) || 0);
+    if (!por[id] || n(k) >= n(por[id])) por[id] = k;
+  });
+  return Object.keys(por).map(id => por[id]);
 }
 
 // ---- relatórios (o Tinker manda sozinho quando algo dá errado, e quando você compartilha) ----

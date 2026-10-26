@@ -332,6 +332,25 @@ internal fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit,
                 }
             }
         }
+        // agente offline: depois da IA, para o "Configurar IA" continuar caindo na IA
+        item(key = "offline") {
+            Panel {
+                Text("Agente offline", style = MaterialTheme.typography.titleSmall)
+                Toggle("Usar o que o agente sabe", "No 🎯 Achar sozinho pelo nome (ex.: Moedas), vai direto no tipo que já acertou neste jogo e deixa de tentar " +
+                    "primeiro o que errou. Sem internet e sem gastar a IA. Com um tipo marcado na busca, vale o seu.", s.offlineAgent) { s.offlineAgent = it; engine.saveSettings() }
+                val know = remember(s.offlineAgent, s.autoFind) { engine.knowAll() }
+                val mine = know.filter { it.game != "*" }
+                Section("O que ele sabe", "${mine.size} aprendidos jogando · ${know.count { it.game == "*" }} ensinados") {
+                    mine.sortedByDescending { it.at }.take(30).forEach { k ->
+                        Text("${k.name} · ${TYPE_NAMES[k.type] ?: k.type} · ${k.wins} acertos, ${k.fails} erros · ${k.game}", style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (mine.isEmpty()) Text("Ainda nada aprendido jogando: use o 🎯 Achar sozinho com o nome ao lado do número.", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Técnicas que ele conhece", style = MaterialTheme.typography.bodyMedium)
+                    TECHNIQUES.forEach { t -> Text("• ${t.name.removePrefix("#")}: ${t.tips}", style = MaterialTheme.typography.bodySmall) }
+                }
+            }
+        }
         item { HelpPanel() }
     }
 }
@@ -372,6 +391,7 @@ private val HELP = listOf(
     Triple("Registro", "O jogo fechou", "Quase sempre é edição num endereço errado ou de outro tipo: refine até sobrar 1 antes de editar. O Tinker percebe a queda, pergunta se reabre e, reabrindo, os salvos voltam sozinhos. O motivo fica no Registro."),
     Triple("Registro", "Reportar um problema", "Registro → Compartilhar relatório e envie o .txt: tem tudo para investigar."),
     Triple("Ajustes", "Assistente (IA)", "Em Ajustes, escolha Gemini ou Groq e coloque as chaves (grátis em aistudio.google.com e console.groq.com) ou use o painel de chaves da planilha. Toque em ✨ na Busca, na Ficha ou no Registro. A IA procura classes, busca, refina e compara, mas não edita sozinha: quando acha, aparece Aplicar e ↶ Desfazer. Só vai o que está na tela, quando você toca em Perguntar. Precisa de internet."),
+    Triple("Ajustes", "Agente offline", "Aprende a achar sem internet e sem gastar a IA. No 🎯 Achar sozinho pelo nome (ex.: Moedas, com o tipo Auto), ele vai direto no tipo que já acertou neste jogo; o que errou deixa de ser tentado primeiro. Já vem sabendo o tipo comum de moedas, vida, energia, nível, itens e tempo, e as técnicas de achar de cada caso (aparecem como dica quando não acha). Ajustes → Agente offline mostra o que ele sabe; com o painel da planilha, vai para a aba Agente offline."),
     Triple("Ajustes", "Opções", "Menu flutuante: abrir ao iniciar, tamanho, lado com o jogo deitado e transparência. Busca: pausar o jogo durante a busca, procurar valores cifrados (🔒), Teclado do Tinker. Ponteiros: preparar ao salvar e só nas libs do jogo. Regiões de memória: onde a busca procura. Atualizar e testar sozinho: baixa a versão nova, instala (root) e roda o autoteste. Mandar relatório sozinho: a cada 10 min de jogo, para a planilha."),
     Triple("Ajustes", "Biblioteca e backup", "Cada jogo guarda notas da IA, salvos, receitas e patches. Fazer backup grava tudo em Download/Tinker; Exportar e Importar (colar) levam para outro aparelho; Juntar com a planilha mistura com o painel. Juntar nunca apaga o que já existe."),
 )

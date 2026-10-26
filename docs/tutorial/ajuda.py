@@ -118,6 +118,11 @@ AJUDA = [
  "Em Ajustes, escolha Gemini ou Groq e coloque as chaves (grátis em aistudio.google.com e console.groq.com) ou use o painel de chaves "
  "da planilha. Toque em ✨ na Busca, na Ficha ou no Registro. A IA procura classes, busca, refina e compara, mas não edita sozinha: "
  "quando acha, aparece Aplicar e ↶ Desfazer. Só vai o que está na tela, quando você toca em Perguntar. Precisa de internet."),
+("Ajustes", "Agente offline",
+ "Aprende a achar sem internet e sem gastar a IA. No 🎯 Achar sozinho pelo nome (ex.: Moedas, com o tipo Auto), ele vai direto no "
+ "tipo que já acertou neste jogo; o que errou deixa de ser tentado primeiro. Já vem sabendo o tipo comum de moedas, vida, energia, "
+ "nível, itens e tempo, e as técnicas de achar de cada caso (aparecem como dica quando não acha). Ajustes → Agente offline mostra o "
+ "que ele sabe; com o painel da planilha, vai para a aba Agente offline."),
 ("Ajustes", "Opções",
  "Menu flutuante: abrir ao iniciar, tamanho, lado com o jogo deitado e transparência. Busca: pausar o jogo durante a busca, "
  "procurar valores cifrados (🔒), Teclado do Tinker. Ponteiros: preparar ao salvar e só nas libs do jogo. Regiões de memória: onde "

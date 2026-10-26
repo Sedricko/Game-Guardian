@@ -650,6 +650,16 @@ function Run-Missions($v) {
         if ($c -lt 1 -or $c -gt 3 -or $msg -match "vi |Parou|Nenhum") { throw "sobraram $c ($msg)" }
         "sobraram $c so lendo a tela ($msg)"
     }
+    # agente offline: com Auto, o Tinker escolhe sozinho o tipo pelo que ja sabe de "Abates" e guarda o acerto
+    Mission "agente offline aprende (abates, tipo Auto)" {
+        $c = Step "sozinho Abates auto"
+        $msg = ($script:last -split "`n")[0]
+        if ($c -lt 1 -or $c -gt 3 -or $msg -match "vi |Parou|Nenhum") { throw "sobraram $c ($msg)" }
+        Step "aprendido Abates" | Out-Null
+        $f = (($script:last -split "`n")[0]) -split ' '
+        if ($f[1] -ne "i32" -or [int]$f[2] -lt 1) { throw "nao guardou o acerto ($($script:last -replace "`n", ' | '))" }
+        "sobraram $c; o agente sabe: Abates e Dword, $($f[2]) acertos e $($f[3]) erros"
+    }
     Mission "unreal: objeto pelo nome (tabelas de nomes e objetos)" {
         $c = Step "unreal jogador"
         if ($script:last -notmatch "ueobj [0-9a-f]+ BP_Jogador_C Jogador") { throw "nao achou Jogador da classe BP_Jogador_C ($($script:last -replace "`n", ' | '))" }

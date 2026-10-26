@@ -21,9 +21,10 @@ Responder sempre em **português do Brasil**, curto e direto. O usuário testa n
 | Motor | `Engine.kt` | A classe `Engine`: chamadas ao daemon (`call { d -> }`), busca, salvos, receitas, patches, ferramentas, planilha, IA |
 | Dados | `Model.kt`, `Session.kt`, `Values.kt` | Tipos e classes de dados; o estado da tela (`Session`); funções puras (conversões, assinatura, ficha, save, JSON, `friendly()` dos erros) |
 | Tela | `TinkerScreen.kt` (painel, abas, cabeçalho, componentes comuns) + um arquivo por aba: `SearchTab.kt`, `Tools.kt` (🧰), `SavedTab.kt`, `MemoryTab.kt`, `LogTab.kt`, `SettingsTab.kt` (com a Ajuda gerada) | |
+| Agente offline | `Learn.kt` (+ `LearnTest.kt`) | `Know`, `SEED` (tipos ensinados pelo Claude por palavra), `TECHNIQUES` (situação → modo de achar), `pickType` (acertou aqui → acertou em outro jogo → ensinado → próximo tipo; tipo que só errou aqui sai da frente), `record`, `mergeKnow` (não soma: vale o com mais tentativas). Engine: `aprende.json`, `learnResult` no 🎯 Achar sozinho pelo nome |
 | Outros | `Assistant.kt` + `AiBox.kt` (IA Gemini/Groq), `Arm64.kt` (decodificador), `Keypad.kt`, `QuickBar.kt` (barra rápida), `OverlayService.kt` (painel flutuante), `TinkerApp.kt` (`Diag` e vigia da tela) |
 | Ajuda e tutorial | `docs/tutorial/ajuda.py` → `gerar.py` | Fonte única: gera a Ajuda do app e `Tinker-tutorial.pdf` |
-| Planilha | `docs/painel-chaves/Code.gs`, `Painel.html`, `LEIAME.md` | App da Web: chaves, Pedidos, Aparelhos, Buscas, Relatórios, Problemas, Salvos, Receitas, Patches |
+| Planilha | `docs/painel-chaves/Code.gs`, `Painel.html`, `LEIAME.md` | App da Web: chaves, Pedidos, Aparelhos, Buscas, Relatórios, Problemas, Salvos, Receitas, Patches, Agente offline |
 
 Versões: `app/build.gradle.kts` (`versionCode`/`versionName`), `VERSAO` no Code.gs, `SCRIPT_VERSION` no Model.kt (versão **mínima** do script que o app exige).
 ## O que o app faz (estado 2.68, 26/10/2026)
@@ -94,7 +95,7 @@ O texto completo de cada opção está em `docs/tutorial/ajuda.py` (fonte única
 - GET `pedidos=1&aparelho&versao` → `{pedidos:[{id,tipo,jogo,texto}], versao}`; `feito=id&situacao&resposta`.
 - GET `analise=1&jogo=pkg` → `{analise:[…]}` (coluna Análise da aba Buscas); `memoria=1` → aprendizado.
 - GET `?leitura=` (token só de leitura) → relatórios + aprendizado, sem chaves.
-- POST `busca=1` `{jogo,motor,versao,aparelho,etapas,total,resultados,emVolta}`; `relatorio=1` `{jogo,versao,aparelho,motivo,problemas,texto}`; sem parâmetro: memória `{tinker:'memoria-ia', licoes, jogos:{pkg:{nome,notas,salvos,receitas,patches}}, apagados}`.
+- POST `busca=1` `{jogo,motor,versao,aparelho,etapas,total,resultados,emVolta}`; `relatorio=1` `{jogo,versao,aparelho,motivo,problemas,texto}`; sem parâmetro: memória `{tinker:'memoria-ia', licoes, jogos:{pkg:{nome,notas,salvos,receitas,patches}}, apagados, aprende:[{jogo,nome,tipo,acertos,erros,ms,dicas,origem,quando}]}` (jogo `*` = ensinado; o app só importa os aprendidos).
 
 ## Descobertas no DYSMANTLE (IL2CPP arm64)
 - Materiais são objetos de slot do inventário: Dword quantidade em +0, cópia em +4, +8 = 4 (máx. por slot?), Floats em +0x28/+0x2C, depois cor RGB, 0.75, 1.0f.

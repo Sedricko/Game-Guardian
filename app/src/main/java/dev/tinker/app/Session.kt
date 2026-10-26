@@ -70,6 +70,7 @@ object Session {
     var aiCanTest by mutableStateOf(false)  // a IA pode escrever um valor de teste (e voltar o original) para saber se é o verdadeiro
     var aiAuto by mutableStateOf(false)  // modo autônomo 1: a IA aplica, congela, testa e cria receitas sem esperar o toque
     var aiControl by mutableStateOf(false)  // modo autônomo 2: a IA toca e arrasta na tela do jogo para fazer o valor mudar
+    var offlineAgent by mutableStateOf(true)  // agente offline: o Achar sozinho pelo nome usa o que acertou e errou antes (Learn.kt)
     var watchFields by mutableStateOf(true)  // enquanto joga, anota sozinho os campos das classes conhecidas que mudam
     var gameUpdated by mutableStateOf(false)  // o jogo mudou de versão desde a última vez: a IA conserta os salvos que não voltarem
     val geminiUseModel = java.util.concurrent.ConcurrentHashMap<String, Int>()  // "chave|modelo" → pedidos de hoje (a cota é por modelo)
