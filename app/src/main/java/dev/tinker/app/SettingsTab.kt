@@ -69,8 +69,8 @@ internal fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit,
     // "Configurar IA" (das outras telas) abre os Ajustes já na parte da IA
     LaunchedEffect(s.settingsAt) {
         if (s.settingsAt == "ia") {
-            // antes da IA: menu flutuante, busca, ponteiros, jogo (com jogo escolhido), título das regiões e uma linha por região
-            list.scrollToItem(3 + (if (s.process != null) 1 else 0) + 1 + s.regions.size)
+            // antes da IA: menu flutuante, busca, ponteiros, versão nova, jogo (com jogo escolhido), título das regiões e uma linha por região
+            list.scrollToItem(4 + (if (s.process != null) 1 else 0) + 1 + s.regions.size)
             s.settingsAt = ""
         }
     }
@@ -105,11 +105,6 @@ internal fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit,
             Panel {
                 Text("Busca", style = MaterialTheme.typography.titleSmall)
                 Toggle("Pausar o jogo durante a busca e o refino", "O valor não muda no meio da busca.", s.autoPause) { s.autoPause = it; engine.saveSettings() }
-                Toggle("Atualizar e testar sozinho", "Com versão nova, baixa e instala sozinho (root), reabre e roda o autoteste; o resultado vai para a planilha. Nunca mexe em jogo.", s.autoUpdate) {
-                    s.autoUpdate = it; engine.saveSettings()
-                }
-                if (s.autoUpdate) OutlinedTextField(s.githubToken, { s.githubToken = it.trim(); engine.saveSettings() }, label = { Text("Token do GitHub (só se o repositório for privado)") },
-                    singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
                 Toggle("Teclado do Tinker", "Números e letras dentro do painel; o teclado do telefone abre por cima do jogo e esconde o valor.", s.ownKeypad) {
                     s.ownKeypad = it; engine.saveSettings()
                 }
@@ -129,6 +124,16 @@ internal fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit,
                 Toggle("Ponteiros só nas libs do jogo", "Base em libil2cpp, libunity e outras do jogo; as do sistema costumam dar caminhos que quebram.", s.gameLibsOnly) {
                     s.gameLibsOnly = it; engine.saveSettings()
                 }
+            }
+        }
+        item {
+            Panel {
+                Text("Versão nova", style = MaterialTheme.typography.titleSmall)
+                Toggle("Atualizar e testar sozinho", "Com versão nova, baixa e instala sozinho (root), reabre e roda o autoteste; o resultado vai para a planilha. Nunca mexe em jogo.", s.autoUpdate) {
+                    s.autoUpdate = it; engine.saveSettings()
+                }
+                if (s.autoUpdate) OutlinedTextField(s.githubToken, { s.githubToken = it.trim(); engine.saveSettings() }, label = { Text("Token do GitHub (só se o repositório for privado)") },
+                    singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
             }
         }
         if (s.process != null) {

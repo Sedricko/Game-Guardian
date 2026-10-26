@@ -119,17 +119,17 @@ internal fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(shape = MaterialTheme.shapes.medium, onClick = {
                         if ((s.count ?: 0) > 0) confirmNew = true else run { engine.search(s.types, s.value) }
-                    }, enabled = enabled && s.value.isNotBlank() && !confirmNew, modifier = Modifier.weight(1f)) {
+                    }, enabled = enabled && s.value.isNotBlank() && !confirmNew, modifier = Modifier.weight(1f), contentPadding = TIGHT) {
                         Text("Nova busca", maxLines = 1, softWrap = false)
                     }
                     FilledTonalButton(
                         shape = MaterialTheme.shapes.medium,
                         onClick = { run { engine.refine(s.value) } },
                         enabled = enabled && (s.count ?: 0) > 0 && s.value.isNotBlank() && !same,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1f), contentPadding = TIGHT,
                     ) { Text(if (same) "Mude no jogo" else "Refinar", maxLines = 1) }
                     // sem número na tela (barra de vida): começa já aqui, sem abrir "Mais buscas"
-                    if (s.count == null) OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { run { engine.startUnknown(s.types) } }, enabled = enabled) { Text("Sem valor") }
+                    if (s.count == null) OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { run { engine.startUnknown(s.types) } }, enabled = enabled, contentPadding = TIGHT) { Text("Sem valor", maxLines = 1) }
                 }
                 // 🎯 lê o número na tela e refina sozinho a cada mudança; com "IA pode testar valores", acha o verdadeiro
                 val finding = s.autoFind
@@ -672,3 +672,6 @@ internal fun NearSearch(engine: Engine, centers: List<String>, initialType: Stri
         }
     }
 }
+
+// três botões numa linha (Nova busca, Refinar, Sem valor): o espaço interno padrão (24 dp) cortava "Nova busca" em pé
+private val TIGHT = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
