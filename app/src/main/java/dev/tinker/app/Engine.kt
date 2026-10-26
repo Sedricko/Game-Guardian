@@ -1737,13 +1737,16 @@ class Engine private constructor(private val app: Context) {
     private suspend fun mission(cmd: String): String {
         val w = cmd.split(' ').filter { it.isNotEmpty() }
         val arg = w.drop(1).joinToString(" ")
-        if (w.firstOrNull() == "escolher") {
+        suspend fun pickTestGame(): String {
             val pid = call { d -> d.send("ps", quiet = true).lines.firstNotNullOfOrNull { l -> l.substringBefore(' ').toIntOrNull()?.takeIf { l.substringAfter(' ') == TEST_GAME } } }
                 ?: error("o Jogo de Teste não está aberto")
-            return "ok " + attach(GameProcess(pid, TEST_GAME, "Jogo de Teste", null))
+            return attach(GameProcess(pid, TEST_GAME, "Jogo de Teste", null))
         }
+        if (w.firstOrNull() == "escolher") return "ok " + pickTestGame()
         // só troca a aba na tela (para o agente tirar print de cada uma)
         if (w.firstOrNull() == "aba") return "ok ${TABS.getOrNull(w[1].toInt())}\ncount 0".also { withContext(Dispatchers.Main) { Session.tab = w[1].toInt().coerceIn(0, TABS.lastIndex) } }
+        // o Tinker reabriu no meio da rodada (o Android fechou ele): volta a seguir o Jogo de Teste, nunca outro jogo
+        if (Session.process == null) runCatching { pickTestGame() }
         require(Session.process?.pkg == TEST_GAME) { "missão só no Jogo de Teste" }
         val msg = when (w.firstOrNull()) {
             "buscar" -> search(if (w[1] == "auto") emptySet() else setOf(w[1]), w.drop(2).joinToString(" "))
