@@ -174,7 +174,7 @@ function Tap-Chip($re) {
     Top-Ui
     $n = Find-Ui $re 0
     if (-not $n) {
-        $row = Find-Ui '^\W*Loja$' 0
+        $row = Find-Ui '(^|\s)Loja$' 0
         if ($row) { & $adb shell input swipe 1300 ([int]$row.y) 200 ([int]$row.y) 300; Start-Sleep -Milliseconds 700 }
         $n = Find-Ui $re 0
     }
@@ -189,7 +189,9 @@ function Ui-Tour($v) {
     function Check($name, [scriptblock]$b) {
         try { $r = & $b; $script:tourRes += "OK $name$(if ($r) { ": $r" })" }
         catch {
-            $script:tourRes += "FALHA $name`: $($_.Exception.Message)"
+            # o que estava na tela, em texto (a print pode nao caber na celula da planilha)
+            $seen = (Ui-Nodes | ForEach-Object { $_.t } | Where-Object { $_ }) -join " | "
+            $script:tourRes += "FALHA $name`: $($_.Exception.Message) [na tela: $($seen.Substring(0, [Math]::Min($seen.Length, 1500)))]"
             $script:tourShots += "`n=== $name ===`njpeg base64`n" + (Shot "tour")
         }
     }
@@ -201,8 +203,9 @@ function Ui-Tour($v) {
         foreach ($t in @("Nova busca", "Refinar", "Ferramentas")) { if (-not (Find-Ui $t 0)) { throw "'$t' nao aparece sem rolar" } }
     }
     # cada ferramenta: abre pelo botao da fileira e confere o titulo dela; toca de novo para fechar
-    foreach ($tool in @(@('^\W*F.{1,2}cil$', "Modo f"), @('^\W*Velocidade$', "^Achar a velocidade$"), @('^\W*Cron.metros$', "^Achar cron"),
-                        @('^\W*Loja$', "^Achar pre"), @('^\W*Disfar.ado$', "mero disfar"))) {
+    # nome no fim do texto, depois de um espaco (o botao e "emoji Nome"; uma frase com a mesma palavra no meio nao conta)
+    foreach ($tool in @(@('(^|\s)F.{1,2}cil$', "Modo f"), @('(^|\s)Velocidade$', "Achar a velocidade"), @('(^|\s)Cron.metros$', "Achar cron"),
+                        @('(^|\s)Loja$', "Achar pre"), @('(^|\s)Disfar.ado$', "mero disfar"))) {
         Check "Ferramenta $($tool[0])" {
             Top-Ui
             $was = Find-Ui $tool[1] 0
