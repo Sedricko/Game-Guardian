@@ -69,6 +69,16 @@ function Start-Emulator {
     Say "emulador ligado"
 }
 
+# so decide sobre o Magisk com o Android ligado de verdade: logo depois do "adb root" o pm ainda diz "Can't find service: package"
+function Wait-Booted {
+    for ($i = 0; $i -lt 36; $i++) {
+        if (((& $adb shell getprop sys.boot_completed 2>$null) -match "1") -and ((& $adb shell pm list packages android 2>$null) -match "package:android")) { return $true }
+        Start-Sleep 5
+    }
+    Say "o emulador ainda nao terminou de ligar (3 min): espero a proxima volta antes de mexer no Magisk"
+    return $false
+}
+
 function Install-Magisk {
     Say "o emulador ainda nao tem Magisk (root para apps): instalando com o rootAVD"
     $dir = "C:\rootAVD"
@@ -520,6 +530,7 @@ while ($true) {
         & $adb root | Out-Null
         Start-Sleep 3
         & $adb wait-for-device
+        if (-not (Wait-Booted)) { continue }
         if (-not ((& $adb shell pm list packages com.topjohnwu.magisk) -match "magisk")) { Install-Magisk; continue }
         Test-Version
     } catch { Say "erro: $($_.Exception.Message)" }
