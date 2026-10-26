@@ -552,6 +552,8 @@ class Engine private constructor(private val app: Context) {
             while (true) {
                 delay(3000)
                 if (!Session.busy) runCatching { followGame(startDaemon = false) }.getOrNull()?.let { Session.status = it }
+                // salvos aprendem a vizinhança mesmo com a aba Salvos fechada: é ela que acha o valor de novo ao reabrir o jogo
+                if (!Session.busy && Session.saved.isNotEmpty()) runCatching { refreshSaved() }
                 if (!Session.busy) runCatching { retryRestore() }
                 if (!Session.busy) runCatching { autoRecipes() }
             }
@@ -3028,7 +3030,7 @@ class Engine private constructor(private val app: Context) {
                 item.pointer.isNotEmpty() -> confirmPointer(item, pid, why)
                 item.anchor.isNotEmpty() -> "offset".takeIf { resolve(item).pid == pid }.also { if (it == null) why += "o salvo que ele segue não voltou" }
                 else -> null
-            } ?: fromChains(item, pid, why) ?: (if (signature) fromIl2cpp(item, pid, why) ?: fromSignature(item, pid, why) else null)
+            } ?: fromChains(item, pid, why) ?: (if (signature) fromIl2cpp(item, pid, why) ?: fromSignature(item, pid, why) ?: fromSimilar(item, pid, why) else null)
             when {
                 how != null -> back += "${label(item)} ($how)"
                 item.pid != 0 || item.chains.isNotEmpty() || item.sig.isNotEmpty() -> {
@@ -3188,6 +3190,47 @@ class Engine private constructor(private val app: Context) {
         val addr = same.singleOrNull() ?: fits.singleOrNull() ?: places.singleOrNull()
             ?: return null.also { why += "assinatura em ${places.size} lugares (${same.size} com o último valor, ${fits.size} dentro do histórico)" }
         return "assinatura".takeIf { moveTo(item, addr, "Assinatura").pid == pid }?.also { replace(item) { it.copy(trusted = false) } }
+    }
+
+    /**
+     * Vizinhança parecida: a assinatura exata falhou (parte dela muda a cada vez que o jogo abre, como uma chave sorteada).
+     * Procura o último valor e fica com o lugar cujos bytes em volta mais batem com a assinatura, se ganhar com folga.
+     */
+    private fun Daemon.fromSimilar(item: SavedItem, pid: Int, why: MutableList<String>): String? {
+        if (!sigUseful(item.sig)) return null
+        val bytes = valueBytes(item) ?: return null
+        val r = runCatching { send("aobfind $bytes", quiet = true) }.getOrNull() ?: return null
+        if (r.status.toLongOrNull() != r.lines.size.toLong()) return null.also { why += "parecido: último valor em ${r.status} lugares" }
+        val sig = item.sig.chunked(2)
+        val words = (sig.size + 7) / 8
+        val scored = r.lines.mapNotNull { line ->
+            val a = line.toLong(16)
+            val start = a - item.sigOff
+            val dump = runCatching { send("dump ${start.toString(16)} i64 $words", quiet = true).lines }.getOrNull()
+            if (start < 0 || dump == null || dump.size != words) return@mapNotNull null
+            val raw = ByteArray(words * 8)
+            dump.forEachIndexed { i, l -> val v = l.substringAfter(' ').toLongOrNull() ?: return@mapNotNull null; for (k in 0 until 8) raw[i * 8 + k] = (v shr (8 * k)).toByte() }
+            a to sig.indices.count { sig[it] != "??" && sig[it] == "%02x".format(raw[it]) }
+        }.sortedByDescending { it.second }
+        val fixed = sig.count { it != "??" }
+        val best = scored.firstOrNull() ?: return null.also { why += "parecido: nenhum lugar com o último valor" }
+        val second = scored.getOrNull(1)?.second ?: 0
+        if (best.second < fixed / 2 || best.second - second < 4) return null.also { why += "parecido: melhor ${best.second} de $fixed bytes, segundo $second" }
+        return "vizinhança parecida".takeIf { moveTo(item, best.first.toString(16), "Parecido").pid == pid }?.also { replace(item) { it.copy(trusted = false) } }
+    }
+
+    /** Bytes do último valor como ficam na memória (só tipos simples). */
+    private fun valueBytes(item: SavedItem): String? {
+        val v = readable(item.value, item.type)?.toDoubleOrNull() ?: return null
+        val b = java.nio.ByteBuffer.allocate(8).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        val n = when (item.type) {
+            "i32" -> { b.putInt(v.toLong().toInt()); 4 }
+            "i64" -> { b.putLong(v.toLong()); 8 }
+            "f32" -> { b.putFloat(v.toFloat()); 4 }
+            "f64" -> { b.putDouble(v); 8 }
+            else -> return null
+        }
+        return b.array().take(n).joinToString("") { "%02x".format(it) }
     }
 
     /** Aprende a assinatura enquanto o jogo roda: bytes em volta que mudaram viram ??. */
