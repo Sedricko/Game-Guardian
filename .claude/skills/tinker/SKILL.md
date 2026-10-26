@@ -26,6 +26,23 @@ Responder sempre em **português do Brasil**, curto e direto. O usuário testa n
 Versões: `app/build.gradle.kts` (`versionCode`/`versionName`), `VERSAO` no Code.gs, `SCRIPT_VERSION` no Engine.kt (versão **mínima** do script que o app exige).
 Estado em 2026-10: app **2.44.0** (code 131; jogo de teste: tests/target.c vai no APK como libtinkertarget.so e o autoteste testa nele Dword/Float/refino, 🔒, ponteiros, congelar, AOB, grupo, IL2CPP, patch e foto (withTarget); "Atualizar e testar sozinho" em Ajustes (desligado: baixa o APK, confere pacote+versão, pm install via su, UpdatedReceiver reabre, autoteste com testarApos); editor de save (savefiles/readsave/writesave); exportar .CT; patch com ctx relocado por AOB em Xa; AOB em Dados/Xa/Xs; editar bytes no hex; 📍 activity start/activity no daemon (soft-dirty ou smaps), regiões por jogo em prefs regioes-<pkg> + região dos salvos, busca começa nelas e cai para tudo; Auto sem 🔒; script v16 com linhasApagadas; 🎯 Achar sozinho = OCR ML Kit no print + refino por faixa + teste dos finalistas com aiCanTest; Lua: tipos `li`/`lf` e comando `luatable` no daemon, LuaPanel na Ficha; Groq troca de chave pelos cabeçalhos x-ratelimit, Gemini aprende o limite diário por modelo em `geminiLimit`), script **v15**, app exige v14.
 
+Estado em 2026-10-26: app **2.67.0** (code 190). Desde a 2.44:
+- Funções nativas pelo nome sem IDA: `syms` (.dynsym na memória), `func` (.eh_frame_hdr), `calls` (BL/CALL); `patchNative` = patch de retorno (x86 e arm64) que guarda `sym` e se reacha ao reabrir.
+- ⏩ Velocidade Unity: `findGameSpeed` (relógio do Unity: 0.99999994 + dois doubles de segundos + 1.0), `setGameSpeed` (máx. 4 endereços). **Só por valor do motor; nunca hook de tempo/injeção no processo.**
+- ⏱️ Cronômetros (epoch ms/s): `findTimers(quanto falta na tela)` ±2 min, alinhados; `finishTimers` recusa >5 (escrever em 61–77 lugares corrompia o Scudo do jogo).
+- 🛒 Loja (`findShopPrices`), "Só os que valem X → Y" (`writeWhere`, recusa >200), 🧮 número guardado diferente (daemon `compare lin` ×k+c com k de jogo, `compare xk` XOR chave fixa), `...A4` no refino = endereço termina em (daemon `addrend`).
+- Unreal: daemon `ue` (FNamePool + GUObjectArray) lista objetos por nome.
+- Ficha Unity: daemon `il2cpp` também imprime `text <off> <len> <utf8>` (string) e `count <off> <n>` (array/List); struct de até 16 bytes vira `(x, y, z)`; copiar os números de um objeto para outro da mesma classe (`copyFicha`); 🔓 Desbloquear (`findUnlocks`/`unlock`: bool isUnlocked/owned/purchased; isLocked → 0).
+- Vigia da tela (TinkerApp.watchUi) guarda "Onde a tela travou:" com a pilha do Tinker (R8 mantém nomes de dev.tinker.**).
+- Relatório "o jogo fechou sozinho" e patch suspeito só quando o crashlog tem FATAL deste pid (a missão fecha o jogo de propósito).
+
+## Testes automáticos no PC (emulador)
+- Emulador Android Studio "Pixel 6 Pro" API 31 x86_64 (emulator-5554) com Magisk (rootAVD). O S25 é de outro agente: **nunca mexer**; sempre `ANDROID_SERIAL=emulator-5554`.
+- `tools/pc/TINKER-AGENTE.ps1/.bat` (Área de Trabalho do usuário): se atualiza pelo branch (confere a sintaxe antes), espera o Android ligar, instala a versão nova, roda autoteste + missões e manda para a aba **Relatórios** (mais novo em cima). Checa versão nova a cada 30 s.
+- Missões só no Jogo de Teste (`dev.tinker.testgame`, `TEST_GAME` fixo): `testgame/` com lib nativa `testgame/src/main/c/jogo.c` (funções com nome, tick, Unreal de mentira, Unity de mentira Jogo.Heroi/Jogo.Arma). Passos da missão em `Engine.mission()`.
+- Ler o resultado ~10–17 min depois do push (CI ~7 min + rodada ~10 min). PowerShell: `"${c}:"`, nunca `"$c:"`.
+- CI também testa o daemon contra a lib do jogo em 32 bits (gcc-multilib); YAML: comando com `: ` vai em bloco `|`.
+
 ## Armadilhas já resolvidas (não repetir)
 - `Engine.call { d -> }` **não é suspend dentro do bloco**: nada de `delay`/`withContext` lá dentro; divida em várias chamadas.
 - Texto começando com `= + - @` vira fórmula na planilha: usar `texto_()` (apóstrofo) em tudo que se grava.
@@ -43,6 +60,9 @@ Estado em 2026-10: app **2.44.0** (code 131; jogo de teste: tests/target.c vai n
 5. Sem evasão de anti-cheat; sem duplicar recompensa de servidor/online. Só estado local offline.
 6. Arquivos baixados não são confiáveis: extrair em pasta isolada e nunca executar (ideias, não binários).
 7. Nunca colocar identificador de modelo em commits.
+8. Missões e testes automáticos só no Jogo de Teste; nada de canal em que a planilha/Claude comande o app em jogo real.
+9. Velocidade sem entrar no processo (sem hook de relógio/injeção), nem em jogo offline. Não aprofundar internals de debugger/watchpoint.
+10. Não contornar bloqueio de site (bot-check) nem baixar binários de fora; APK de site espelho não se instala.
 
 ## Como trabalhar
 1. Mudou o daemon → `bash tests/daemon_test.sh` (compila `tests/target.c` em x86 e testa tudo; tem que terminar com `daemon ok`).
@@ -75,6 +95,8 @@ Estado em 2026-10: app **2.44.0** (code 131; jogo de teste: tests/target.c vai n
 - Detecção de jogo online foi TIRADA a pedido do usuário (jogo offline também tem sinais de conexão): o combinado de não editar jogo online vale pela conversa, não por código.
 
 ## Próximos passos
+- Achar a causa das paradas da tela (ler "Onde a tela travou:" nos relatórios) — o usuário viu "Tinker isn't responding" na aba Busca.
+- Velocidade Cocos/Godot (por valor), receitas de um toque, campos da Unreal na Ficha (precisa de jogo Unreal offline do usuário).
 - Testar no aparelho: métodos da classe (Ver código / Contar chamadas / Sempre devolver), dump .cs, foto do jogo, backup do save, "O que escreve aqui?", e se algum menu corta em pé/deitado.
 - O ptrace com registradores de hardware em arm64/vPhoneOS ainda **não foi confirmado** no aparelho.
 - Adiados ("depois fazemos"): macro de toques, indicador de captura (contagem na bolinha, vibração, Parar agora), assistente "materiais infinitos", aba Jogos, atalho na bolinha.
