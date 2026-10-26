@@ -95,7 +95,8 @@ O texto completo de cada opção está em `docs/tutorial/ajuda.py` (fonte única
 - GET `pedidos=1&aparelho&versao` → `{pedidos:[{id,tipo,jogo,texto}], versao}`; `feito=id&situacao&resposta`.
 - GET `analise=1&jogo=pkg` → `{analise:[…]}` (coluna Análise da aba Buscas); `memoria=1` → aprendizado.
 - GET `?leitura=` (token só de leitura) → relatórios + aprendizado, sem chaves.
-- POST `busca=1` `{jogo,motor,versao,aparelho,etapas,total,resultados,emVolta}`; `relatorio=1` `{jogo,versao,aparelho,motivo,problemas,texto}`; sem parâmetro: memória `{tinker:'memoria-ia', licoes, jogos:{pkg:{nome,notas,salvos,receitas,patches}}, apagados, aprende:[{jogo,nome,tipo,acertos,erros,ms,dicas,origem,quando}]}` (jogo `*` = ensinado; o app só importa os aprendidos).
+- POST `busca=1` `{jogo,motor,versao,aparelho,etapas,total,resultados,emVolta}`; `relatorio=1` `{jogo,versao,aparelho,motivo,problemas,texto}`; sem parâmetro: memória `{tinker:'memoria-ia', licoes, jogos:{pkg:{nome,notas,salvos,receitas,patches}}, apagados}`.
+- Agente offline (separado da memória da IA): POST `agente=1` `{tinker:'agente-offline', aprende:[{jogo,nome,tipo,acertos,erros,ms,dicas,origem,quando}]}` grava linha a linha na aba **Agente offline** (atualiza ou acrescenta, nunca apaga; vale o com mais tentativas); GET `agente=1` devolve a aba. Jogo `(todos os jogos)`/`*` = ensinado pelo Claude (o app não importa: vem do código). Origem `IA` = sugestão da IA que deu certo (`borrowFromAi`, opção Pedir ajuda à IA).
 
 ## Descobertas no DYSMANTLE (IL2CPP arm64)
 - Materiais são objetos de slot do inventário: Dword quantidade em +0, cópia em +4, +8 = 4 (máx. por slot?), Floats em +0x28/+0x2C, depois cor RGB, 0.75, 1.0f.

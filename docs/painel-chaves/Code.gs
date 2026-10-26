@@ -245,6 +245,8 @@ function doGet(e) {
   if (p.analise) return json_({ analise: analises_(String(p.jogo || '')) });
   // aprendizado guardado (o de todas as instâncias juntas)
   if (p.memoria) return json_(memoriaGuardada_() || {});
+  // agente offline: só a aba dele (separada do aprendizado da IA)
+  if (p.agente) return json_({ tinker: 'agente-offline', aprende: agenteLinhas_().map(r => r.k) });
   const ativas = linhas_().filter(r => r.ativa);
   // "chaves" continua sendo o Gemini: o Tinker 2.19.0 lê só ela
   return json_({
@@ -303,12 +305,6 @@ function legivel_(m) {
       r.apagado ? 'apagado no app' : 'ativo']));
   });
   tabela_(LEGIVEL, aprendizado);
-  // o que o agente offline sabe: o que o Claude ensinou (jogo *) e o que ele aprendeu jogando, com acertos e erros
-  const agente = [['Jogo', 'Nome na tela', 'Tipo', 'Acertos', 'Erros', 'Tempo médio (s)', 'Técnicas', 'Origem', 'Quando']];
-  lista_(m.aprende).slice().sort((x, y) => (String(x.jogo) === '*') - (String(y.jogo) === '*') || String(y.quando).localeCompare(String(x.quando)))
-    .forEach(k => agente.push([k.jogo === '*' ? '(todos os jogos)' : nome(k.jogo), String(k.nome || '').replace(/^#/, 'técnica: '), k.tipo || '',
-      Number(k.acertos) || 0, Number(k.erros) || 0, k.ms ? Math.round(Number(k.ms) / 1000) : '', k.dicas || '', k.origem || '', k.quando || '']));
-  tabela_('Agente offline', agente);
   tabela_('Salvos', salvos);
   tabela_('Receitas', receitas);
   tabela_('Patches', patches);
@@ -371,8 +367,7 @@ function juntarMemoria_(velha, nova) {
   // lições e notas apagadas na planilha (pela pessoa ou pelo Claude a pedido dela): ficam numa lista e não voltam do app
   const linhasApagadas = Array.from(new Set(lista2_(velha.linhasApagadas).concat(lista2_(nova.linhasApagadas)).map(String))).slice(-500);
   const foraL = new Set(linhasApagadas);
-  const m = { tinker: 'memoria-ia', versao: 2, licoes: juntarLinhas_(velha.licoes, nova.licoes, foraL), jogos: {}, apagados: apagados, linhasApagadas: linhasApagadas,
-    aprende: juntarAprende_(velha.aprende, nova.aprende) };
+  const m = { tinker: 'memoria-ia', versao: 2, licoes: juntarLinhas_(velha.licoes, nova.licoes, foraL), jogos: {}, apagados: apagados, linhasApagadas: linhasApagadas };
   const pkgs = new Set(Object.keys(velha.jogos || {}).concat(Object.keys(nova.jogos || {})));
   pkgs.forEach(pkg => {
     const a = (velha.jogos || {})[pkg] || {}, b = (nova.jogos || {})[pkg] || {};
@@ -394,16 +389,49 @@ function juntarMemoria_(velha, nova) {
   return m;
 }
 
-// agente offline: o mesmo jogo+nome+tipo fica com o que tem mais tentativas (o app manda tudo de novo a cada vez: somar contaria em dobro)
-function juntarAprende_(a, b) {
-  const por = {};
-  lista_(a).concat(lista_(b)).forEach(k => {
-    if (!k || typeof k !== 'object') return;
-    const id = [k.jogo, k.nome, k.tipo].join('|');
-    const n = x => (Number(x.acertos) || 0) + (Number(x.erros) || 0);
-    if (!por[id] || n(k) >= n(por[id])) por[id] = k;
+// ---- agente offline (aba própria): o que o 🎯 Achar sozinho pelo nome acertou e errou, por jogo e tipo ----
+// separado do aprendizado da IA (MemoriaBruta): aqui só entra o que o agente viu dar certo ou errado, o que o Claude
+// ensinou (jogo "(todos os jogos)") e o que a IA sugeriu e funcionou (origem IA)
+const AGENTE = 'Agente offline';
+const ACOLS = ['Jogo', 'Nome na tela', 'Tipo', 'Acertos', 'Erros', 'Tempo médio (s)', 'Técnicas', 'Origem', 'Quando'];
+const ATIPOS = { i32: 'Dword', f32: 'Float', i64: 'Qword', f64: 'Double' };
+function abaAgente_() {
+  const ss = SpreadsheetApp.getActive();
+  let s = ss.getSheetByName(AGENTE);
+  if (!s) {
+    s = ss.insertSheet(AGENTE);
+    s.getRange(1, 1, 1, ACOLS.length).setValues([ACOLS]).setFontWeight('bold');
+    s.setFrozenRows(1);
+  }
+  return s;
+}
+function agenteLinhas_() {
+  const s = abaAgente_();
+  if (s.getLastRow() < 2) return [];
+  const nomes = {};
+  Object.keys(ATIPOS).forEach(t => { nomes[ATIPOS[t]] = t; });
+  return s.getRange(2, 1, s.getLastRow() - 1, ACOLS.length).getValues().map((v, i) => ({ linha: i + 2, k: {
+    jogo: v[0] === '(todos os jogos)' ? '*' : String(v[0]), nome: String(v[1]).replace(/^técnica: /, '#'), tipo: nomes[v[2]] || String(v[2]),
+    acertos: Number(v[3]) || 0, erros: Number(v[4]) || 0, ms: (Number(v[5]) || 0) * 1000, dicas: String(v[6]), origem: String(v[7]), quando: String(v[8]) } }));
+}
+// o mesmo jogo+nome+tipo fica com o que tem mais tentativas (o app manda tudo de novo a cada vez: somar contaria em dobro)
+function guardarAgente_(novas) {
+  const s = abaAgente_();
+  const tem = agenteLinhas_();
+  const id = k => [k.jogo, k.nome, k.tipo].join('|');
+  const n = k => (Number(k.acertos) || 0) + (Number(k.erros) || 0);
+  const linha = k => [k.jogo === '*' ? '(todos os jogos)' : String(k.jogo || '').slice(0, 200), String(k.nome || '').replace(/^#/, 'técnica: ').slice(0, 200),
+    ATIPOS[k.tipo] || String(k.tipo || ''), Number(k.acertos) || 0, Number(k.erros) || 0, k.ms ? Math.round(Number(k.ms) / 1000) : '',
+    String(k.dicas || '').slice(0, 2000), String(k.origem || '').slice(0, 40), String(k.quando || '').slice(0, 40)].map(texto_);
+  let mudou = 0;
+  novas.filter(k => k.jogo && k.jogo !== '*' && k.nome).forEach(k => {
+    const velha = tem.find(r => id(r.k) === id(k));
+    if (velha && n(velha.k) > n(k)) return;
+    if (velha) s.getRange(velha.linha, 1, 1, ACOLS.length).setValues([linha(k)]);
+    else { s.appendRow(linha(k)); tem.push({ linha: s.getLastRow(), k: k }); }
+    mudou++;
   });
-  return Object.keys(por).map(id => por[id]);
+  return mudou;
 }
 
 // ---- relatórios (o Tinker manda sozinho quando algo dá errado, e quando você compartilha) ----
@@ -582,6 +610,15 @@ function doPost(e) {
     lock.waitLock(20000);
     try { guardarBusca_(r); marcarAparelho_(r.aparelho, r.versao); } finally { lock.releaseLock(); }
     return json_({ ok: true });
+  }
+  // agente offline: grava na aba dele, linha por linha (atualiza ou acrescenta; nunca apaga)
+  if (p.agente) {
+    let r;
+    try { r = JSON.parse((e.postData && e.postData.contents) || ''); } catch (err) { return json_({ erro: 'json' }); }
+    if (!r || r.tinker !== 'agente-offline') return json_({ erro: 'nao e o agente offline' });
+    const lock = LockService.getScriptLock();
+    lock.waitLock(20000);
+    try { return json_({ ok: true, linhas: guardarAgente_(lista_(r.aprende)) }); } finally { lock.releaseLock(); }
   }
   if (p.relatorio) {
     let r;

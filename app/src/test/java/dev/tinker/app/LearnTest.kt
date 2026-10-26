@@ -29,4 +29,11 @@ class LearnTest {
         assertEquals(2, mergeKnow(a, b).single().wins)
         assertEquals(2, mergeKnow(b, b).single().wins)
     }
+
+    @Test fun daIASoGuardaOQueDeuCerto() {
+        assertEquals(emptyList<Know>(), record(emptyList(), "jogo.a", "Ouro", "f32", ok = false, ms = 0, at = "", from = "IA"))
+        val k = record(emptyList(), "jogo.a", "Ouro", "i64", ok = true, ms = 9, at = "", from = "IA", tips = "Qword")
+        assertEquals("IA", k.single().from)
+        assertEquals("i64", pickType(all + k, "jogo.a", "Ouro").first)
+    }
 }

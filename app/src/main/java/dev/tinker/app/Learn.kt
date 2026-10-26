@@ -82,9 +82,11 @@ internal fun pickType(all: Collection<Know>, game: String, label: String): Pair<
 }
 
 /** Guarda o resultado de uma busca pelo nome (acerto ou erro) no tipo que foi usado. */
-internal fun record(all: List<Know>, game: String, label: String, type: String, ok: Boolean, ms: Long, at: String): List<Know> {
+internal fun record(all: List<Know>, game: String, label: String, type: String, ok: Boolean, ms: Long, at: String,
+                    from: String = "aprendeu", tips: String = ""): List<Know> {
     val k = learnKey(label)
-    val old = all.firstOrNull { it.game == game && it.name == k && it.type == type } ?: Know(game, k, type)
+    // o que veio da IA só entra quando deu certo (o erro de uma sugestão dela não vira conhecimento)
+    val old = all.firstOrNull { it.game == game && it.name == k && it.type == type } ?: if (from == "IA" && !ok) return all else Know(game, k, type, from = from, tips = tips)
     val wins = old.wins + if (ok) 1 else 0
     val new = old.copy(wins = wins, fails = old.fails + if (ok) 0 else 1, at = at,
         ms = if (ok) (old.ms * old.wins + ms) / wins else old.ms)

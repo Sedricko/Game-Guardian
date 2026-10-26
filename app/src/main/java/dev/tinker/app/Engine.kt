@@ -52,7 +52,7 @@ class Engine private constructor(private val app: Context) {
             .putBoolean("autoOverlay", Session.autoOverlay).putBoolean("ownKeypad", Session.ownKeypad).putBoolean("autoUpdate", Session.autoUpdate).putString("githubToken", Session.githubToken).putFloat("alpha", Session.alpha).putInt("panelSize2", Session.panelSize).putBoolean("panelLeft", Session.panelLeft)
             .remove("aiKey").putString("aiProvider", Session.aiProvider).putBoolean("aiReserve", Session.aiReserve)
             .putString("groqKeys", Session.groqKeys.joinToString("\n")).putInt("groqKeyIndex", Session.groqKeyIndex).putString("groqModel", Session.groqModel)
-            .putString("sheetGroqKeys", Session.sheetGroqKeys.joinToString("\n")).putBoolean("aiCanTest", Session.aiCanTest).putBoolean("aiAuto", Session.aiAuto).putBoolean("aiControl", Session.aiControl).putBoolean("offlineAgent", Session.offlineAgent)
+            .putString("sheetGroqKeys", Session.sheetGroqKeys.joinToString("\n")).putBoolean("aiCanTest", Session.aiCanTest).putBoolean("aiAuto", Session.aiAuto).putBoolean("aiControl", Session.aiControl).putBoolean("offlineAgent", Session.offlineAgent).putBoolean("offlineBorrowAi", Session.offlineBorrowAi)
             .putString("geminiKeys", Session.geminiKeys.joinToString("\n")).putInt("geminiKeyIndex", Session.geminiKeyIndex)
             .putString("keySource", Session.keySource).putString("sheetKeys", Session.sheetKeys.joinToString("\n"))
             .putString("geminiModel", Session.geminiModel).putBoolean("geminiAuto", Session.geminiAutoModel).putBoolean("watchFields", Session.watchFields)
@@ -88,6 +88,7 @@ class Engine private constructor(private val app: Context) {
         Session.aiAuto = prefs.getBoolean("aiAuto", false)
         Session.aiControl = prefs.getBoolean("aiControl", false)
         Session.offlineAgent = prefs.getBoolean("offlineAgent", true)
+        Session.offlineBorrowAi = prefs.getBoolean("offlineBorrowAi", false)
         // antes era uma chave só ("geminiKey"): vira a primeira da lista
         Session.geminiKeys = (prefs.getString("geminiKeys", null) ?: prefs.getString("geminiKey", "")).orEmpty().split('\n').filter { it.isNotBlank() }
         Session.geminiKeyIndex = prefs.getInt("geminiKeyIndex", 0).coerceIn(0, (Session.geminiKeys.size - 1).coerceAtLeast(0))
@@ -1028,7 +1029,6 @@ class Engine private constructor(private val app: Context) {
     fun memoryJson(): String = JSONObject().put("tinker", "memoria-ia").put("versao", 2).put("apagados", JSONArray(deleted().toList()))
         .put("criado", java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US).format(java.util.Date()))
         .put("licoes", lessons())
-        .put("aprende", knowJson())
         .put("jogos", JSONObject().apply {
             library().forEach { g ->
                 put(g.pkg, JSONObject().put("nome", g.name).put("notas", g.notes).put("receitas", jsonFile("recipes-${g.pkg}.json"))
@@ -1048,8 +1048,6 @@ class Engine private constructor(private val app: Context) {
         val j = runCatching { JSONObject(text) }.getOrNull()?.takeIf { it.optString("tinker") == "memoria-ia" }
             ?: return "Não é uma memória do Tinker (arquivo tinker-memoria-ia.json)."
         lessonsFile.writeText(mergeLines(lessons(), j.optString("licoes")))
-        // o que o Claude ensinou vem sempre do código (versão nova atualiza); só o aprendido jogando é juntado
-        j.optJSONArray("aprende")?.let { a -> storeKnowledge(mergeKnow(knowledge(), (0 until a.length()).mapNotNull { a.optJSONObject(it)?.toKnow() }.filter { it.game != "*" && PKG.matches(it.game) })) }
         // apagado em outra instância: apaga aqui também (e não volta)
         val gone = j.optJSONArray("apagados")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty().filter { it.isNotEmpty() }
         if (gone.isNotEmpty()) {
@@ -1741,6 +1739,7 @@ class Engine private constructor(private val app: Context) {
 
     /** Traz o aprendizado de todas as instâncias da planilha e junta com o daqui (depois manda o resultado de volta). */
     suspend fun cloudPull(): String = withContext(Dispatchers.IO) {
+        runCatching { agentPull() }.getOrDefault("").takeIf { it.isNotEmpty() }?.let { Diag.add("Planilha$it") }
         val url = panelUrl("memoria=1") ?: return@withContext "Sem painel de chaves: o aprendizado fica só neste aparelho e no backup."
         val text = panelGet(url).getOrElse { return@withContext "Não li o aprendizado da planilha: ${it.message}" }
         if (runCatching { JSONObject(text).optString("tinker") }.getOrNull() != "memoria-ia") {
@@ -1887,18 +1886,61 @@ class Engine private constructor(private val app: Context) {
     private fun knowledge(): List<Know> = runCatching { JSONArray(learnFile.readText()).let { a -> (0 until a.length()).map { a.getJSONObject(it).toKnow() } } }.getOrDefault(emptyList())
     /** O que o agente sabe: o que o Claude ensinou (tipos e técnicas) mais o que ele aprendeu jogando. */
     fun knowAll(): List<Know> = SEED + TECHNIQUES + knowledge()
-    private fun knowJson() = JSONArray().apply { knowAll().forEach { put(it.toJson()) } }
-    private fun storeKnowledge(l: List<Know>) {
-        learnFile.writeText(JSONArray().apply { l.filter { it.game != "*" }.forEach { put(it.toJson()) } }.toString())
-        backupMemorySoon()
+    private fun knowJson(l: List<Know>) = JSONArray().apply { l.filter { it.game != "*" }.forEach { put(it.toJson()) } }
+    private fun storeKnowledge(l: List<Know>, push: Boolean = true) {
+        learnFile.writeText(knowJson(l).toString())
+        if (push) agentPush()
     }
-    @Synchronized private fun learnResult(label: String, type: String, ok: Boolean, ms: Long) {
+
+    // na planilha o agente tem envio e aba só dele (Agente offline), separados do aprendizado da IA: um não contamina o outro
+    private fun agentPush() {
+        val url = panelUrl("agente=1") ?: return
+        scope.launch(Dispatchers.IO) { runCatching {
+            val code = panelPost(url, JSONObject().put("tinker", "agente-offline").put("aprende", knowJson(knowledge())).toString())
+            if (code >= 400) Diag.add("Agente offline não foi para a planilha: código $code")
+        }.onFailure { Diag.add("Agente offline não foi para a planilha: ${it.message}") } }
+    }
+
+    /** Traz da aba Agente offline o que ele aprendeu em outros aparelhos (o ensinado vem do código). */
+    private fun agentPull(): String {
+        val url = panelUrl("agente=1") ?: return ""
+        val a = panelGet(url).mapCatching { JSONObject(it).takeIf { j -> j.optString("tinker") == "agente-offline" }?.optJSONArray("aprende") }.getOrNull() ?: return ""
+        val got = (0 until a.length()).mapNotNull { a.optJSONObject(it)?.toKnow() }.filter { it.game != "*" && PKG.matches(it.game) }
+        storeKnowledge(mergeKnow(knowledge(), got), push = false)
+        return " · agente offline: ${got.size} da planilha"
+    }
+    @Synchronized private fun learnResult(label: String, type: String, ok: Boolean, ms: Long, from: String = "aprendeu", tips: String = "") {
         val g = savedPkg ?: return
         // procura pelo tipo base: o 🔒 e o ×2 aparecem sozinhos na busca normal (cifrados ligados)
         val base = type.removePrefix("x").substringBefore('@').removeSuffix("x2")
         val at = java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.US).format(java.util.Date())
-        storeKnowledge(record(knowledge(), g, label, base, ok, ms, at))
+        storeKnowledge(record(knowledge(), g, label, base, ok, ms, at, from, tips))
         Diag.add("Agente offline ${if (ok) "acertou" else "errou"}: ${learnKey(label)} como $base")
+    }
+
+    /**
+     * O agente não achou: uma pergunta fechada à IA (sem ferramentas, sem a tela; poucos tokens) pede só o tipo e a técnica.
+     * Com um tipo novo, o Achar sozinho roda de novo nele; se acertar, fica guardado com origem IA (o que não funcionou não fica).
+     */
+    private suspend fun borrowFromAi(label: String, tried: String, why: String) {
+        withContext(Dispatchers.Main) { Session.autoFind = "O agente offline não achou: perguntando à IA como achar \"$label\"…" }
+        val q = "Você é especialista em editores de memória (GameGuardian, Cheat Engine). Responda SÓ com 2 linhas, sem nada antes ou depois:\n" +
+            "TIPO=<um de: i32, f32, i64, f64>\nDICA=<uma técnica do Tinker em até 25 palavras>\n\n" +
+            "Jogo: ${Session.process?.label ?: "?"} (${savedPkg ?: "?"}), motor: ${Session.engine ?: "?"}.\n" +
+            "Valor na tela, ao lado do nome: \"$label\". O número muda enquanto joga.\n" +
+            "Já tentado: tipo $tried pelo 🎯 Achar sozinho (lê o número na tela e refina a cada mudança). Resultado: ${why.take(200)}\n" +
+            "Tipos: i32 = inteiro 4 bytes (Dword), f32 = decimal 4 bytes (Float), i64 = inteiro 8 bytes (Qword), f64 = decimal 8 bytes (Double). " +
+            "Não repita o tipo já tentado se ele não achou nada. Técnicas do Tinker que pode citar: cifrados 🔒, 🧮 Disfarçado (×10, dobro, +100, XOR), " +
+            "Começar sem valor com ↑/↓, grupo 100;250::64, Ficha do objeto."
+        val a = runCatching { Assistant.ask(AiChat(), { "" }, q, emptyList()) {} }.getOrElse { "" }
+        val type = Regex("""TIPO\s*=\s*(i32|f32|i64|f64)""").find(a)?.groupValues?.get(1)
+        val tip = Regex("""DICA\s*=\s*(.+)""").find(a)?.groupValues?.get(1)?.trim()?.take(300).orEmpty()
+        Diag.add("Agente offline pediu ajuda à IA para $label: ${a.take(200).replace('\n', ' ')}")
+        if (type == null || type == tried) {
+            withContext(Dispatchers.Main) { Session.autoFind = "Não achei, e a IA não sugeriu outro tipo." + if (tip.isEmpty()) "" else "\nDica da IA: $tip" }
+            return
+        }
+        withContext(Dispatchers.Main) { autoFindStart(label, setOf(type), borrowed = tip.ifEmpty { "IA sugeriu $type" }) }
     }
 
     fun autoFindStop() {
@@ -1911,7 +1953,7 @@ class Engine private constructor(private val app: Context) {
      * value: o número que a pessoa vê agora. Acha ele na tela, busca, e a cada mudança na tela refina sozinho. Com até 3
      * resultados (e "IA pode testar valores" ligado), testa cada um: o que faz o número da tela mudar é o verdadeiro.
      */
-    fun autoFindStart(value: String, types: Set<String>, waitMs: Long = 600) {
+    fun autoFindStart(value: String, types: Set<String>, waitMs: Long = 600, borrowed: String = "") {
         autoFindStop()
         Session.autoFindWinner = null
         // número ("113") ou o nome escrito ao lado dele na tela ("Abates"): com o nome, o número pode mudar à vontade
@@ -1923,7 +1965,13 @@ class Engine private constructor(private val app: Context) {
         val (knownType, tips) = if (label != null && Session.offlineAgent) pickType(knowAll(), savedPkg.orEmpty(), label) else null to ""
         val useTypes = if (knownType != null && types == setOf("auto")) setOf(knownType) else types
         var usedType = useTypes.singleOrNull() ?: "auto"
-        fun fail(t: String) { if (label != null) learnResult(label, usedType, false, 0); say(t + if (tips.isEmpty()) "" else "\nDica do agente offline: $tips") }
+        val from = if (borrowed.isEmpty()) "aprendeu" else "IA"
+        fun fail(t: String) {
+            if (label != null) learnResult(label, usedType, false, 0, from)
+            // não soube: pega emprestado da IA o tipo para tentar (uma pergunta curta); só fica guardado se der certo
+            if (label != null && borrowed.isEmpty() && Session.offlineBorrowAi && Assistant.ready()) { scope.launch { borrowFromAi(label, usedType, t) }; return }
+            say(t + if (tips.isEmpty()) "" else "\nDica do agente offline: $tips")
+        }
         autoJob = scope.launch {
             try {
                 withContext(Dispatchers.Main) { Session.autoFind = "Procurando $target na tela…"; Session.aiHidePanel = true }
@@ -1979,7 +2027,7 @@ class Engine private constructor(private val app: Context) {
                 if (finalists.size > 3) { fail("10 minutos e ainda ${Session.count} resultados: o número mudou pouco. Continue pela busca normal."); return@launch }
                 if (finalists.isEmpty()) { fail("Nenhum resultado ficou: o número da tela pode não estar guardado como número. Tente outro valor."); return@launch }
                 // o agente aprende o tipo: com 1 a 3 do mesmo tipo já se sabe (o teste depois só escolhe o endereço)
-                finalists.map { it.type }.distinct().singleOrNull()?.let { t -> if (label != null) learnResult(label, t, true, System.currentTimeMillis() - t0) }
+                finalists.map { it.type }.distinct().singleOrNull()?.let { t -> if (label != null) learnResult(label, t, true, System.currentTimeMillis() - t0, from, borrowed) }
                 if (!Session.aiCanTest) { say("Sobraram ${finalists.size}. Ligue \"IA pode testar valores\" em Ajustes para eu descobrir o verdadeiro, ou abra cada um na Ficha."); return@launch }
                 for (h in finalists) {
                     say("Testando 0x${h.addr}…")
