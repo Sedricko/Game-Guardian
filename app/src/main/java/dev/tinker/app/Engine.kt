@@ -1767,7 +1767,7 @@ class Engine private constructor(private val app: Context) {
             "funcoes" -> return nativeFunctions(arg).let { (n, l) -> "ok $n\n" + l.joinToString("\n") { "fn ${it.addr} ${it.name}" } }
             "chama" -> return nativeFunctions(arg).second.firstOrNull { it.name == arg }?.let { f -> "ok\n" + callsOf(f.addr).joinToString("\n") { "call ${it.first} ${it.second}" } }
                 ?: error("não achei a função $arg")
-            "fixar" -> nativeFunctions(w[1]).second.firstOrNull { it.name == w[1] }?.let { patchNative(it, w.getOrElse(2) { "" }, apply = true, prefix = "missão ") }
+            "fixar" -> clearMissionPatches().let { nativeFunctions(w[1]) }.second.firstOrNull { it.name == w[1] }?.let { patchNative(it, w.getOrElse(2) { "" }, apply = true, prefix = "missão ") }
                 ?: error("não achei a função ${w[1]}")
             "velocidade" -> if (arg.isEmpty()) return findGameSpeed().also { speedAddrs = it }.let { "ok ${it.size}\ncount ${it.size}\n" + it.joinToString("\n") }
                 else setGameSpeed(speedAddrs, arg)
@@ -1784,7 +1784,7 @@ class Engine private constructor(private val app: Context) {
             "cronometros" -> return findTimers().also { timerHits = it }.let { "ok ${it.size}\ncount ${it.size}\n" + it.joinToString("\n") { t -> "timer ${t.addr} ${t.leftSec}" } }
             "terminar" -> finishTimers(timerHits)
             "quaisrodam" -> return whichRun(nativeFunctions(arg).second).let { r -> "ok ${r.size}\ncount ${r.size}\n" + r.joinToString("\n") { "roda ${it.first.name} ${it.second}" } }
-            "despatch" -> Session.patches.filter { it.name.startsWith("missão ") }.onEach { setPatch(it, false); withContext(Dispatchers.Main) { removePatch(it) } }.let { "desfeitos ${it.size}" }
+            "despatch" -> "desfeitos ${clearMissionPatches()}"
             "desconhecido" -> startUnknown(setOf(w.getOrElse(1) { "i32" }))
             "comparar" -> compare(w[1], w.drop(2).joinToString(" "))
             "escrever" -> writeAll(arg)
@@ -3918,6 +3918,12 @@ class Engine private constructor(private val app: Context) {
     @Volatile private var lastPatchAt = 0L
     private var speedAddrs = emptyList<String>()  // achados da missão "velocidade"
     private var timerHits = emptyList<GameTimer>()  // achados da missão "cronometros"
+
+    /** Desliga e tira os patches das missões, mesmo se desligar falhar (senão um patch velho volta ligado na próxima rodada). */
+    private suspend fun clearMissionPatches(): Int = Session.patches.filter { it.name.startsWith("missão ") }.onEach {
+        runCatching { setPatch(it, false) }
+        withContext(Dispatchers.Main) { removePatch(it) }
+    }.size
 
     /** Liga (bytes novos) ou desliga (bytes originais) um patch; confere antes que o código ainda é o esperado. */
     suspend fun setPatch(p: CodePatch, on: Boolean): String {
