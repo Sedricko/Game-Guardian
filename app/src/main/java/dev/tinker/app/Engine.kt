@@ -377,33 +377,33 @@ object Session {
     var appVisible by mutableStateOf(false)  // a tela principal do Tinker está na frente: a bolinha some (ficava por cima dos Ajustes)
     var panelLeft by mutableStateOf(false)  // tela deitada: painel à esquerda (padrão: à direita)
     var panelWide by mutableStateOf(false)  // o painel está de lado agora (tela deitada, menor que a tela cheia)
-    var peek by mutableStateOf(false)
-    var autoPause by mutableStateOf(true)
-    var findEncrypted by mutableStateOf(true)
-    var useBar by mutableStateOf(false)
-    var autoOverlay by mutableStateOf(true)
+    var peek by mutableStateOf(false)  // segurando o "olho": painel quase invisível
+    var autoPause by mutableStateOf(true)  // pausa o jogo durante busca/refino, para o valor não mudar no meio
+    var findEncrypted by mutableStateOf(true)  // a busca também procura valores cifrados (🔒)
+    var useBar by mutableStateOf(false)  // a bolinha abre a barra rápida em vez do painel
+    var autoOverlay by mutableStateOf(true)  // ao abrir o app, já abre o menu flutuante e sai da frente (como o GameGuardian)
     var githubToken by mutableStateOf("")  // token só de leitura do GitHub: precisa quando o repositório é privado
     var autoUpdate by mutableStateOf(false)  // baixa e instala a versão nova sozinho (root) e roda o autoteste depois
-    var ownKeypad by mutableStateOf(true)  // teclado do Tinker no lugar do teclado do telefone  // ao abrir o app, já abre o menu flutuante e sai da frente (como o GameGuardian)
-    var update by mutableStateOf<Pair<String, String>?>(null)
-    var gameGone by mutableStateOf<GameProcess?>(null)
-    var gameGoneByUser = false  // fechado pelo botão do Tinker: mostra "Reabrir", mas não abre o painel sozinho  // o jogo fechou sozinho (não pelo Tinker): pergunta se reabre  // versão nova na página de releases: nome e link do APK  // a bolinha abre a barra rápida em vez do painel  // a busca também procura valores cifrados (🔒)
+    var ownKeypad by mutableStateOf(true)  // teclado do Tinker no lugar do teclado do telefone
+    var update by mutableStateOf<Pair<String, String>?>(null)  // versão nova na página de releases: nome e link do APK
+    var gameGone by mutableStateOf<GameProcess?>(null)  // o jogo fechou sozinho (não pelo Tinker): pergunta se reabre
+    var gameGoneByUser = false  // fechado pelo botão do Tinker: mostra "Reabrir", mas não abre o painel sozinho
     var lastRefine by mutableStateOf("")  // o número do último refino: refinar de novo com ele não muda nada
-    var canUndo by mutableStateOf(false)  // há um refino para desfazer  // pausa o jogo durante busca/refino, para o valor não mudar no meio
-    var view by mutableStateOf<Pair<String, String>?>(null)
+    var canUndo by mutableStateOf(false)  // há um refino para desfazer
+    var view by mutableStateOf<Pair<String, String>?>(null)  // visualizador de memória: endereço e tipo
     var codeMode by mutableStateOf(false)  // aba Memória: instruções (Código)
     var watchHits by mutableStateOf<Pair<String, List<Triple<String, Int, String>>>?>(null)  // último "o que escreve aqui"
     var fichaMode by mutableStateOf(false)  // aba Memória: lista de endereços (false) ou ficha do objeto (true)
-    var tab by mutableIntStateOf(0)  // índice em TABS  // visualizador de memória: endereço e tipo  // segurando o "olho": painel quase invisível
+    var tab by mutableIntStateOf(0)  // índice em TABS
     val saved = mutableStateListOf<SavedItem>()
     val recipes = mutableStateListOf<Recipe>()
     val aiProposals = mutableStateListOf<AiProposal>()
     val sheetRequests = mutableStateListOf<SheetRequest>()
     val patches = mutableStateListOf<CodePatch>()
-    var release by mutableStateOf<List<Pair<String, String>>>(emptyList())
-    var traceHits by mutableStateOf<Pair<String, Pair<Int, List<Triple<String, Int, String>>>>?>(null)  // último contador de chamadas  // valores que liberaram a recompensa (Foto do jogo)
-    var alwaysRequests by mutableStateOf(setOf<String>())
-    var autoReports by mutableStateOf(true)  // relatório sozinho a cada 10 min de jogo (com atividade nova) e ao fechar o jogo pelo Tinker  // tipos que a pessoa mandou lembrar
+    var release by mutableStateOf<List<Pair<String, String>>>(emptyList())  // valores que liberaram a recompensa (Foto do jogo)
+    var traceHits by mutableStateOf<Pair<String, Pair<Int, List<Triple<String, Int, String>>>>?>(null)  // último contador de chamadas
+    var alwaysRequests by mutableStateOf(setOf<String>())  // tipos que a pessoa mandou lembrar
+    var autoReports by mutableStateOf(true)  // relatório sozinho a cada 10 min de jogo (com atividade nova) e ao fechar o jogo pelo Tinker
     val aiUndo = mutableStateListOf<AiUndo>()
     val aiClasses = mutableStateListOf<GameClass>()  // classes que a IA recomendou: aparecem no topo da lista de classes
     var aiAsk by mutableStateOf<Pair<String, String>?>(null)  // pedido automático: (onde, pergunta) — a caixa ✨ daquela tela pergunta sozinha
@@ -724,7 +724,7 @@ class Engine private constructor(private val app: Context) {
         c.setRequestProperty("User-Agent", "Tinker")
         c.inputStream.use { i -> f.outputStream().use { i.copyTo(it) } }
         val info = app.packageManager.getPackageArchiveInfo(f.path, 0)
-        require(info?.packageName == app.packageName && info?.versionName == version) { "o APK baixado não é o Tinker $version" }
+        require(info?.packageName == app.packageName && info.versionName == version) { "o APK baixado não é o Tinker $version" }
         prefs.edit().putString("testarApos", version).commit()
         Diag.add("Instalando sozinho o Tinker $version")
         val tmp = "/data/local/tmp/tinker-update.apk"
@@ -948,7 +948,7 @@ class Engine private constructor(private val app: Context) {
         when {
             n == "0" -> "Nenhum restou. O valor pode ter mudado de novo antes do refino: toque em Desfazer e refine com o valor atual." + byName +
                 focusRegions().takeIf { it.isNotEmpty() && Session.regions.none { r -> !r.enabled } }?.let {
-                    " A busca começou só em ${it.joinToString()}; se o valor estiver em outra região, esqueça as regiões em Mais formas → Onde o jogo escreve."
+                    " A busca começou só em ${it.joinToString()}; se o valor estiver em outra região, esqueça as regiões em Mais buscas → Onde o jogo escreve."
                 }.orEmpty()
             // refinar com o mesmo número não filtra nada: o valor precisa mudar no jogo antes
             n == before?.toString() -> "Continuam $n: nenhum mudou. Faça o valor mudar no jogo (gaste ou ganhe) e refine com o número novo."
@@ -4469,8 +4469,6 @@ class Engine private constructor(private val app: Context) {
         "$n valores voltaram como estavam."
     }
 
-    fun hasSequence() = seqOld.isNotEmpty()
-
     /**
      * Escreve em sequência, lê a tela e acha o número que apareceu: o dono dele é o endereço certo. Volta tudo depois.
      * Melhor que o do GG: começa logo acima do valor de agora (número absurdo pode derrubar o jogo), ignora os números
@@ -4788,7 +4786,7 @@ private val AOB = Regex("""([0-9a-f]{2}|\?\?){1,192}""")
 private val POINTER = Regex("""[^\s+]{1,100}\+[0-9a-f]{1,16}( [0-9a-f]{1,8}){0,7}""")
 
 val COMPARE_NAMES = mapOf("inc" to "aumentou", "dec" to "diminuiu", "same" to "não mudou", "changed" to "mudou", "incby" to "aumentou", "decby" to "diminuiu",
-    "lin" to "guardado diferente (×k+c)", "xk" to "cifrado com chave fixa")
+    "lin" to "disfarçado (×k+c)", "xk" to "cifrado com chave fixa")
 
 /** "1.10.0" é mais nova que "1.9.2"? Compara número por número. */
 internal fun newer(latest: String, mine: String): Boolean {

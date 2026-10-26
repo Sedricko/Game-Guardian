@@ -2962,7 +2962,6 @@ int main(void) {
         else if (!strcmp(cmd, "pause")) puts(kill(target, SIGSTOP) ? "err não pausou" : "ok");
         else if (!strcmp(cmd, "resume")) puts(kill(target, SIGCONT) ? "err não continuou" : "ok");
         else if (!strcmp(cmd, "kill")) puts(kill(target, SIGKILL) ? "err não fechou" : "ok");
-        else if (!strcmp(cmd, "reset")) { nres = nprev = 0; drop_snap(); puts("ok 0"); }
         else if (!strcmp(cmd, "undo")) {
             // troca atual e anterior: desfazer de novo refaz
             if (!nprev) { puts("err nada para desfazer"); continue; }

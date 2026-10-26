@@ -55,7 +55,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -444,12 +443,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
         }
     }
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item { EasyMode(engine, enabled, run) }
-        item { GameSpeed(engine, enabled, run) }
-        item { Timers(engine, enabled, run) }
-        item { ShopPrices(engine, enabled, run) }
-        if (Session.engine?.il2cpp == true) item { Unlocks(engine, enabled, run) }
-        item { HiddenValue(engine, enabled, run) }
+        // a busca primeiro (é o que se usa toda hora); as ferramentas ficam numa fileira logo abaixo, uma aberta por vez
         item {
             Panel {
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -504,7 +498,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                         enabled = enabled && (s.count ?: 0) > 0 && s.value.isNotBlank() && !same,
                         modifier = Modifier.weight(1f),
                     ) { Text(if (same) "Mude no jogo" else "Refinar", maxLines = 1) }
-                    // sem número na tela (barra de vida): começa já aqui, sem abrir "Mais formas de buscar"
+                    // sem número na tela (barra de vida): começa já aqui, sem abrir "Mais buscas"
                     if (s.count == null) OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { run { engine.startUnknown(s.types) } }, enabled = enabled) { Text("Sem valor") }
                 }
                 // 🎯 lê o número na tela e refina sozinho a cada mudança; com "IA pode testar valores", acha o verdadeiro
@@ -534,7 +528,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                     s.aiAsk = "busca" to "A busca não achou o valor. Descubra por quê e tente achar você mesmo (outro tipo, faixa, grupo, sem valor ou pelo nome da classe)."
                 }) { Text("✨ Por que não achou? A IA tenta achar") }
                 // o resto fica recolhido: a tela pequena do menu flutuante sobra para os resultados
-                TextButton(onClick = { more = !more }) { Text((if (more) "▾ " else "▸ ") + "Mais formas de buscar") }
+                TextButton(onClick = { more = !more }) { Text((if (more) "▾ " else "▸ ") + "Mais buscas") }
                 if (more) {
                     UnknownSearch(engine, enabled, run)
                     AobSearch(engine, enabled, run)
@@ -550,6 +544,7 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                 )
             }
         }
+        item { Toolbox(engine, enabled, run) }
         val count = s.count ?: return@LazyColumn
         val visible = s.results.map { it.addr + it.type }.toSet()
         val chosen = s.results.filter { it.addr + it.type in selected }
@@ -663,13 +658,41 @@ private fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
     }
 }
 
-/** Busca desconhecida: sem número na tela (barra de vida), compara como o valor mudou. */
 /**
- * Modo fácil: o passo a passo para quem não sabe o que é Dword, Float ou cifrado. Só pergunta o que qualquer pessoa sabe
- * (o número da tela, se aumentou ou diminuiu); o tipo, o cifrado, o dobro e as cópias o Tinker resolve sozinho.
+ * 🧰 Ferramentas do jogo, como um canivete: uma fileira de botões curtos e só a escolhida aberta embaixo, para a busca e
+ * os resultados não ficarem lá no fim da tela. Desbloquear só aparece em jogo Unity (precisa das classes IL2CPP).
  */
+@Composable
+private fun Toolbox(engine: Engine, enabled: Boolean, run: (suspend () -> String) -> Unit) {
+    val s = Session
+    // primeira vez sem busca: o Modo fácil já vem aberto, como antes; depois fica fechado até a pessoa escolher
+    var tool by remember { mutableStateOf(if (s.count == null && s.history.isEmpty()) "facil" else "") }
+    val tools = buildList {
+        add("facil" to "🧭 Fácil")
+        add("velocidade" to "⏩ Velocidade")
+        add("cronometros" to "⏱️ Cronômetros")
+        add("loja" to "🛒 Loja")
+        if (s.engine?.il2cpp == true) add("desbloquear" to "🔓 Desbloquear")
+        add("disfarcado" to "🧮 Disfarçado")
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("🧰 Ferramentas", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            tools.forEach { (key, label) -> FilterChip(selected = tool == key, onClick = { tool = if (tool == key) "" else key }, label = { Text(label) }) }
+        }
+        when (tool) {
+            "facil" -> EasyMode(engine, enabled, run)
+            "velocidade" -> GameSpeed(engine, enabled, run)
+            "cronometros" -> Timers(engine, enabled, run)
+            "loja" -> ShopPrices(engine, enabled, run)
+            "desbloquear" -> Unlocks(engine, enabled, run)
+            "disfarcado" -> HiddenValue(engine, enabled, run)
+        }
+    }
+}
+
 /**
- * 🧮 Número guardado diferente: a tela mostra 50 mas a memória guarda 100 (dobro), 507 (×10+7) ou 50 XOR uma chave.
+ * 🧮 Número disfarçado: a tela mostra 50 mas a memória guarda 100 (dobro), 507 (×10+7) ou 50 XOR uma chave.
  * Marca o número de agora; a cada mudança, diz o novo e o Tinker fica com o que mudou na mesma proporção (ou chave).
  */
 @Composable
@@ -677,7 +700,7 @@ private fun HiddenValue(engine: Engine, enabled: Boolean, run: (suspend () -> St
     var now by remember { mutableStateOf("") }
     var last by remember { mutableStateOf<String?>(null) }
     Panel {
-        Text("🧮 Número guardado diferente", style = MaterialTheme.typography.titleMedium)
+        Text("🧮 Número disfarçado", style = MaterialTheme.typography.titleMedium)
         Text(if (last == null) "Quando a busca normal não acha (o jogo guarda em dobro, ×10, +100 ou cifrado): digite o número da tela agora e toque em Começar."
             else "Era $last. Mude no jogo, digite o número novo e escolha o jeito. Mude de jeitos diferentes (ganhe 1, depois 3, ou gaste): subir sempre de 1 deixa contadores passarem.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -705,7 +728,7 @@ private fun ShopPrices(engine: Engine, enabled: Boolean, run: (suspend () -> Str
     val scope = rememberCoroutineScope()
     var prices by remember { mutableStateOf("") }
     Panel {
-        Text("🛒 Preços da loja", style = MaterialTheme.typography.titleMedium)
+        Text("🛒 Loja", style = MaterialTheme.typography.titleMedium)
         Text("Abra a loja do jogo e digite 2 a 6 preços que aparecem (ou leia da tela). O Tinker acha a lista de preços e deixa tudo por 1.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         TinkerTextField(prices, { prices = it }, "Preços (ex.: 150 320 75)", Modifier.fillMaxWidth())
@@ -750,7 +773,7 @@ private fun Timers(engine: Engine, enabled: Boolean, run: (suspend () -> String)
     var found by remember { mutableStateOf<List<GameTimer>?>(null) }
     var left by remember { mutableStateOf("") }
     Panel {
-        Text("⏱️ Cronômetros (terminar agora)", style = MaterialTheme.typography.titleMedium)
+        Text("⏱️ Cronômetros", style = MaterialTheme.typography.titleMedium)
         TinkerTextField(left, { left = it }, "Quanto falta na tela (ex.: 2h 30min, 45min, 90s)", Modifier.fillMaxWidth())
         Text("Com uma construção ou espera rodando no jogo, acha a hora em que ela termina. Troca os resultados da busca.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -791,7 +814,7 @@ internal fun durationSec(text: String): Long? {
 private fun GameSpeed(engine: Engine, enabled: Boolean, run: (suspend () -> String) -> Unit) {
     var addrs by remember { mutableStateOf<List<String>?>(null) }
     Panel {
-        Text("⏩ Velocidade do jogo (Unity)", style = MaterialTheme.typography.titleMedium)
+        Text("⏩ Velocidade (Unity)", style = MaterialTheme.typography.titleMedium)
         val a = addrs
         if (a == null) {
             Text("Acha onde o jogo guarda a velocidade do tempo. Fique no menu ou numa fase parada. Troca os resultados da busca.",
@@ -813,10 +836,13 @@ private fun GameSpeed(engine: Engine, enabled: Boolean, run: (suspend () -> Stri
     }
 }
 
+/**
+ * Modo fácil: o passo a passo para quem não sabe o que é Dword, Float ou cifrado. Só pergunta o que qualquer pessoa sabe
+ * (o número da tela, se aumentou ou diminuiu); o tipo, o cifrado, o dobro e as cópias o Tinker resolve sozinho.
+ */
 @Composable
 private fun EasyMode(engine: Engine, enabled: Boolean, run: (suspend () -> String) -> Unit) {
     val s = Session
-    var open by remember { mutableStateOf(s.count == null) }
     var step by remember { mutableIntStateOf(0) }  // 0 número; 1 número mudou; 2 escondido (aumentou/diminuiu); 3 achou
     var v by remember { mutableStateOf("") }
     var target by remember { mutableStateOf("") }
@@ -831,11 +857,7 @@ private fun EasyMode(engine: Engine, enabled: Boolean, run: (suspend () -> Strin
         if (s.count == 1L) step = 3
     }
     Panel {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("🧭 Modo fácil", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-            TextButton(onClick = { open = !open }) { Text(if (open) "Fechar" else "Abrir") }
-        }
-        if (!open) return@Panel
+        Text("🧭 Modo fácil", style = MaterialTheme.typography.titleMedium)
         when (step) {
             0 -> {
                 Text("1. Qual número você quer mudar? Digite o que aparece no jogo.")
@@ -890,6 +912,7 @@ private fun EasyMode(engine: Engine, enabled: Boolean, run: (suspend () -> Strin
     }
 }
 
+/** Busca desconhecida: sem número na tela (barra de vida), compara como o valor mudou. */
 @Composable
 private fun UnknownSearch(engine: Engine, enabled: Boolean, run: (suspend () -> String) -> Unit) {
     val s = Session
@@ -2671,6 +2694,8 @@ private val HELP = listOf(
     "Como achar um valor" to "1. Escolha o jogo. 2. Digite o número que aparece na tela (ex.: moedas) e toque em Nova busca. " +
         "3. Faça o número mudar no jogo, digite o novo e toque em Refinar. 4. Repita até sobrar 1 ou poucos resultados. " +
         "Já sabe o final do endereço (de outra vez)? Refine com ...A4 para ficar só com os que terminam em A4.",
+    "🧰 Ferramentas" to "Logo abaixo da busca, uma de cada vez: 🧭 Fácil (passo a passo), ⏩ Velocidade (Unity), ⏱️ Cronômetros (terminar " +
+        "construção agora), 🛒 Loja (tudo por 1), 🔓 Desbloquear (Unity) e 🧮 Disfarçado (o jogo guarda em dobro, ×10 ou cifrado).",
     "Tipos de valor" to "Auto procura Dword, Float, Qword e Double de uma vez. Se souber o tipo, marque só ele: a busca fica mais rápida " +
         "e com menos resultados. Vida e velocidade costumam ser Float; moedas, Dword.",
     "Faixa (100~200)" to "Use quando o jogo mostra o número arredondado ou abreviado (1.2K = 1150~1250) ou quando você não sabe o valor exato. " +
@@ -2713,7 +2738,7 @@ private val HELP = listOf(
         "com tipo e valor ao vivo; o que muda fica destacado. Em jogo Unity IL2CPP, com os nomes do próprio jogo (Player.hp); nos outros, " +
         "com o tipo adivinhado (inteiro, decimal, ponteiro, cifrado 🔒). Toque num campo para salvar ou editar; num ponteiro, para abrir o objeto. " +
         "Salvos dentro de um objeto IL2CPP ganham o nome do campo sozinhos.",
-    "Foto do jogo" to "Para pegar de novo uma recompensa (jogo offline): Busca → Mais formas → Foto do jogo. 1) Tirar foto antes, parado 4 s. " +
+    "Foto do jogo" to "Para pegar de novo uma recompensa (jogo offline): Busca → Mais buscas → Foto do jogo. 1) Tirar foto antes, parado 4 s. " +
         "2) Pegue a recompensa no jogo. 3) Ver o que mudou: a lista mostra só o que mudou com a ação (o que muda sozinho e os ponteiros ficam fora); " +
         "refine se quiser (ex.: pelo número de presentes). 4) Voltar como estava: os valores da lista (ou os escolhidos) voltam aos da foto, " +
         "e a recompensa fica para pegar de novo. Se o jogo travar, feche e abra: o jogo volta pelo save dele.",
@@ -2721,10 +2746,10 @@ private val HELP = listOf(
         "Aparece a instrução que muda o valor; \"Ver código\" abre Memória → Código, com as instruções traduzidas (SUB, STR…). Tocar numa " +
         "instrução deixa trocar por NOP (não faz nada) ou por outros bytes: vira um patch em Salvos → Patches de código, com liga/desliga. " +
         "Os bytes de antes ficam guardados; o patch volta sozinho quando o jogo reabre. Se o jogo fechar logo depois, o patch fica suspeito e desligado.",
-    "📍 Onde o jogo escreve" to "Em Busca → Mais formas: Começar, carregue o jogo ou uma fase, Ver. Mostra em que regiões da memória o jogo " +
+    "📍 Onde o jogo escreve" to "Em Busca → Mais buscas: Começar, carregue o jogo ou uma fase, Ver. Mostra em que regiões da memória o jogo " +
         "escreveu. Usar nas buscas deste jogo faz a busca começar só nelas (bem menos resultados); se não achar, ela procura em tudo sozinha. " +
         "Os salvos também ensinam: a região de cada salvo entra junto.",
-    "💾 Editor de save" to "Busca → Mais formas → Editor de save: lista os arquivos onde o jogo guarda o progresso. Os de texto (XML das " +
+    "💾 Editor de save" to "Busca → Mais buscas → Editor de save: lista os arquivos onde o jogo guarda o progresso. Os de texto (XML das " +
         "preferências, PlayerPrefs do Unity, JSON) mostram cada número pelo nome; mude e toque em Gravar: o Tinker faz backup do save, fecha o " +
         "jogo e devolve o arquivo. Ao abrir de novo, o jogo lê o valor novo. Save binário ou cifrado não dá: use a busca na memória. Só jogo offline.",
     "Editar em sequência" to "Como no GameGuardian: em Busca → Editar, \"Em sequência\" escreve 100, 101, 102… um em cada resultado (ou nos " +
