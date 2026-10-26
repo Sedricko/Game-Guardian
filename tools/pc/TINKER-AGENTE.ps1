@@ -208,6 +208,8 @@ function Ui-Tour($v) {
         }
     }
     $script:tourRes = @(); $script:tourShots = ""
+    # print de cada tela de dentro (ferramenta aberta, Mais buscas, Ficha, Codigo, Ajuda), uma linha por print na planilha
+    function Snap($name) { try { Post-Sheet "agente PC: print $name" "" ("jpeg base64`n" + (Shot "tour")) $v } catch { } }
     & $adb shell settings put system user_rotation 0
     & $adb logcat -b crash -c
     Step "aba 0" | Out-Null; Start-Sleep 2; Top-Ui
@@ -216,26 +218,31 @@ function Ui-Tour($v) {
     }
     # cada ferramenta: abre pelo botao da fileira e confere o titulo dela; toca de novo para fechar
     # nome no fim do texto, depois de um espaco (o botao e "emoji Nome"; uma frase com a mesma palavra no meio nao conta)
-    foreach ($tool in @(@('(^|\s)F.{1,2}cil$', "Modo f"), @('(^|\s)Velocidade$', "Achar a velocidade"), @('(^|\s)Cron.metros$', "Achar cron"),
-                        @('(^|\s)Loja$', "Achar pre"), @('(^|\s)Disfar.ado$', "mero disfar"))) {
-        Check "Ferramenta $($tool[0])" {
+    foreach ($tool in @(@('(^|\s)F.{1,2}cil$', "Modo f", "Facil"), @('(^|\s)Velocidade$', "Achar a velocidade", "Velocidade"),
+                        @('(^|\s)Cron.metros$', "Achar cron", "Cronometros"), @('(^|\s)Loja$', "Achar pre", "Loja"),
+                        @('(^|\s)Disfar.ado$', "mero disfar", "Disfarcado"))) {
+        Check "Ferramenta $($tool[2])" {
             Top-Ui
             $was = Find-Ui $tool[1] 0
             if (-not $was) { Tap-Chip $tool[0] }
             if (-not (Find-Ui $tool[1] 3)) { throw "abriu mas nao mostrou '$($tool[1])'" }
+            Snap "Ferramenta $($tool[2])"
             Tap-Chip $tool[0]  # fecha
         }
     }
     Check "Mais buscas" {
         Top-Ui; Tap-Ui "Mais buscas"
         foreach ($t in @("Come.ar sem valor", "Busca por bytes")) { if (-not (Find-Ui $t 4)) { throw "nao mostrou '$t'" } }
+        Snap "Mais buscas"
         Top-Ui; Tap-Ui "Mais buscas"
     }
     Check "Salvos" { Step "aba 1" | Out-Null; Start-Sleep 2; if (-not (Find-Ui "Exportar|Colar lista|Receitas" 6)) { throw "a aba nao mostrou a lista nem Exportar" } }
     Check "Memoria: Enderecos, Ficha e Codigo" {
         Step "aba 2" | Out-Null; Start-Sleep 2; Top-Ui
         Tap-Ui "^Ficha$" 0; if (-not (Find-Ui "classe" 3)) { throw "a Ficha nao mostrou as classes" }
+        Snap "Memoria Ficha"
         Top-Ui; Tap-Ui "^C.digo$" 0; if (-not (Find-Ui "Procurar|Fun..o pelo nome" 3)) { throw "o Codigo nao mostrou a busca de funcoes" }
+        Snap "Memoria Codigo"
         Top-Ui; Tap-Ui "^Endere.os$" 0; if (-not (Find-Ui "Ir para um endere" 3)) { throw "Enderecos nao mostrou Ir para um endereco" }
     }
     Check "Registro" { Step "aba 3" | Out-Null; Start-Sleep 2; if (-not (Find-Ui "Compartilhar relat" 4)) { throw "nao mostrou Compartilhar relatorio" } }
@@ -249,6 +256,7 @@ function Ui-Tour($v) {
     Check "Ajuda" {
         Tap-Ui "Para que serve o Tinker" 12
         if (-not (Find-Ui "Editor de mem" 2)) { throw "o item da Ajuda nao abriu" }
+        Snap "Ajuda"
     }
     Check "Tinker continua aberto" {
         if (-not (& $adb shell pidof $app)) { throw "o Tinker fechou durante a volta" }
