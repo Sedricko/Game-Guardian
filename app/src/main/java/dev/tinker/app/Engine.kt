@@ -1734,7 +1734,7 @@ class Engine private constructor(private val app: Context) {
             "salvos" -> return "ok\n" + Session.saved.filter { it.name.startsWith("missão") }.map { i ->
                 val now = runCatching { call { d -> d.send("read ${i.addr} ${i.type}", quiet = true).status } }.getOrDefault("?")
                 "salvo ${i.name.substringAfter("missão ")} ${i.addr} ${if (i.pid == currentPid) "voltou" else "perdido"} $now ${i.pointer.ifEmpty { "-" }}"
-            }.joinToString("\n")
+            }.joinToString("\n") + "\n" + Diag.lines.lastOrNull { "Não voltou: missão" in it || "Restauração dos salvos" in it }.orEmpty()
             else -> error("passo desconhecido: $cmd")
         }
         val (count, hits) = list()
@@ -3032,7 +3032,15 @@ class Engine private constructor(private val app: Context) {
             val why = mutableListOf<String>()  // por que não voltou: vai para o registro
             val how = when {
                 item.pointer.isNotEmpty() -> confirmPointer(item, pid, why)
-                item.anchor.isNotEmpty() -> "offset".takeIf { resolve(item).pid == pid }.also { if (it == null) why += "o salvo que ele segue não voltou" }
+                item.anchor.isNotEmpty() -> resolve(item).let { r ->
+                    when {
+                        r.pid != pid -> null.also { why += "o salvo que ele segue não voltou" }
+                        // a âncora voltou num lugar errado (ou a ficha mudou): o offset cairia em lixo, então tenta os outros jeitos
+                        !plausible(r, runCatching { send("read ${r.addr} ${r.type}", quiet = true).status }.getOrDefault("?")) ->
+                            null.also { replace(r) { item }; why += "pelo offset o valor fica fora do histórico" }
+                        else -> "offset"
+                    }
+                }
                 else -> null
             } ?: fromChains(item, pid, why) ?: (if (signature) fromIl2cpp(item, pid, why) ?: fromSignature(item, pid, why) ?: fromSimilar(item, pid, why) else null)
             when {

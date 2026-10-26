@@ -296,8 +296,15 @@ function Run-Missions($v) {
         Tap "+1 ouro"  # grava o ouro no save do jogo, que volta igual ao reabrir
         & $adb shell am force-stop $game
         Start-Sleep 2; Front-Game; Start-Sleep 12  # o Tinker percebe o jogo novo e restaura os salvos
-        Step "salvos" | Out-Null
-        $line = ($script:last -split "`n") | Where-Object { $_ -like "salvo ouro *" } | Select-Object -First 1
+        # a assinatura roda a cada 15 s enquanto o jogo carrega: espera ate 45 s, como uma pessoa esperaria
+        for ($w = 0; $w -lt 4; $w++) {
+            Step "salvos" | Out-Null
+            $line = ($script:last -split "`n") | Where-Object { $_ -like "salvo ouro *" } | Select-Object -First 1
+            if ($line -and ($line -split " ")[3] -eq "voltou") { break }
+            Start-Sleep 11
+        }
+        $why = ($script:last -split "`n") | Where-Object { ($_ -like "*voltou:*" -or $_ -like "*salvos:*") -and $_ -notlike "salvo *" } | Select-Object -Last 1
+        if ($why) { $line = "$line | $why" }
         if (-not $line) { throw "o salvo sumiu da lista" }
         $f = $line -split " "
         if ($f[3] -ne "voltou") { throw "nao voltou sozinho depois de reabrir ($line)" }
