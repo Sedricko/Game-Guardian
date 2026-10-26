@@ -139,6 +139,102 @@ function Send-Shots($v) {
     } catch { Say "nao tirei os prints: $($_.Exception.Message)" }
 }
 
+# a tela do Tinker como o uiautomator ve (os textos do Compose): cada no com texto e o retangulo dele
+function Ui-Nodes {
+    for ($k = 0; $k -lt 4; $k++) {
+        & $adb shell uiautomator dump /sdcard/tinker-ui.xml 2>&1 | Out-Null
+        $x = (& $adb shell cat /sdcard/tinker-ui.xml 2>$null) -join ""
+        if ($x -match "<hierarchy") {
+            return [regex]::Matches($x, '<node [^>]*?text="([^"]*)"[^>]*?content-desc="([^"]*)"[^>]*?bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"') | ForEach-Object {
+                [pscustomobject]@{ t = [Net.WebUtility]::HtmlDecode($_.Groups[1].Value + " " + $_.Groups[2].Value).Trim()
+                                   x = ([int]$_.Groups[3].Value + [int]$_.Groups[5].Value) / 2; y = ([int]$_.Groups[4].Value + [int]$_.Groups[6].Value) / 2 }
+            }
+        }
+        Start-Sleep 1  # tela animando: o uiautomator nao le; tenta de novo
+    }
+    throw "nao consegui ler a tela (uiautomator)"
+}
+# acha um texto (regex) na tela; sem achar, rola para baixo e tenta de novo
+function Find-Ui($re, $scrolls = 6) {
+    for ($k = 0; $k -le $scrolls; $k++) {
+        $n = Ui-Nodes | Where-Object { $_.t -match $re } | Select-Object -First 1
+        if ($n) { return $n }
+        if ($k -lt $scrolls) { & $adb shell input swipe 540 1900 540 900 300; Start-Sleep -Milliseconds 700 }
+    }
+    $null
+}
+function Tap-Ui($re, $scrolls = 6) {
+    $n = Find-Ui $re $scrolls
+    if (-not $n) { throw "nao achei '$re' na tela" }
+    & $adb shell input tap ([int]$n.x) ([int]$n.y)
+    Start-Sleep -Milliseconds 900
+}
+function Top-Ui { for ($k = 0; $k -lt 4; $k++) { & $adb shell input swipe 540 700 540 1900 200 }; Start-Sleep -Milliseconds 500 }
+
+# volta por todo o app, como uma pessoa: cada aba, cada ferramenta, cada modo; confere que a tela abriu e o app nao fechou
+function Ui-Tour($v) {
+    function Check($name, [scriptblock]$b) {
+        try { $r = & $b; $script:tourRes += "OK $name$(if ($r) { ": $r" })" }
+        catch {
+            $script:tourRes += "FALHA $name`: $($_.Exception.Message)"
+            $script:tourShots += "`n=== $name ===`njpeg base64`n" + (Shot "tour")
+        }
+    }
+    $script:tourRes = @(); $script:tourShots = ""
+    & $adb shell settings put system user_rotation 0
+    & $adb logcat -b crash -c
+    Step "aba 0" | Out-Null; Start-Sleep 2; Top-Ui
+    Check "Busca: botoes principais no topo" {
+        foreach ($t in @("Nova busca", "Refinar", "Ferramentas")) { if (-not (Find-Ui $t 0)) { throw "'$t' nao aparece sem rolar" } }
+    }
+    # cada ferramenta: abre pelo botao da fileira e confere o titulo dela; toca de novo para fechar
+    foreach ($tool in @(@("F.{1,2}cil", "Modo f"), @("Velocidade", "Achar a velocidade"), @("Cron.metros", "Achar cron"),
+                        @("Loja", "Achar pre"), @("Disfar.ado", "mero disfar"))) {
+        Check "Ferramenta $($tool[0])" {
+            Top-Ui
+            $was = Find-Ui $tool[1] 0
+            if (-not $was) { Tap-Ui $tool[0] 2 }
+            if (-not (Find-Ui $tool[1] 3)) { throw "abriu mas nao mostrou '$($tool[1])'" }
+            Top-Ui; Tap-Ui $tool[0] 2  # fecha
+        }
+    }
+    Check "Mais buscas" {
+        Top-Ui; Tap-Ui "Mais buscas"
+        foreach ($t in @("Come.ar sem valor", "Buscar bytes")) { if (-not (Find-Ui $t 4)) { throw "nao mostrou '$t'" } }
+        Top-Ui; Tap-Ui "Mais buscas"
+    }
+    Check "Salvos" { Step "aba 1" | Out-Null; Start-Sleep 2; if (-not (Find-Ui "Exportar|Colar lista|Receitas" 6)) { throw "a aba nao mostrou a lista nem Exportar" } }
+    Check "Memoria: Enderecos, Ficha e Codigo" {
+        Step "aba 2" | Out-Null; Start-Sleep 2; Top-Ui
+        Tap-Ui "^Ficha$" 0; if (-not (Find-Ui "classe" 3)) { throw "a Ficha nao mostrou as classes" }
+        Top-Ui; Tap-Ui "^C.digo$" 0; if (-not (Find-Ui "Procurar|Fun..o pelo nome" 3)) { throw "o Codigo nao mostrou a busca de funcoes" }
+        Top-Ui; Tap-Ui "^Endere.os$" 0; if (-not (Find-Ui "Ir para um endere" 3)) { throw "Enderecos nao mostrou Ir para um endereco" }
+    }
+    Check "Registro" { Step "aba 3" | Out-Null; Start-Sleep 2; if (-not (Find-Ui "Compartilhar relat" 4)) { throw "nao mostrou Compartilhar relatorio" } }
+    Check "Ajustes: o dia a dia antes da IA" {
+        Step "aba 4" | Out-Null; Start-Sleep 2; Top-Ui
+        $menu = Find-Ui "^Menu flutuante$" 0
+        if (-not $menu) { throw "Menu flutuante nao e a primeira coisa dos Ajustes" }
+        if (-not (Find-Ui "^Assistente \(IA\)$" 12)) { throw "nao achei o Assistente (IA) rolando" }
+        "Menu flutuante no topo, IA mais abaixo"
+    }
+    Check "Ajuda" {
+        Tap-Ui "Para que serve o Tinker" 12
+        if (-not (Find-Ui "Editor de mem" 2)) { throw "o item da Ajuda nao abriu" }
+    }
+    Check "Tinker continua aberto" {
+        if (-not (& $adb shell pidof $app)) { throw "o Tinker fechou durante a volta" }
+        $c = (& $adb logcat -d -b crash) -join "`n"
+        if ($c -match "dev\.tinker\.app") { throw "queda registrada: " + $c.Substring(0, [Math]::Min($c.Length, 1500)) }
+    }
+    Step "aba 0" | Out-Null
+    $ok = @($script:tourRes | Where-Object { $_ -like "OK*" }).Count
+    $fails = ($script:tourRes | Where-Object { $_ -like "FALHA*" }) -join "`n"
+    Say "volta pelo app: $ok de $($script:tourRes.Count) ok"
+    if ($fails) { Say $fails }
+    Post-Sheet "agente PC: volta pelo app $ok de $($script:tourRes.Count) ok" $fails (($script:tourRes -join "`n") + $script:tourShots) $v
+}
+
 # o link da planilha (salvo so neste PC) vai para o Tinker do emulador pelo adb root, com o app fechado
 function Set-PanelLink {
     $link = (Get-Content $cfg -ErrorAction SilentlyContinue | Select-Object -First 1)
@@ -527,6 +623,7 @@ function Test-Version {
     if ($fails) { Say $fails }
     Post-Sheet "agente PC: $first" $fails ($out + "`n`n=== crash ===`n" + $crash) $v
     Send-Shots $v
+    try { Ui-Tour $v } catch { Say "a volta pelo app parou: $($_.Exception.Message)" }
     if ((& $adb shell pm list packages $game) -match $game) {
         try { Run-Missions $v } catch { Say "missoes pararam: $($_.Exception.Message)" }
     }
