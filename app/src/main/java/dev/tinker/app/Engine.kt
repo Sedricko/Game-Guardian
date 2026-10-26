@@ -656,13 +656,14 @@ class Engine private constructor(private val app: Context) {
             storePatches()
             Diag.add("O jogo fechou logo depois de um patch de código: os patches ligados ficaram como suspeitos e desligados")
         }
-        sendReport("o jogo fechou sozinho", auto = true)
+        // sem falha registrada (deslizado, force-stop, missão reabrindo o jogo): não é queda, não vai relatório nem dica
+        if (crashed) sendReport("o jogo fechou sozinho", auto = true)
         Diag.add("=== O jogo ${p.label} (PID ${p.pid}) fechou. Falhas registradas pelo Android: ===")
         dedupe(crashes).forEach(Diag::add)
         Diag.add("=== Últimas linhas do logcat do jogo ===")
         runCatching { dedupe(d.call("logs").lines).forEach(Diag::add) }
         Diag.add("=== Fim do relatório da queda ===")
-        Diag.add("Dica: se o jogo fechou logo depois de editar ou congelar, provavelmente o endereço não era o valor certo " +
+        if (crashed) Diag.add("Dica: se o jogo fechou logo depois de editar ou congelar, provavelmente o endereço não era o valor certo " +
             "(ou era de outro tipo). Refine mais vezes até sobrar 1 resultado antes de editar.")
     }
 
