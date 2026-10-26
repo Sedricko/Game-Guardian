@@ -30,7 +30,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/statvfs.h>
 #include <sys/uio.h>
 #include <sys/utsname.h>
@@ -362,10 +364,13 @@ static void add_chunks(uint64_t s, uint64_t e, int region, void *ctx) {
 
 // Roda fn em cada pedaço usando todos os núcleos (até 8). Cada thread tem um buffer de 2 MB.
 typedef void (*chunk_fn)(size_t i, unsigned char *buf, void *ctx);
-typedef struct { chunk_fn fn; void *ctx; size_t n, next; } pool_t;
+typedef struct { chunk_fn fn; void *ctx; size_t n, next; pthread_t main; } pool_t;
 
 static void *worker(void *arg) {
     pool_t *p = arg;
+    // threads extras da varredura com prioridade baixa: a tela do Tinker e o jogo continuam fluindo (no emulador a
+    // busca usava todos os núcleos e a tela parava 1–2 s); a thread principal fica normal, a busca não demora mais quando sobra CPU
+    if (!pthread_equal(pthread_self(), p->main)) setpriority(PRIO_PROCESS, (id_t)syscall(SYS_gettid), 10);
     unsigned char *buf = malloc(2 * CHUNK);
     if (!buf) return NULL;  // as outras threads fazem o trabalho
     for (size_t i; (i = __atomic_fetch_add(&p->next, 1, __ATOMIC_RELAXED)) < p->n;) p->fn(i, buf, p->ctx);
@@ -374,7 +379,7 @@ static void *worker(void *arg) {
 }
 
 static void parallel(size_t n, chunk_fn fn, void *ctx) {
-    pool_t p = {fn, ctx, n, 0};
+    pool_t p = {fn, ctx, n, 0, pthread_self()};
     long cpus = sysconf(_SC_NPROCESSORS_ONLN);
     int nt = cpus < 1 ? 1 : cpus > 8 ? 8 : (int)cpus, started = 0;
     pthread_t th[8];

@@ -1516,7 +1516,10 @@ class Engine private constructor(private val app: Context) {
     private fun mergePatches(pkg: String, a: JSONArray) {
         val current = pkg == savedPkg
         val have = if (current) Session.patches.toList() else jsonFile("patches-$pkg.json").let { x -> (0 until x.length()).mapNotNull { x.optJSONObject(it)?.toPatch() } }
-        val new = (0 until a.length()).mapNotNull { a.optJSONObject(it)?.toPatch()?.copy(enabled = false) }.filter { n -> have.none { it.id == n.id } }
+        val gone = deleted()
+        // patches de missão são do teste automático: não voltam do backup
+        val new = (0 until a.length()).mapNotNull { a.optJSONObject(it)?.toPatch()?.copy(enabled = false) }
+            .filter { n -> n.id !in gone && !n.name.startsWith("missão ") && have.none { it.id == n.id } }
         if (new.isEmpty()) return
         if (current) { Session.patches.addAll(new); storePatches() }
         else File(app.filesDir, "patches-$pkg.json").writeText(JSONArray().apply { (have + new).forEach { put(it.toJson()) } }.toString())
@@ -4128,6 +4131,7 @@ class Engine private constructor(private val app: Context) {
     fun removePatch(p: CodePatch) {
         Session.patches.removeAll { it.id == p.id }
         storePatches()
+        markDeleted(listOf(p.id))  // senão a memória da planilha traz de volta (a missão acumulava 22 cópias)
         Diag.add("Patch removido: ${p.name}")
     }
 
