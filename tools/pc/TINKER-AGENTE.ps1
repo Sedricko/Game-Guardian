@@ -367,6 +367,11 @@ function Run-Missions($v) {
         if ($c -lt 1 -or $c -gt 3) { throw "sobraram $c ($msg)" }
         "sobraram $c so lendo a tela ($msg)"
     }
+    Mission "unreal: objeto pelo nome (tabelas de nomes e objetos)" {
+        $c = Step "unreal jogador"
+        if ($script:last -notmatch "ueobj [0-9a-f]+ BP_Jogador_C Jogador") { throw "nao achou Jogador da classe BP_Jogador_C ($($script:last -replace "`n", ' | '))" }
+        "achou $c objeto(s): $((($script:last -split "`n") | Select-Object -First 1))"
+    }
     Mission "jogo atualizado (campos mudam de lugar)" {
         Tap "Atualizar jogo"
         $r = Narrow "i32" "Ouro" "+1 ouro" $int

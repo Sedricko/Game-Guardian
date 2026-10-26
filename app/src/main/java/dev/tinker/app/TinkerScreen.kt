@@ -1612,6 +1612,7 @@ private fun FichaView(engine: Engine, center: String, run: (suspend () -> String
         // sem IL2CPP não há nomes de classe: a ficha mostra só os bytes em volta
         Text("${e.name}: este jogo não tem classes IL2CPP com nome. A ficha mostra os campos em volta do salvo; receitas vão pelo ponteiro ou pela assinatura.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (e.name == "Unreal") UnrealOpener(engine)
         if (center != "0") FichaBody(engine, center, run)
         return
     }
@@ -1632,6 +1633,37 @@ private fun FichaView(engine: Engine, center: String, run: (suspend () -> String
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     if (!none) FichaBody(engine, center, run)
+}
+
+/** Unreal: acha objetos pelo nome ou pela classe (Jogador, BP_Player_C) nas tabelas do próprio motor e abre a Ficha. */
+@Composable
+private fun UnrealOpener(engine: Engine) {
+    val s = Session
+    val scope = rememberCoroutineScope()
+    var filter by remember { mutableStateOf("") }
+    var found by remember { mutableStateOf<Pair<String, List<UeObj>>?>(null) }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        TinkerTextField(filter, { filter = it }, "Objeto da Unreal (ex.: Player, Character)", Modifier.weight(1f))
+        OutlinedButton(shape = MaterialTheme.shapes.medium, enabled = !s.busy && filter.isNotBlank(), contentPadding = PaddingValues(horizontal = 12.dp),
+            onClick = { scope.launch { found = runCatching { engine.unrealObjects(filter) }.getOrElse { (it.message ?: "erro") to emptyList() } } }) { Text("Procurar") }
+    }
+    val (msg, list) = found ?: return
+    Text(msg, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Column(Modifier.fillMaxWidth().heightIn(max = 240.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        list.forEach { o ->
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceContainerLow)
+                    .sizeIn(minHeight = 48.dp).clickable { s.view = o.addr to "i32" }.padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(o.name, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("${o.cls} · 0x${o.addr}", fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Text("Abrir", color = MaterialTheme.colorScheme.primary)
+            }
+        }
+    }
 }
 
 /** "Abrir objeto pelo nome": digita a classe (PlayerData) e a ficha abre com todos os valores, sem buscar número nenhum. */

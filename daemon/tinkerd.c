@@ -1915,6 +1915,121 @@ static int func_of(uint64_t a, uint64_t *start, uint64_t *end, char *name, size_
     return 0;
 }
 
+// ---- Unreal 4.23+ e 5: nomes (FNamePool) e objetos (GUObjectArray), lidos da memória como os dumpers fazem ----
+// O bloco 0 dos nomes começa sempre com "None" e "ByteProperty" (o app acha com aobfind e passa o endereço); a tabela
+// dos blocos e a dos objetos ficam nos dados da lib do jogo e são achadas pelo formato. UObject (64 bits): classe em
+// +0x10, nome (índice do FName) em +0x18, índice interno em +0xC.
+static uint64_t ue_blocks[8192];
+static int ue_nblocks;
+
+static int ue_name(uint32_t idx, char *out, size_t n) {
+    uint32_t b = idx >> 16, off = (idx & 0xffff) * 2;
+    out[0] = 0;
+    if (b >= (uint32_t)ue_nblocks || n < 2) return -1;
+    uint16_t h;
+    if (read_mem(ue_blocks[b] + off, &h, 2)) return -1;
+    int len = h >> 6, wide = h & 1;
+    if (len <= 0) return -1;
+    if (wide) {  // UTF-16: fica a parte ASCII
+        uint16_t w[256];
+        int l = len < 255 ? len : 255;
+        if (read_mem(ue_blocks[b] + off + 2, w, l * 2)) return -1;
+        size_t k = 0;
+        for (int i = 0; i < l && k + 1 < n; i++) out[k++] = w[i] >= 32 && w[i] < 127 ? (char)w[i] : '?';
+        out[k] = 0;
+    } else {
+        int l = (size_t)len < n - 1 ? len : (int)n - 1;
+        if (read_mem(ue_blocks[b] + off + 2, out, l)) return -1;
+        out[l] = 0;
+    }
+    for (char *c = out; *c; c++) if (*c == ' ' || *c == '\n') *c = '_';
+    return 0;
+}
+
+// cada valor de 8 bytes dos dados graváveis das libs do jogo passa por fn; devolve o endereço do primeiro aceito
+typedef int (*qw_fn)(uint64_t at, uint64_t v, void *ctx);
+static uint64_t scan_qwords(qw_fn fn, void *ctx) {
+    for (size_t r = 0; r < nsr; r++) {
+        if (mods[sr[r].mod].system && !getenv("TINKER_ALL_LIBS")) continue;
+        size_t len = sr[r].end - sr[r].start;
+        if (len > (64u << 20)) continue;
+        uint64_t *buf = malloc(len);
+        if (!buf) continue;
+        if (!read_mem(sr[r].start, buf, len))
+            for (size_t i = 0; i < len / 8; i++)
+                if (fn(sr[r].start + i * 8, buf[i], ctx)) { uint64_t a = sr[r].start + i * 8; free(buf); return a; }
+        free(buf);
+    }
+    return 0;
+}
+
+static int is_blocks(uint64_t at, uint64_t v, void *ctx) {
+    uint64_t next;
+    (void)at;
+    return v == *(uint64_t *)ctx && !read_mem(at + 8, &next, 8) && (next == 0 || (next & TAGMASK) > 0x10000);
+}
+
+static int ue_item = 24;
+static uint32_t ue_index(uint64_t chunk, int i, int item) {
+    uint64_t obj;
+    uint32_t idx = 0xffffffff;
+    if (read_mem(chunk + (uint64_t)i * item, &obj, 8) || !(obj & TAGMASK)) return 0xffffffff;
+    if (read_mem((obj & TAGMASK) + 0xc, &idx, 4)) return 0xffffffff;
+    return idx;
+}
+
+// FChunkedFixedUObjectArray: Objects (ponteiro para os pedaços), PreAllocated, Max, Num, MaxChunks, NumChunks
+static int is_objects(uint64_t at, uint64_t v, void *ctx) {
+    (void)ctx;
+    v &= TAGMASK;
+    if (v < 0x10000 || (v & 7)) return 0;
+    int32_t f[4];
+    if (read_mem(at + 16, f, 16) || f[1] < 3 || f[1] > f[0] || f[0] > 100000000 || f[3] < 1 || f[3] > f[2] || f[2] > 5000) return 0;
+    uint64_t chunk;
+    if (read_mem(v, &chunk, 8) || !(chunk & TAGMASK)) return 0;
+    chunk &= TAGMASK;
+    for (int item = 24; item >= 16; item -= 8)
+        if (ue_index(chunk, 0, item) == 0 && ue_index(chunk, 1, item) == 1 && ue_index(chunk, 2, item) == 2) { ue_item = item; return 1; }
+    return 0;
+}
+
+// "ue BLOCO0 filtro": objetos cujo nome ou classe contém o filtro (vazio ou * = só conta)
+static void cmd_ue(const char *block0, const char *filter) {
+    if (mods_pid != target) { psize = ptr_size(); if (load_modules()) { puts("err sem mapa"); return; } }
+    if (psize != 8) { puts("err só jogos de 64 bits"); return; }
+    uint64_t b0 = strtoull(block0, NULL, 16);
+    if (b0 < 0x10000) { puts("err endereço do bloco de nomes inválido"); return; }
+    uint64_t tab = scan_qwords(is_blocks, &b0);
+    if (!tab) { puts("err não achei a tabela dos blocos de nomes"); return; }
+    ue_nblocks = 0;
+    while (ue_nblocks < 8192 && !read_mem(tab + ue_nblocks * 8ULL, &ue_blocks[ue_nblocks], 8) && ue_blocks[ue_nblocks]) ue_blocks[ue_nblocks] &= TAGMASK, ue_nblocks++;
+    uint64_t arr = scan_qwords(is_objects, NULL);
+    if (!arr) { printf("err achei %d blocos de nomes, mas não a lista de objetos\n", ue_nblocks); return; }
+    uint64_t objs;
+    int32_t num;
+    read_mem(arr, &objs, 8);
+    read_mem(arr + 20, &num, 4);
+    objs &= TAGMASK;
+    const char *f = !filter[0] || !strcmp(filter, "*") ? NULL : filter;
+    int shown = 0, total = 0;
+    uint64_t chunk = 0;
+    int cur = -1;
+    char name[160], cname[160];
+    for (int i = 0; i < num && f; i++) {
+        if (i / 65536 != cur) { cur = i / 65536; if (read_mem(objs + cur * 8ULL, &chunk, 8)) break; chunk &= TAGMASK; }
+        uint64_t obj, cls;
+        uint32_t ni, ci;
+        if (read_mem(chunk + (uint64_t)(i % 65536) * ue_item, &obj, 8) || !(obj &= TAGMASK)) continue;
+        if (read_mem(obj + 0x18, &ni, 4) || read_mem(obj + 0x10, &cls, 8) || ue_name(ni, name, sizeof name)) continue;
+        cls &= TAGMASK;
+        if (!cls || read_mem(cls + 0x18, &ci, 4) || ue_name(ci, cname, sizeof cname)) strcpy(cname, "?");
+        if (!strcasestr(name, f) && !strcasestr(cname, f)) continue;
+        total++;
+        if (shown++ < 200) printf("ueobj %" PRIx64 " %s %s\n", obj, cname, name);
+    }
+    printf("ok %d %d %d\n", total, ue_nblocks, num);
+}
+
 static void cmd_func(const char *addr) {
     uint64_t a = strtoull(addr, NULL, 16), s, e;
     char name[160], w[160];
@@ -2743,6 +2858,7 @@ int main(void) {
         else if (!strcmp(cmd, "syms")) cmd_syms(a1);
         else if (!strcmp(cmd, "func")) cmd_func(a1);
         else if (!strcmp(cmd, "calls")) cmd_calls(a1);
+        else if (!strcmp(cmd, "ue")) cmd_ue(a1, a2);
         else if (!strcmp(cmd, "photo")) cmd_photo();
         else if (!strcmp(cmd, "photonoise")) cmd_photonoise();
         else if (!strcmp(cmd, "photodiff")) cmd_photodiff();

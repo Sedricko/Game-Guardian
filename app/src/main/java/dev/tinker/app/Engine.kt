@@ -152,6 +152,11 @@ private fun x86Return(ret: Int, value: String): String? {
 
 /** Função de uma lib do jogo, achada pelo nome na tabela de símbolos da própria lib (sem IDA nem Ghidra). */
 const val SPEED_NAME = "⏩ velocidade"
+// começo do bloco 0 de nomes da Unreal 4.23+ e 5: "None" e "ByteProperty", cada um com 2 bytes de cabeçalho antes
+const val UE_NAMES_AOB = "??014e6f6e65??034279746550726f7065727479"
+
+/** Objeto da Unreal achado pelo nome: endereço, classe e nome (como nos dumpers). */
+data class UeObj(val addr: String, val cls: String, val name: String)
 
 data class NativeFn(val addr: String, val size: Long, val lib: String, val name: String)
 
@@ -1770,6 +1775,7 @@ class Engine private constructor(private val app: Context) {
                 delay(300)  // a última frase chega pela thread da tela
                 (Session.autoFind ?: "parou").also { autoFindStop() }
             }
+            "unreal" -> return unrealObjects(arg).let { (msg, l) -> "ok $msg\ncount ${l.size}\n" + l.joinToString("\n") { "ueobj ${it.addr} ${it.cls} ${it.name}" } }
             "despatch" -> Session.patches.filter { it.name.startsWith("missão ") }.onEach { setPatch(it, false); withContext(Dispatchers.Main) { removePatch(it) } }.let { "desfeitos ${it.size}" }
             "desconhecido" -> startUnknown(setOf(w.getOrElse(1) { "i32" }))
             "comparar" -> compare(w[1], w.drop(2).joinToString(" "))
@@ -3650,6 +3656,25 @@ class Engine private constructor(private val app: Context) {
         call { d -> addrs.forEach { d.send("unfreeze $it f32", quiet = true); d.send("write $it f32 $f") } }
         if (f != 1f) withContext(Dispatchers.Main) { addSaved(addrs.map { Hit(it, "f32", "A", f.toString()) }, frozen = true, name = SPEED_NAME) }
         return if (f == 1f) "Velocidade normal." else "Jogo em ${f}x (travado em Salvos → $SPEED_NAME; 1x solta)."
+    }
+
+    /**
+     * Objetos da Unreal cujo nome ou classe contém o texto, lidos das tabelas de nomes e de objetos que o próprio motor
+     * guarda na memória (sem dump de fora). Devolve o resumo e até 200 objetos.
+     */
+    suspend fun unrealObjects(filter: String): Pair<String, List<UeObj>> = call { d ->
+        val blocks = runCatching { d.send("aobfind $UE_NAMES_AOB data", quiet = true).lines }.getOrDefault(emptyList())
+            .map { it.trim() }.filter { it.isNotEmpty() && it.all { c -> c.isDigit() || c in 'a'..'f' } }
+        if (blocks.isEmpty()) return@call "Não achei os nomes da Unreal (versão antes da 4.23, ou o jogo ainda está carregando)." to emptyList()
+        val f = filter.filterNot { it.isWhitespace() }.ifEmpty { "*" }
+        for (b in blocks) {
+            val r = runCatching { d.send("ue $b $f", quiet = true) }.getOrNull() ?: continue
+            val st = r.status.split(' ')
+            val list = r.lines.filter { it.startsWith("ueobj ") }.map { it.split(' ', limit = 4) }.filter { it.size == 4 }.map { UeObj(it[1], it[2], it[3]) }
+            Diag.add("Unreal: bloco de nomes 0x$b, ${st.getOrNull(1)} blocos, ${st.getOrNull(2)} objetos; \"$f\": ${st[0]}")
+            return@call "${st[0]} objetos com \"$filter\" (de ${st.getOrNull(2)} no jogo)" to list
+        }
+        "Achei os nomes da Unreal, mas não a lista de objetos." to emptyList()
     }
 
     /** Funções com nome nas libs do jogo que contêm o texto (até 300) e quantas há ao todo. */
