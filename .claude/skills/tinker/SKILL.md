@@ -20,21 +20,31 @@ Responder sempre em **português do Brasil**, curto e direto. O usuário testa n
 | Daemon root | `daemon/tinkerd.c` | Protocolo texto stdin/stdout: search/refine/read/write/dump, ponteiros, AOB, IL2CPP (`il2cpp`, `il2classes`, `il2objs`, `il2methods`), `where`, `watch` e `trace` (ptrace + registradores de hardware), `photo*`, `backup`/`backups`/`restoresave` |
 | Motor | `app/.../Engine.kt` | Sessão (`Session`), chamadas ao daemon (`call { d -> }`), salvos, receitas, patches, planilha, IA |
 | Tela | `TinkerScreen.kt` | Abas Busca, Salvos, Memória (Endereços / Ficha / Código), Registro, Ajustes + Ajuda |
-| Outros | `Assistant.kt` (Gemini/Groq), `Arm64.kt` (decodificador), `Keypad.kt`, `OverlayService.kt` (painel flutuante), `TinkerApp.kt` (`Diag`) |
+| Outros | `Assistant.kt` + `AiBox.kt` (IA Gemini/Groq), `Arm64.kt` (decodificador), `Keypad.kt`, `QuickBar.kt` (barra rápida), `OverlayService.kt` (painel flutuante), `TinkerApp.kt` (`Diag` e vigia da tela) |
+| Ajuda e tutorial | `docs/tutorial/ajuda.py` → `gerar.py` | Fonte única: gera a Ajuda do app e `Tinker-tutorial.pdf` |
 | Planilha | `docs/painel-chaves/Code.gs`, `Painel.html`, `LEIAME.md` | App da Web: chaves, Pedidos, Aparelhos, Buscas, Relatórios, Problemas, Salvos, Receitas, Patches |
 
 Versões: `app/build.gradle.kts` (`versionCode`/`versionName`), `VERSAO` no Code.gs, `SCRIPT_VERSION` no Engine.kt (versão **mínima** do script que o app exige).
-Estado em 2026-10: app **2.44.0** (code 131; jogo de teste: tests/target.c vai no APK como libtinkertarget.so e o autoteste testa nele Dword/Float/refino, 🔒, ponteiros, congelar, AOB, grupo, IL2CPP, patch e foto (withTarget); "Atualizar e testar sozinho" em Ajustes (desligado: baixa o APK, confere pacote+versão, pm install via su, UpdatedReceiver reabre, autoteste com testarApos); editor de save (savefiles/readsave/writesave); exportar .CT; patch com ctx relocado por AOB em Xa; AOB em Dados/Xa/Xs; editar bytes no hex; 📍 activity start/activity no daemon (soft-dirty ou smaps), regiões por jogo em prefs regioes-<pkg> + região dos salvos, busca começa nelas e cai para tudo; Auto sem 🔒; script v16 com linhasApagadas; 🎯 Achar sozinho = OCR ML Kit no print + refino por faixa + teste dos finalistas com aiCanTest; Lua: tipos `li`/`lf` e comando `luatable` no daemon, LuaPanel na Ficha; Groq troca de chave pelos cabeçalhos x-ratelimit, Gemini aprende o limite diário por modelo em `geminiLimit`), script **v15**, app exige v14.
-
-Estado em 2026-10-26: app **2.67.0** (code 190). Desde a 2.44:
-- Funções nativas pelo nome sem IDA: `syms` (.dynsym na memória), `func` (.eh_frame_hdr), `calls` (BL/CALL); `patchNative` = patch de retorno (x86 e arm64) que guarda `sym` e se reacha ao reabrir.
-- ⏩ Velocidade Unity: `findGameSpeed` (relógio do Unity: 0.99999994 + dois doubles de segundos + 1.0), `setGameSpeed` (máx. 4 endereços). **Só por valor do motor; nunca hook de tempo/injeção no processo.**
-- ⏱️ Cronômetros (epoch ms/s): `findTimers(quanto falta na tela)` ±2 min, alinhados; `finishTimers` recusa >5 (escrever em 61–77 lugares corrompia o Scudo do jogo).
-- 🛒 Loja (`findShopPrices`), "Só os que valem X → Y" (`writeWhere`, recusa >200), 🧮 número guardado diferente (daemon `compare lin` ×k+c com k de jogo, `compare xk` XOR chave fixa), `...A4` no refino = endereço termina em (daemon `addrend`).
-- Unreal: daemon `ue` (FNamePool + GUObjectArray) lista objetos por nome.
-- Ficha Unity: daemon `il2cpp` também imprime `text <off> <len> <utf8>` (string) e `count <off> <n>` (array/List); struct de até 16 bytes vira `(x, y, z)`; copiar os números de um objeto para outro da mesma classe (`copyFicha`); 🔓 Desbloquear (`findUnlocks`/`unlock`: bool isUnlocked/owned/purchased; isLocked → 0).
-- Vigia da tela (TinkerApp.watchUi) guarda "Onde a tela travou:" com a pilha do Tinker (R8 mantém nomes de dev.tinker.**).
-- Relatório "o jogo fechou sozinho" e patch suspeito só quando o crashlog tem FATAL deste pid (a missão fecha o jogo de propósito).
+## O que o app faz (estado 2.68, 26/10/2026)
+O texto completo de cada opção está em `docs/tutorial/ajuda.py` (fonte única da Ajuda do app e do PDF
+`docs/tutorial/Tinker-tutorial.pdf`). Aqui fica só o que importa para mexer no código:
+- **Tela**: aba Busca com a busca no topo, depois a fileira 🧰 Ferramentas (`Toolbox`: Fácil, Velocidade, Cronômetros, Loja,
+  Desbloquear só em Unity, Disfarçado; uma aberta por vez), depois os resultados; o secundário em "▸ Mais buscas" (sem valor,
+  AOB, foto, onde o jogo escreve, editor de save). Barra rápida (`QuickBar.kt`) com as receitas como ▶ botões.
+- **Busca**: tipos `i32 f32 i64 f64`, cifrados `xi32@N` (150X4), `i32x2` (Flutter/JS), Lua `li/lf`; faixa `~`, vários `;`,
+  grupo `::`; refino `...A4` (daemon `addrend`); comparar `inc dec same changed incby decby lin xk`; 🎯 Achar sozinho = OCR
+  ML Kit (pelo número ou pelo nome ao lado; número que anda sozinho busca faixa à frente, `ahead()`).
+- **Ferramentas**: `findGameSpeed/setGameSpeed` (relógio do Unity, máx. 4 endereços; **só valor do motor, nunca hook de
+  tempo/injeção**), `findTimers/finishTimers` (±2 min do que falta na tela, recusa >5: escrever em muitos lugares corrompia o
+  Scudo), `findShopPrices`, `findUnlocks/unlock`, `writeWhere` (recusa >200).
+- **Salvos**: ponteiros + caminhos + assinatura (`sigUseful`), restauração ao reabrir, receitas por classe/ponteiro/assinatura,
+  patches (NOP/bytes/retorno) que voltam ao reabrir e ficam suspeitos só se o crashlog tem FATAL deste pid.
+- **Memória**: Ficha (IL2CPP com `text`/`count` do daemon, struct ≤16 bytes vira (x, y, z), `copyFicha` só números), métodos
+  (`il2methods`, contar chamadas, sempre devolver), funções da lib sem IDA (`syms`/`func`/`calls`, `patchNative` com `sym`),
+  Unreal (`ue`), Lua (`luatable`).
+- **Outros**: autoteste no `tests/target.c` (libtinkertarget.so), atualizar e testar sozinho, editor de save, foto do jogo,
+  📍 onde o jogo escreve, exportar .CT, IA (Gemini/Groq) que não edita sozinha, vigia da tela ("Onde a tela travou:").
+- **Daemon**: threads extras da varredura com `setpriority` 10 (a tela e o jogo não param na busca).
 
 ## Testes automáticos no PC (emulador)
 - Emulador Android Studio "Pixel 6 Pro" API 31 x86_64 (emulator-5554) com Magisk (rootAVD). O S25 é de outro agente: **nunca mexer**; sempre `ANDROID_SERIAL=emulator-5554`.
@@ -63,14 +73,18 @@ Estado em 2026-10-26: app **2.67.0** (code 190). Desde a 2.44:
 8. Missões e testes automáticos só no Jogo de Teste; nada de canal em que a planilha/Claude comande o app em jogo real.
 9. Velocidade sem entrar no processo (sem hook de relógio/injeção), nem em jogo offline. Não aprofundar internals de debugger/watchpoint.
 10. Não contornar bloqueio de site (bot-check) nem baixar binários de fora; APK de site espelho não se instala.
+11. A detecção de jogo online foi tirada a pedido do usuário (jogo offline também tem sinais de conexão): o combinado de não
+    editar jogo online vale pela conversa, não por código.
 
 ## Como trabalhar
 1. Mudou o daemon → `bash tests/daemon_test.sh` (compila `tests/target.c` em x86 e testa tudo; tem que terminar com `daemon ok`).
 2. Mudou Kotlin → não há Android SDK local: compila no CI. Testes unitários em `app/src/test/.../ValuesTest.kt`.
 3. Mudou o Code.gs → `node -e "new Function(require('fs').readFileSync('docs/painel-chaves/Code.gs','utf8'))"` para sintaxe; subir `VERSAO`.
-4. Subir `versionCode`/`versionName`, commit, `git push -u origin ccr-92c99132-2ne91y`, esperar o CI (~4 min) e mandar o link do APK.
+4. Subir `versionCode`/`versionName`, commit, `git push -u origin ccr-92c99132-2ne91y`, esperar o CI (~7 min) e mandar o link do APK.
 5. Layout: painel flutuante é estreito; vários botões numa linha → `FlowRow`. Parte de cima das telas em `TopArea` (máx. 45% da altura).
-6. Ao mudar o script, lembrar o usuário: colar Code.gs + Painel.html e **Implantar → Gerenciar implantações → editar → Nova versão**.
+6. Mudou uma opção da tela → atualizar o texto dela em `docs/tutorial/ajuda.py` e rodar `python3 -I docs/tutorial/gerar.py`
+   (reescreve a Ajuda em `TinkerScreen.kt` entre `// AJUDA:` e `// FIM AJUDA` e o PDF). Nunca editar a Ajuda direto no `.kt`.
+7. Ao mudar o script, lembrar o usuário: colar Code.gs + Painel.html e **Implantar → Gerenciar implantações → editar → Nova versão**.
 
 ## Contrato app ↔ planilha (doGet/doPost)
 - GET `?token=` → `{chaves, groq, versao}`; `&fim=XXXXXX&situacao=` marca chave sem cota.
@@ -88,15 +102,10 @@ Estado em 2026-10-26: app **2.67.0** (code 190). Desde a 2.44:
 - Abrindo por um campo, o daemon anda pelos nós vizinhos (pode pegar nó de tabela colada; chaves que não são texto/número são puladas). LuaJIT não é suportado.
 - Last Garden: Survival (com.bravo.plants) usa HybridCLR + xLua 5.4, é ONLINE: só leitura/estudo, sem edição.
 
-## Correções de 25/10 à tarde
-- Busca 🔒 descarta pares que são ponteiro (ptr_at/in_chunks no daemon): falsos 🔒 no heap do Lua derrubaram o Last Garden.
-- esperar_mudanca com aumentou/diminuiu não faz o "não mudou" antes; refinar usa faixa para valor rápido.
-- Gemini só aprende o limite diário com geminiCountFull (contagem desde a virada do dia).
-- Detecção de jogo online foi TIRADA a pedido do usuário (jogo offline também tem sinais de conexão): o combinado de não editar jogo online vale pela conversa, não por código.
-
 ## Próximos passos
-- Achar a causa das paradas da tela (ler "Onde a tela travou:" nos relatórios) — o usuário viu "Tinker isn't responding" na aba Busca.
-- Velocidade Cocos/Godot (por valor), receitas de um toque, campos da Unreal na Ficha (precisa de jogo Unreal offline do usuário).
-- Testar no aparelho: métodos da classe (Ver código / Contar chamadas / Sempre devolver), dump .cs, foto do jogo, backup do save, "O que escreve aqui?", e se algum menu corta em pé/deitado.
+- Paradas longas da tela no emulador (até 13 s) acontecem durante "quais rodam" (o daemon segura o jogo com ptrace) e a pilha é
+  só do desenho do Android (HardwareRenderer): suspeita de GPU do emulador; confirmar num celular de verdade antes de mexer.
+- Velocidade Cocos/Godot (por valor), campos da Unreal na Ficha (precisa de jogo Unreal offline do usuário).
+- `Engine.kt` tem ~5.200 linhas: dividir em arquivos por assunto (busca, salvos, ferramentas, IA) aos poucos, com CI a cada passo.
 - O ptrace com registradores de hardware em arm64/vPhoneOS ainda **não foi confirmado** no aparelho.
-- Adiados ("depois fazemos"): macro de toques, indicador de captura (contagem na bolinha, vibração, Parar agora), assistente "materiais infinitos", aba Jogos, atalho na bolinha.
+- Adiados ("depois fazemos"): macro de toques, indicador de captura, assistente "materiais infinitos", aba Jogos.

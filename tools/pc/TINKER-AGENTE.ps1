@@ -430,7 +430,7 @@ function Run-Missions($v) {
         if ($d -ne 1) { throw "a espada custou $d (esperava 1)" }
         "achou $c; a espada saiu por 1"
     }
-    Mission "guardado diferente: nivel x10+7 e moedas com chave fixa" {
+    Mission "disfarcado: nivel x10+7 e moedas com chave fixa" {
         # mudando de jeitos diferentes (+1 e depois +3): subir sempre igual deixa contadores passarem
         foreach ($p in @(@("Nivel", "+1 nível", "lin", "+3 níveis"), @("Moedas", "+1 moeda", "xk", "+5 moedas"))) {
             $a = Val $p[0]
