@@ -86,7 +86,7 @@ __attribute__((constructor)) static void fake_unity(void) {
     uint8_t *s = (uint8_t *)heroi_nome;
     *(int32_t *)(s + 2 * sizeof(void *)) = 5;
     memcpy(s + 2 * sizeof(void *) + 4, nome, sizeof nome);
-    heroi_mochila[3] = 7;  // Il2CppArray: klass, monitor, bounds, max_length
+    *(int32_t *)((uint8_t *)heroi_mochila + 3 * sizeof(void *)) = 7;  // Il2CppArray: klass, monitor, bounds, max_length
     uint8_t *o = (uint8_t *)heroi;
     *(void **)o = &heroi_k;
     *(int32_t *)(o + 0x10) = 987654;

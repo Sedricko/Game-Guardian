@@ -355,4 +355,18 @@ grep -q '^State:.*S (sleeping)' /proc/$pid/status || { echo "FALHOU: jogo ficou 
 kill $tpid; wait $tpid 2>/dev/null || true
 dead=$(printf 'attach %s\n' "$pid" | "$out/tinkerd")
 grep -q "^err processo $pid não existe$" <<<"$dead" || { echo "FALHOU: jogo fechado"; exit 1; }
+# Unity 32 bits (ponteiro de 4 bytes): a lib do Jogo de Teste compilada em 32 bits, carregada por um programa 32 bits
+jni=$(dirname "$(dirname "$(readlink -f "$(command -v javac || command -v java)")")")/include
+printf '#include <dlfcn.h>\n#include <unistd.h>\nint main(int c,char**v){(void)c;if(!dlopen(v[1],RTLD_NOW))return 1;pause();}\n' > "$out/host.c"
+if [ -f "$jni/jni.h" ] && cc -m32 -o "$out/host32" "$out/host.c" -ldl 2>/dev/null && cc -m32 -O1 -shared -fPIC -I"$jni" -I"$jni/linux" -o "$out/libjogo32.so" testgame/src/main/c/jogo.c; then
+    "$out/host32" "$out/libjogo32.so" & p32=$!; sleep 0.5
+    h=$(printf '%s\n' "attach $p32" "search i32 987654" "list 5" | "$out/tinkerd" | grep -m1 ' i32 ' | cut -d' ' -f1)
+    u=$(printf '%s\n' "attach $p32" "il2cpp $h" | "$out/tinkerd")
+    kill $p32
+    echo "$u"
+    grep -q "^class Jogo.Heroi " <<<"$u" && grep -qx "text 18 5 Herói" <<<"$u" && grep -qx "count 30 7" <<<"$u" && grep -qx "field 20 11 pos" <<<"$u" \
+        || { echo "FALHOU: unity 32 bits"; exit 1; }
+else
+    echo "sem compilador 32 bits: pulei o Unity 32 bits"
+fi
 echo "daemon ok"
