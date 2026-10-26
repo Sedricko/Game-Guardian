@@ -3075,7 +3075,7 @@ class Engine private constructor(private val app: Context) {
                     }
                 }
                 else -> null
-            } ?: fromChains(item, pid, why) ?: (if (signature) fromIl2cpp(item, pid, why) ?: fromSignature(item, pid, why) ?: fromSimilar(item, pid, why) ?: fromSameAddress(item, pid, why) else null)
+            } ?: fromChains(item, pid, why) ?: (if (signature) fromIl2cpp(item, pid, why) ?: fromSignature(item, pid, why) ?: fromAnchorBytes(item, pid, why) ?: fromSimilar(item, pid, why) ?: fromSameAddress(item, pid, why) else null)
             when {
                 how != null -> back += "${label(item)} ($how)"
                 item.pid != 0 || item.chains.isNotEmpty() || item.sig.isNotEmpty() -> {
@@ -3272,6 +3272,42 @@ class Engine private constructor(private val app: Context) {
     }
 
     /**
+     * Trecho fixo mais longo da assinatura (bytes que não mudaram em volta, fora o valor) como âncora: acha os lugares
+     * com ele, e em cada um confere se o número cabe no histórico e quanto do resto da vizinhança bate. Serve quando o
+     * valor mudou logo antes de fechar e parte da vizinhança é sorteada a cada vez que o jogo abre.
+     */
+    private fun Daemon.fromAnchorBytes(item: SavedItem, pid: Int, why: MutableList<String>): String? {
+        if (!sigUseful(item.sig)) return null
+        val sig = item.sig.chunked(2)
+        var run = 0 to 0  // começo e tamanho
+        var i = 0
+        while (i < sig.size) {
+            if (sig[i] == "??") { i++; continue }
+            var j = i
+            while (j < sig.size && sig[j] != "??") j++
+            if (j - i > run.second && sig.subList(i, j).count { it != "00" } >= 3) run = i to j - i
+            i = j
+        }
+        if (run.second < 6) return null.also { why += "âncora: nenhum trecho fixo de 6 bytes" }
+        val bytes = sig.subList(run.first, run.first + minOf(run.second, 16)).joinToString("")
+        val r = runCatching { send("aobfind $bytes", quiet = true) }.getOrNull() ?: return null
+        if (r.status.toLongOrNull() != r.lines.size.toLong()) return null.also { why += "âncora em ${r.status} lugares" }
+        val align = minOf(TYPE_SIZES.getValue(item.type), 4).toLong()
+        val scored = r.lines.mapNotNull { line ->
+            val a = line.trim().toLong(16) - run.first + item.sigOff
+            if (a <= 0 || a % align != 0L) return@mapNotNull null
+            val v = runCatching { send("read ${a.toString(16)} ${item.type}", quiet = true).status }.getOrNull() ?: return@mapNotNull null
+            if (!plausible(item, v)) return@mapNotNull null
+            sigScore(item, a)?.let { a to it }
+        }.sortedByDescending { it.second }
+        val fixed = sig.count { it != "??" }
+        val best = scored.firstOrNull() ?: return null.also { why += "âncora: ${r.lines.size} lugares, nenhum com número dentro do histórico" }
+        val second = scored.getOrNull(1)?.second ?: 0
+        if (best.second < fixed / 2 || best.second - second < 4) return null.also { why += "âncora: melhor ${best.second} de $fixed bytes, segundo $second" }
+        return "âncora na vizinhança".takeIf { moveTo(item, best.first.toString(16), "Âncora").pid == pid }?.also { replace(item) { it.copy(trusted = false) } }
+    }
+
+    /**
      * Mesmo endereço: muitos jogos põem os dados no mesmo lugar a cada vez que abrem (lib, buffer nativo, heap igual).
      * Vale se o número ali cabe no histórico e boa parte da vizinhança bate (o valor pode ter mudado logo antes de fechar).
      */
@@ -3284,7 +3320,8 @@ class Engine private constructor(private val app: Context) {
         val now = readable(v, item.type)?.toDoubleOrNull()
         val last = readable(item.value, item.type)?.toDoubleOrNull()
         val close = now != null && last != null && kotlin.math.abs(last) >= 100 && kotlin.math.abs(now - last) <= maxOf(10.0, kotlin.math.abs(last) / 100)
-        if (!plausible(item, v) || (score < fixed / 3 && !close)) return null.also { why += "mesmo endereço: lê $v, vizinhança $score de $fixed bytes" }
+        // só com o número quase igual: outro campo que caiu no endereço antigo (a ficha andou) passaria só pela vizinhança
+        if (!plausible(item, v) || !(close || now == last) || score < fixed / 3) return null.also { why += "mesmo endereço: lê $v, vizinhança $score de $fixed bytes" }
         // moveTo não muda nada quando o endereço é o mesmo: só passa a valer neste processo
         replace(item) { it.copy(pid = currentPid, trusted = false) }
         Diag.add("Mesmo endereço ${label(item)}: 0x${item.addr} (lê $v, vizinhança $score de $fixed bytes)")
