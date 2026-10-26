@@ -87,6 +87,8 @@ data class CodePatch(
     // ctx: os bytes do código em volta (4 instruções antes, as originais e 4 depois); com o jogo atualizado e a
     // instrução em outro lugar, o patch acha ela de novo por esses bytes e passa a valer no endereço novo
     val ctx: String = "",
+    // endereço de verdade na vez do jogo em que foi criado (não vai para o arquivo): nessa vez não precisa recalcular
+    val addr: String = "", val pid: Int = 0,
 )
 
 // Um método IL2CPP: endereço do código, tipo de retorno (código do Unity: 01 void, 02 bool, 08 int, 0a long, 0c float,
@@ -3863,7 +3865,7 @@ class Engine private constructor(private val app: Context) {
             Triple(w, wordsHex(cur), if (around.size == n + 8) wordsHex(around) else "")
         }
         require(orig != hex) { "esses já são os bytes de agora" }
-        val p = CodePatch(name = name.ifBlank { where }, where = where, orig = orig, new = hex, note = note.take(300), ctx = ctx)
+        val p = CodePatch(name = name.ifBlank { where }, where = where, orig = orig, new = hex, note = note.take(300), ctx = ctx, addr = addr, pid = currentPid)
         withContext(Dispatchers.Main) { Session.patches.add(p); storePatches() }
         Diag.add("Patch criado: ${p.name} em $where ($orig → $hex)")
         return if (apply) setPatch(p, true) else "Patch \"${p.name}\" guardado (desligado): ligue em Salvos → Patches de código."
@@ -3876,7 +3878,7 @@ class Engine private constructor(private val app: Context) {
     suspend fun setPatch(p: CodePatch, on: Boolean): String {
         var relocated: String? = null
         val msg = call { d ->
-            val addr = d.send("resolve ${p.where}", quiet = true).status
+            val addr = if (p.pid == currentPid && p.addr.isNotEmpty()) p.addr else d.send("resolve ${p.where}", quiet = true).status
             val n = p.new.length / 8
             val cur = wordsHex(d.send("dump $addr i32 $n", quiet = true).lines.map { it.substringAfter(' ').toLong().toInt() })
             val want = if (on) p.new else p.orig
