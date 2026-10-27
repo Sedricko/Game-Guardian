@@ -745,6 +745,16 @@ function Run-Missions($v) {
         if ($now -lt 500 -or $now -gt 505) { throw "a tela mostra $now ($($t.msg))" }
         "a tela mostra $now ($($t.msg))"
     }
+    # nivel 9: o valor nunca muda (ninguem toca no Ouro) e ha copias dele (iscas); o agente tem de se virar sozinho
+    # (busca em grupo com outro numero da tela) e por o valor pedido, sem pedir nada
+    Mission "nivel 9: pedido sem o valor mudar (Ouro = 9999, ninguem toca)" {
+        $c = Step "sozinho Ouro=9999 auto"
+        $msg = ($script:last -split "`n")[0]
+        Start-Sleep 2
+        $now = Val "Ouro"
+        if ($now -ne 9999) { throw "a tela mostra $now, sobraram $c ($msg)" }
+        "a tela mostra 9999, sobraram $c ($msg)"
+    }
     # nivel 5: o jogo atualiza e tudo muda de lugar; o agente tem de reachar pelo que ja aprendeu (uma vez cada, conferido na tela)
     $script:curva5 = @()
     # comeca limpo: a curva escreve no jogo e o Vigor deixa a busca pela mudanca grande; o nivel 5 nao herda nada disso

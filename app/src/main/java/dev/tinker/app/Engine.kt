@@ -2062,12 +2062,14 @@ class Engine private constructor(private val app: Context) {
                 var misses = 0
                 var still = 0
                 var changes = 0  // quantas mudanças da tela o refino já seguiu
+                var grouped = false  // a busca em grupo deixou poucos: o teste de escrita (sobe e volta) é a prova
+                var groupTried = false
                 val end = System.currentTimeMillis() + 10 * 60_000L
                 while (System.currentTimeMillis() < end) {
                     val count = Session.count ?: 0L
                     // prova antes de parar: um número solto da memória acompanha 1 ou 2 mudanças por acaso, 3 seguidas quase nunca
                     // (no Jogo de Teste sobrava 1 depois de 1 refino e era o endereço errado)
-                    if (count in 1L..3L && (changes >= 3 || byLabel == null && near == null)) break
+                    if (count in 1L..3L && (changes >= 3 || grouped || byLabel == null && near == null)) break
                     // muitos que seguem todas as mudanças (cópias do mesmo número): o tipo já está provado, o endereço não
                     if (count in 4L..10L && changes >= 8) break
                     say("$count resultados · na tela: $last · jogue para o número mudar")
@@ -2086,6 +2088,19 @@ class Engine private constructor(private val app: Context) {
                             val after = readAt(screenNumbers(), place)
                             if ((Session.count ?: 0L) == 0L || (after != null && after != cur)) aiBusy { resultsText(undo()) }
                             Diag.add("Achar sozinho: tela parada em $cur, não mudou: ${Session.count} resultados")
+                        }
+                        // ~30 s parado e ainda muitos: valor que só muda quando a pessoa gasta. Sem pedir nada, busca junto com
+                        // outro número da tela (o jogo costuma guardar os recursos lado a lado): poucos ficam por acaso
+                        if (still >= 25 && !groupTried && count > 3 && k == 1L) {
+                            groupTried = true
+                            val others = nums.filter { it.second != place && it.first in 1L..999_999_999L && it.first != cur }.map { it.first }.distinct().take(8)
+                            for (n in others) {
+                                aiBusy { resultsText(search(searchTypes, "$cur;$n::256")) }
+                                if ((Session.count ?: 0L) > 0L) aiBusy { resultsText(refine("$cur~${cur + 1}")) }
+                                Diag.add("Achar sozinho: $cur em grupo com $n (até 256 bytes): ${Session.count} resultados")
+                                if ((Session.count ?: 0L) in 1L..3L) { grouped = true; break }
+                            }
+                            if (!grouped) aiBusy { resultsText(seek(cur.toString())) }  // nenhum grupo serviu: volta à busca normal
                         }
                         continue
                     }
