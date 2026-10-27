@@ -1468,12 +1468,13 @@ class Engine private constructor(private val app: Context) {
             "comparar" -> compare(w[1], w.drop(2).joinToString(" "))
             "escrever" -> writeAll(arg)
             // soma N em cada resultado (o número da tela calculado: a missão confere que a tela subiu N)
-            "somar" -> list().second.joinToString(" ") { h ->
-                val v = call { d -> d.send("read ${h.addr} ${h.type}", quiet = true).status }.toDoubleOrNull() ?: return@joinToString "?"
+            // map (inline) e não joinToString: dentro do lambda dele não dá para chamar o daemon (suspend)
+            "somar" -> list().second.map { h ->
+                val v = call { d -> d.send("read ${h.addr} ${h.type}", quiet = true).status }.toDoubleOrNull() ?: return@map "?"
                 val n = v + (arg.toDoubleOrNull() ?: 0.0)
                 write(h.addr, h.type, if (h.type.contains("f")) n.toString() else n.toLong().toString())
                 "${h.addr}=${n.toLong()}"
-            }
+            }.joinToString(" ")
             // "congelar 10": trava no número escrito, mesmo que o jogo já tenha mudado ele de novo (valor que corre sozinho)
             "congelar" -> list().second.take(1).map { if (arg.isEmpty()) it else it.copy(value = arg) }.also { withContext(Dispatchers.Main) { addSaved(it, frozen = true, name = "missão") } }.let { "congelado ${it.size}" }
             // tira os salvos de missões anteriores (cada rodada começa do zero)
@@ -1998,7 +1999,7 @@ class Engine private constructor(private val app: Context) {
         // o número da tela vira o da memória (faixa "a~b" também)
         fun sc(r: String) = if (k == 1L) r else r.split('~').joinToString("~") { (it.trim().toLong() * k).toString() }
         fun kind(t: String) = t + if (k > 1) "*$k" else if (k == -1L) "^" else ""
-        val km get() = if (k > 1) k else 1L  // fator da tela para a memória (pela mudança é 1)
+        fun km() = if (k > 1) k else 1L  // fator da tela para a memória (pela mudança é 1)
         var searchTypes = useTypes
         var exploring = tryFrom > 0  // já está tentando outros jeitos de guardar (não é mais o tipo aprendido)
         val from = if (borrowed.isEmpty()) "aprendeu" else "IA"
@@ -2126,7 +2127,7 @@ class Engine private constructor(private val app: Context) {
                     val o = old.toDoubleOrNull() ?: continue
                     // +20 na tela: longe do que o número anda sozinho em 1 s (abates, energia, alguém tocando) — com +7 e
                     // conferência exata, o número que andou 1 reprovava o endereço certo
-                    val t = o + 20 * km
+                    val t = o + 20 * km()
                     val shown = if (k == -1L) readAt(screenNumbers(), place) else null  // a tela antes de escrever (pela mudança)
                     val whole = !(h.type.contains("f32") || h.type.contains("f64"))
                     write(h.addr, h.type, if (whole) t.toLong().toString() else t.toString())
@@ -2135,7 +2136,7 @@ class Engine private constructor(private val app: Context) {
                     write(h.addr, h.type, old)  // volta como estava
                     Diag.add("Achar sozinho: teste 0x${h.addr} = $t, a tela mostrou $seen")
                     // pela mudança, a tela é a base mais o bônus: vale o pulo de +20, não o número escrito
-                    val before = if (k == -1L) shown ?: kotlin.math.floor(o).toLong() else kotlin.math.floor(o / km).toLong()
+                    val before = if (k == -1L) shown ?: kotlin.math.floor(o).toLong() else kotlin.math.floor(o / km()).toLong()
                     val expect = before + 20
                     // pulou com a escrita (pelo menos 12 dos 20) e ficou perto do escrito (o número pode ter andado um pouco)
                     if (seen != null && seen - before >= 12 && kotlin.math.abs(seen - expect) <= 8) {
