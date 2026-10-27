@@ -1921,7 +1921,9 @@ class Engine private constructor(private val app: Context) {
     @Synchronized private fun learnResult(label: String, type: String, ok: Boolean, ms: Long, from: String = "aprendeu", tips: String = "") {
         val g = savedPkg ?: return
         // procura pelo tipo base: o 🔒 e o ×2 aparecem sozinhos na busca normal (cifrados ligados)
-        val base = type.removePrefix("x").substringBefore('@').removeSuffix("x2")
+        // o 🔒 comum (chave antes) e o ×2 aparecem sozinhos na busca normal: guarda o tipo base; cifrado com a chave em outro
+        // lugar (xi32@4) só acha pelo tipo exato: guarda inteiro
+        val base = if ('@' in type) type else type.removePrefix("x").removeSuffix("x2")
         val at = java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.US).format(java.util.Date())
         storeKnowledge(record(knowledge(), g, label, base, ok, ms, at, from, tips))
         Diag.add("Agente offline ${if (ok) "acertou" else "errou"}: ${learnKey(label)} como $base")
@@ -2025,6 +2027,7 @@ class Engine private constructor(private val app: Context) {
                 var last = start
                 var misses = 0
                 var still = 0
+                var exploring = false  // já está tentando outros jeitos de guardar (não é mais o tipo aprendido)
                 var changes = 0  // quantas mudanças da tela o refino já seguiu
                 val end = System.currentTimeMillis() + 10 * 60_000L
                 while (System.currentTimeMillis() < end) {
@@ -2061,14 +2064,17 @@ class Engine private constructor(private val app: Context) {
                         if (++misses >= 2) {
                             misses = 0
                             // o tipo que o agente sabia não segura o número (sobrou 0 duas vezes): é erro dele; segue como a pessoa pediu
-                            if (searchTypes != types) { learnResult(label!!, usedType, false, 0); k = 1; usedType = types.singleOrNull() ?: "auto"; searchTypes = types }
-                            // pelo nome e já como a pessoa pediu: o número da tela não segura na memória; tenta o próximo disfarce
-                            // (×10, ×100, dobro). O verdadeiro sobrevive aos refinos; o lixo de cada tentativa some
+                            if (searchTypes != types && !exploring) { learnResult(label!!, usedType, false, 0); k = 1; usedType = types.singleOrNull() ?: "auto"; searchTypes = types }
+                            // pelo nome e já como a pessoa pediu: o número da tela não segura na memória; tenta o próximo jeito de
+                            // guardar (×10, ×100, dobro, cifrado com a chave depois ou mais longe). O verdadeiro sobrevive aos
+                            // refinos; o lixo de cada tentativa some
                             else if (label != null) {
-                                val ks = listOf(1L, 10L, 100L, 2L)
-                                k = ks[(ks.indexOf(k) + 1) % ks.size]
+                                val tries = listOf(types to 1L, types to 10L, types to 100L, types to 2L, setOf("xi32@4") to 1L, setOf("xi32@8") to 1L, setOf("xi32@-8") to 1L)
+                                val i = tries.indexOfFirst { it.first == searchTypes && it.second == k }
+                                tries[(i + 1) % tries.size].let { (ty, m) -> searchTypes = ty; k = m }
+                                exploring = true
                                 usedType = kind(searchTypes.singleOrNull() ?: "auto")
-                                Diag.add("Achar sozinho: $label não segura com o número da tela; tentando ×$k")
+                                Diag.add("Achar sozinho: $label não segura; tentando ${typeLabel(usedType)}")
                             }
                             aiBusy { resultsText(search(searchTypes, sc(ahead(cur)))) }
                             Diag.add("Achar sozinho: busquei de novo com $cur, ${Session.count} resultados")

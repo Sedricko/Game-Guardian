@@ -76,7 +76,12 @@ class GameActivity : Activity() {
     private val unk = ByteBuffer.allocateDirect(64).order(ByteOrder.LITTLE_ENDIAN).apply {
         putDouble(0, Random.nextInt(20, 80).toDouble()); putLong(8, 9_000_000_000L + Random.nextInt(1000)); putInt(16, Random.nextInt(40, 99)); putFloat(20, Random.nextInt(10, 60).toFloat())
         putInt(24, Random.nextInt(10, 60) * 10)  // Cristais: guardado ×10 (disfarçado; a tela mostra /10)
+        Random.nextInt().let { k -> putInt(32, k); putInt(28, Random.nextInt(20, 90) xor k) }  // Runas (aqui o unk ainda não existe)
     }
+    // Runas (nível 4): cifrado como os jogos protegidos, valor XOR chave com a chave 4 bytes depois, chave nova a cada mudança
+    private var runas: Int
+        get() = unk.getInt(28) xor unk.getInt(32)
+        set(v) { val k = Random.nextInt(); unk.putInt(32, k); unk.putInt(28, v xor k) }
     private val buildLeft get() = ((build.getLong(8) - System.currentTimeMillis()) / 1000).coerceAtLeast(0)
 
     private fun fresh(): ByteBuffer = ByteBuffer.allocateDirect(160).order(ByteOrder.LITTLE_ENDIAN)
@@ -154,6 +159,7 @@ class GameActivity : Activity() {
         actions["+1 honra"] = { unk.putInt(16, unk.getInt(16) + 1) }
         actions["+1 brilho"] = { unk.putFloat(20, unk.getFloat(20) + 1) }
         actions["+1 cristal"] = { unk.putInt(24, unk.getInt(24) + 10) }
+        actions["+1 runa"] = { runas += 1 }
         val grid = android.widget.GridLayout(this).apply { columnCount = 2 }
         actions.forEach { (label, act) -> grid.addView(Button(this).apply { text = label; setOnClickListener { act(); save(); show() } }) }
         setContentView(android.widget.ScrollView(this).apply {
@@ -219,7 +225,7 @@ class GameActivity : Activity() {
 
     private fun show() {
         val t = "Fase $fase · versão ${if (base == 0) 1 else 2}\nOuro: $gold\nGemas: $gems\nVida: ${"%.1f".format(hp)}\nEnergia: $energy\nPontos: $points\nDiamantes: $diamonds\nMadeira: $wood\nPoções: $potions\nTempo: ${"%.1f".format(java.util.Locale.ROOT, time)}\nAbates: $kills\nVelocidade: ${"%.1f".format(java.util.Locale.ROOT, speed)}\nObra: $buildLeft\nEspada: ${shop.getInt(4)}\nNivel: $level\nMoedas: $coins" +
-            "\nRubis: ${unk.getDouble(0).toLong()}\nSementes: ${unk.getLong(8)}\nHonra: ${unk.getInt(16)}\nBrilho: ${unk.getFloat(20).toInt()}\nCristais: ${unk.getInt(24) / 10}"
+            "\nRubis: ${unk.getDouble(0).toLong()}\nSementes: ${unk.getLong(8)}\nHonra: ${unk.getInt(16)}\nBrilho: ${unk.getFloat(20).toInt()}\nCristais: ${unk.getInt(24) / 10}\nRunas: $runas"
         if (t == shown) return  // a tela só muda quando um valor muda
         shown = t
         text.text = t

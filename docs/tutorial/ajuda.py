@@ -124,7 +124,8 @@ AJUDA = [
  "Aprende a achar sem internet e sem gastar a IA. No 🎯 Achar sozinho pelo nome (ex.: Moedas, com o tipo Auto), ele vai direto no "
  "tipo que já acertou neste jogo; o que errou (sobrou 0) deixa de ser tentado primeiro. Também aprende com cada salvo que você "
  "nomeia (Ouro = Dword neste jogo) e com cada campo que muda no editor de save. Se o número da tela não segura na memória, ele "
- "tenta sozinho os disfarces comuns (×10, ×100, dobro) e aprende o jeito (Cristais = Dword ×10). Já vem sabendo o tipo comum de moedas, vida, energia, "
+ "tenta sozinho os disfarces comuns (×10, ×100, dobro) e o cifrado com a chave em outro lugar (como o 150X4), e aprende o jeito "
+ "(Cristais = Dword ×10, Runas = Dword 🔒 4). Já vem sabendo o tipo comum de moedas, vida, energia, "
  "nível, itens e tempo, e as técnicas de achar de cada caso (aparecem como dica quando não acha). Ajustes → Agente offline mostra o "
  "que ele sabe; com o painel da planilha, vai para a aba Agente offline (só dele, separada do aprendizado da IA). Pedir ajuda à IA "
  "quando não souber (desligado no começo): uma pergunta curta à IA pelo tipo, tenta de novo e só guarda se der certo (origem IA)."),
