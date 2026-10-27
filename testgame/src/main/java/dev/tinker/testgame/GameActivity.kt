@@ -72,9 +72,10 @@ class GameActivity : Activity() {
     private val level get() = (odd.getInt(0) - 7) / 10
     private val coins get() = odd.getInt(16) xor 0x5A17C3
     // nomes que o agente offline nunca viu (nem o Claude ensinou), cada um guardado de um jeito: a curva de aprendizagem
-    // mede se ele acha e aprende sozinho. Gabarito: Rubis = Double, Sementes = Qword (acima de 4 bilhões: um Dword não confunde), Honra = Dword, Brilho = Float
+    // mede se ele acha e aprende sozinho. Gabarito (Cristais = Dword ×10, disfarçado): Rubis = Double, Sementes = Qword (acima de 4 bilhões: um Dword não confunde), Honra = Dword, Brilho = Float
     private val unk = ByteBuffer.allocateDirect(64).order(ByteOrder.LITTLE_ENDIAN).apply {
         putDouble(0, Random.nextInt(20, 80).toDouble()); putLong(8, 9_000_000_000L + Random.nextInt(1000)); putInt(16, Random.nextInt(40, 99)); putFloat(20, Random.nextInt(10, 60).toFloat())
+        putInt(24, Random.nextInt(10, 60) * 10)  // Cristais: guardado ×10 (disfarçado; a tela mostra /10)
     }
     private val buildLeft get() = ((build.getLong(8) - System.currentTimeMillis()) / 1000).coerceAtLeast(0)
 
@@ -152,6 +153,7 @@ class GameActivity : Activity() {
         actions["+1 semente"] = { unk.putLong(8, unk.getLong(8) + 1) }
         actions["+1 honra"] = { unk.putInt(16, unk.getInt(16) + 1) }
         actions["+1 brilho"] = { unk.putFloat(20, unk.getFloat(20) + 1) }
+        actions["+1 cristal"] = { unk.putInt(24, unk.getInt(24) + 10) }
         val grid = android.widget.GridLayout(this).apply { columnCount = 2 }
         actions.forEach { (label, act) -> grid.addView(Button(this).apply { text = label; setOnClickListener { act(); save(); show() } }) }
         setContentView(android.widget.ScrollView(this).apply {
@@ -217,7 +219,7 @@ class GameActivity : Activity() {
 
     private fun show() {
         val t = "Fase $fase · versão ${if (base == 0) 1 else 2}\nOuro: $gold\nGemas: $gems\nVida: ${"%.1f".format(hp)}\nEnergia: $energy\nPontos: $points\nDiamantes: $diamonds\nMadeira: $wood\nPoções: $potions\nTempo: ${"%.1f".format(java.util.Locale.ROOT, time)}\nAbates: $kills\nVelocidade: ${"%.1f".format(java.util.Locale.ROOT, speed)}\nObra: $buildLeft\nEspada: ${shop.getInt(4)}\nNivel: $level\nMoedas: $coins" +
-            "\nRubis: ${unk.getDouble(0).toLong()}\nSementes: ${unk.getLong(8)}\nHonra: ${unk.getInt(16)}\nBrilho: ${unk.getFloat(20).toInt()}"
+            "\nRubis: ${unk.getDouble(0).toLong()}\nSementes: ${unk.getLong(8)}\nHonra: ${unk.getInt(16)}\nBrilho: ${unk.getFloat(20).toInt()}\nCristais: ${unk.getInt(24) / 10}"
         if (t == shown) return  // a tela só muda quando um valor muda
         shown = t
         text.text = t

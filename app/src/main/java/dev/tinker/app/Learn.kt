@@ -10,6 +10,9 @@ import java.text.Normalizer
 data class Know(val game: String, val name: String, val type: String, val wins: Int = 0, val fails: Int = 0, val ms: Long = 0,
                 val tips: String = "", val from: String = "aprendeu", val at: String = "")
 
+/** "i32*10" = "Dword ×10" (guardado disfarçado: a tela mostra 23, a memória tem 230). */
+internal fun typeLabel(t: String): String = t.substringBefore('*').let { TYPE_NAMES[it] ?: it } + t.substringAfter('*', "").let { if (it.isEmpty()) "" else " ×$it" }
+
 /** "Moedas:" e "moedas" são o mesmo nome; acento e maiúscula não contam. */
 internal fun learnKey(label: String): String =
     // "⏩ Velocidade:" é "velocidade": sem acento, maiúscula, emoji nem pontuação

@@ -907,7 +907,7 @@ class Engine private constructor(private val app: Context) {
             val lessons = lessonsFile.takeIf { it.exists() }?.readText()?.takeLast(3000).orEmpty()
             val server = runCatching { serverHints() }.getOrDefault("")
             val sheet = sheetAnalysis()
-            val known = savedPkg?.let { g -> knowledge().filter { it.game == g }.joinToString("\n") { "${it.name}: ${TYPE_NAMES[it.type] ?: it.type}, ${it.wins} acertos, ${it.fails} erros" } }.orEmpty()
+            val known = savedPkg?.let { g -> knowledge().filter { it.game == g }.joinToString("\n") { "${it.name}: ${typeLabel(it.type)}, ${it.wins} acertos, ${it.fails} erros" } }.orEmpty()
             withContext(Dispatchers.Main) { context() } +
                 (if (lessons.isBlank()) "" else "\n\n=== Suas lições (aprendidas em conversas anteriores, valem para qualquer jogo) ===\n$lessons") +
                 (if (notes.isBlank()) "" else "\n\n=== Suas anotações deste jogo (de outras conversas) ===\n$notes") +
@@ -1973,8 +1973,14 @@ class Engine private constructor(private val app: Context) {
         val t0 = System.currentTimeMillis()
         val (knownType, tips) = if (label != null && Session.offlineAgent) pickType(knowAll(), savedPkg.orEmpty(), label) else null to ""
         // Auto na tela é o conjunto vazio (Session.types)
-        val useTypes = if (knownType != null && (types.isEmpty() || types == setOf("auto"))) setOf(knownType) else types
-        var usedType = useTypes.singleOrNull() ?: "auto"
+        val applied = knownType != null && (types.isEmpty() || types == setOf("auto"))
+        // "i32*10" = Dword guardado ×10 (a tela mostra 23, a memória tem 230): o agente aprendeu o disfarce
+        var k = if (applied) knownType!!.substringAfter('*', "1").toLongOrNull() ?: 1L else 1L
+        val useTypes = if (applied) setOf(knownType!!.substringBefore('*')) else types
+        var usedType = (useTypes.singleOrNull() ?: "auto") + if (k > 1) "*$k" else ""
+        // o número da tela vira o da memória (faixa "a~b" também)
+        fun sc(r: String) = if (k == 1L) r else r.split('~').joinToString("~") { (it.trim().toLong() * k).toString() }
+        fun kind(t: String) = t + if (k > 1) "*$k" else ""
         var searchTypes = useTypes
         val from = if (borrowed.isEmpty()) "aprendeu" else "IA"
         fun fail(t: String) {
@@ -1999,11 +2005,20 @@ class Engine private constructor(private val app: Context) {
                 // pelo nome o número costuma andar sozinho (abates, tempo): até a busca terminar ele já passou do que a tela
                 // mostrou; uma faixa para frente não deixa o certo de fora (refinar depois corta os outros)
                 val first = if (byLabel != null || near != null) ahead(start) else start.toString()
-                aiBusy { resultsText(search(useTypes, first)) }
+                aiBusy { resultsText(search(useTypes, sc(first))) }
                 if (useTypes != types && (Session.count ?: 0L) == 0L) {
                     // o tipo aprendido errou neste jogo: guarda o erro e busca como a pessoa pediu
-                    learnResult(label!!, usedType, false, 0); usedType = types.singleOrNull() ?: "auto"; searchTypes = types
+                    learnResult(label!!, usedType, false, 0); k = 1; usedType = types.singleOrNull() ?: "auto"; searchTypes = types
                     aiBusy { resultsText(search(types, first)) }
+                }
+                // nada com o número da tela: o jogo pode guardar disfarçado (×10, ×100, dobro); tenta os comuns sozinho
+                if (label != null && (Session.count ?: 0L) == 0L) {
+                    for (m in listOf(10L, 100L, 2L)) {
+                        k = m
+                        aiBusy { resultsText(search(searchTypes, sc(first))) }
+                        if ((Session.count ?: 0L) > 0L) break
+                    }
+                    if ((Session.count ?: 0L) == 0L) k = 1 else { usedType = kind(searchTypes.singleOrNull() ?: "auto"); Diag.add("Achar sozinho: $label parece guardado ×$k") }
                 }
                 Diag.add("Achar sozinho: $target em ${spots.size} lugar(es) da tela, ${Session.count} resultados")
                 var place = spots.first()
@@ -2038,7 +2053,7 @@ class Engine private constructor(private val app: Context) {
                     }
                     still = 0
                     changes++
-                    val r = aiBusy { resultsText(refine(followRange(last, cur))) }
+                    val r = aiBusy { resultsText(refine(sc(followRange(last, cur)))) }
                     Diag.add("Achar sozinho: $last → $cur, ${Session.count} resultados")
                     if ((Session.count ?: 0L) == 0L) {
                         aiBusy { resultsText(undo()) }.also { Diag.add("Achar sozinho: nenhum ficou ($r), desfeito") }
@@ -2046,8 +2061,16 @@ class Engine private constructor(private val app: Context) {
                         if (++misses >= 2) {
                             misses = 0
                             // o tipo que o agente sabia não segura o número (sobrou 0 duas vezes): é erro dele; segue como a pessoa pediu
-                            if (searchTypes != types) { learnResult(label!!, usedType, false, 0); usedType = types.singleOrNull() ?: "auto"; searchTypes = types }
-                            aiBusy { resultsText(search(searchTypes, ahead(cur))) }
+                            if (searchTypes != types) { learnResult(label!!, usedType, false, 0); k = 1; usedType = types.singleOrNull() ?: "auto"; searchTypes = types }
+                            // pelo nome e já como a pessoa pediu: o número da tela não segura na memória; tenta o próximo disfarce
+                            // (×10, ×100, dobro). O verdadeiro sobrevive aos refinos; o lixo de cada tentativa some
+                            else if (label != null) {
+                                val ks = listOf(1L, 10L, 100L, 2L)
+                                k = ks[(ks.indexOf(k) + 1) % ks.size]
+                                usedType = kind(searchTypes.singleOrNull() ?: "auto")
+                                Diag.add("Achar sozinho: $label não segura com o número da tela; tentando ×$k")
+                            }
+                            aiBusy { resultsText(search(searchTypes, sc(ahead(cur)))) }
                             Diag.add("Achar sozinho: busquei de novo com $cur, ${Session.count} resultados")
                         }
                     } else misses = 0
@@ -2056,27 +2079,27 @@ class Engine private constructor(private val app: Context) {
                 val finalists = list().second
                 // várias cópias que seguiram todas as mudanças: o agente aprende o tipo delas; o endereço fica para a pessoa (Ficha)
                 finalists.map { it.type }.distinct().singleOrNull()?.takeIf { finalists.size in 4..10 && label != null }?.let { t ->
-                    learnResult(label!!, t, true, System.currentTimeMillis() - t0, from, borrowed)
+                    learnResult(label!!, kind(t), true, System.currentTimeMillis() - t0, from, borrowed)
                     say("Sobraram ${finalists.size}, todos ${TYPE_NAMES[t] ?: t}, seguindo cada mudança da tela: são cópias do mesmo número. Abra cada um na Ficha ou mude no jogo de novo.")
                     return@launch
                 }
                 if (finalists.size > 3) { fail("10 minutos e ainda ${Session.count} resultados: o número mudou pouco. Continue pela busca normal."); return@launch }
                 if (finalists.isEmpty()) { fail("Nenhum resultado ficou: o número da tela pode não estar guardado como número. Tente outro valor."); return@launch }
                 // o agente aprende o tipo: com 1 a 3 do mesmo tipo já se sabe (o teste depois só escolhe o endereço)
-                finalists.map { it.type }.distinct().singleOrNull()?.let { t -> if (label != null) learnResult(label, t, true, System.currentTimeMillis() - t0, from, borrowed) }
+                finalists.map { it.type }.distinct().singleOrNull()?.let { t -> if (label != null) learnResult(label, kind(t), true, System.currentTimeMillis() - t0, from, borrowed) }
                 if (!Session.aiCanTest) { say("Sobraram ${finalists.size}. Ligue \"IA pode testar valores\" em Ajustes para eu descobrir o verdadeiro, ou abra cada um na Ficha."); return@launch }
                 for (h in finalists) {
                     say("Testando 0x${h.addr}…")
                     val old = call { d -> runCatching { d.send("read ${h.addr} ${h.type}", quiet = true).status }.getOrNull() } ?: continue
-                    val test = (old.toLongOrNull() ?: continue) + 7
+                    val test = (old.toLongOrNull() ?: continue) + 7 * k  // disfarçado ×k: +7 na tela
                     write(h.addr, h.type, test.toString())
                     delay(1200)
                     val seen = readAt(screenNumbers(), place)
                     write(h.addr, h.type, old)  // volta como estava
                     Diag.add("Achar sozinho: teste 0x${h.addr} = $test, a tela mostrou $seen")
-                    if (seen == test) {
+                    if (seen == test / k) {
                         withContext(Dispatchers.Main) { Session.autoFindWinner = h }
-                        say("Achei: 0x${h.addr} muda o número da tela. Toque em Salvar.")
+                        say("Achei: 0x${h.addr} muda o número da tela" + (if (k > 1) " (guardado ×$k: para pôr 50, escreva ${50 * k})" else "") + ". Toque em Salvar.")
                         return@launch
                     }
                 }

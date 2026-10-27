@@ -704,7 +704,7 @@ function Run-Missions($v) {
     }
     # curva de aprendizagem: 4 nomes que o agente nunca viu (o Claude nao ensinou), 3 vezes cada. So o que foi medido:
     # o tipo que ele ia usar antes de cada vez, o tempo, o que sobrou, o que ele guardou e a conferencia na tela do jogo
-    $gab = [ordered]@{ "Rubis" = @("+1 rubi", "f64"); "Sementes" = @("+1 semente", "i64"); "Honra" = @("+1 honra", "i32"); "Brilho" = @("+1 brilho", "f32") }
+    $gab = [ordered]@{ "Rubis" = @("+1 rubi", "f64"); "Sementes" = @("+1 semente", "i64"); "Honra" = @("+1 honra", "i32"); "Brilho" = @("+1 brilho", "f32"); "Cristais" = @("+1 cristal", "i32*10") }
     $script:curva = @()
     foreach ($nome in $gab.Keys) {
         Mission "curva de aprendizagem: $nome (gabarito $($gab[$nome][1]))" {
@@ -720,7 +720,9 @@ function Run-Missions($v) {
             # conferencia: escreve um numero nos que sobraram e le a tela do jogo
             # [double]: Sementes passa de 4 bilhoes ([int] estourava)
             $want = [double](Val $nome) + 50
-            Step "escrever $want" | Out-Null; Start-Sleep 2
+            # disfarcado (i32*10): na memoria vai o numero da tela vezes 10
+            $k = if ($gab[$nome][1] -match "\*(\d+)$") { [double]$Matches[1] } else { 1 }
+            Step "escrever $($want * $k)" | Out-Null; Start-Sleep 2
             $escreveu = ($script:last -split "`n" | Select-Object -First 5) -join " / "  # o que o Tinker escreveu e onde (addr tipo valor)
             $now = Val $nome
             $linha += " | conferido na tela: escrevi $want, a tela mostra $now | resultados: $escreveu"
