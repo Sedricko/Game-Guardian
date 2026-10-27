@@ -458,7 +458,7 @@ function Step($cmd) {
         & $adb wait-for-device; Wait-Booted | Out-Null
         throw "o Android do emulador reiniciou no meio do passo '$cmd'"
     }
-    for ($k = 0; $k -lt 360; $k++) {
+    for ($k = 0; $k -lt 420; $k++) {  # ate 210 s: o sozinho espera ate 170 s
         Start-Sleep -Milliseconds 500
         $t = & $adb shell cat /data/data/$app/files/missao.txt 2>$null
         if ($LASTEXITCODE -eq 0 -and $t) {
