@@ -1418,7 +1418,7 @@ class Engine private constructor(private val app: Context) {
                 withContext(Dispatchers.Main) { app.packageManager.getLaunchIntentForPackage(TEST_GAME)?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)?.let(app::startActivity) }
                 // "auto" = nenhum tipo marcado (como o Auto da tela): o agente offline escolhe o tipo
                 autoFindStart(w[1], w.getOrElse(2) { "i32" }.let { if (it == "auto") emptySet() else setOf(it) }, waitMs = 2500)
-                val end = System.currentTimeMillis() + 120_000
+                val end = System.currentTimeMillis() + 170_000  // disfarçado leva mais: testa ×1, ×10… até um segurar
                 while (autoJob?.isActive == true && System.currentTimeMillis() < end) delay(500)
                 delay(300)  // a última frase chega pela thread da tela
                 (Session.autoFind ?: "parou").also { autoFindStop() }

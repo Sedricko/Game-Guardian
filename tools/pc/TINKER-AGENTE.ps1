@@ -682,7 +682,7 @@ function Run-Missions($v) {
         if ($button) {
             $job = Start-Job -ArgumentList $adb, $game, $button -ScriptBlock {
                 param($adb, $game, $b)
-                for ($i = 0; $i -lt 30; $i++) { Start-Sleep 4; & $adb shell am broadcast -p $game -a dev.tinker.testgame.ACAO --es acao "'$b'" | Out-Null }
+                for ($i = 0; $i -lt 45; $i++) { Start-Sleep 4; & $adb shell am broadcast -p $game -a dev.tinker.testgame.ACAO --es acao "'$b'" | Out-Null }
             }
         }
         try { $c = Step "sozinho $label auto"; $msg = ($script:last -split "`n")[0] } finally { if ($job) { Stop-Job $job; Remove-Job $job -Force } }
