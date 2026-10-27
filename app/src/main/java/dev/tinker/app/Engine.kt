@@ -2104,19 +2104,26 @@ class Engine private constructor(private val app: Context) {
                 }
                 // primeiro os da memória do jogo (Java); as cópias do número da tela moram na memória nativa do desenho do texto
                 // (libhwui) e escrever nelas, mesmo por 1 s, derrubou o Jogo de Teste: essas vão por último e no máximo 4 testes
-                for (h in finalists.sortedBy { if (it.region.startsWith("J")) 0 else 1 }.take(4)) {
+                // com algum da memória Java, só eles são testados (escrever na nativa já corrompeu o malloc: "Scudo corrupted chunk")
+                val javaFirst = finalists.filter { it.region.startsWith("J") }.ifEmpty { finalists }
+                for (h in javaFirst.take(4)) {
                     say("Testando 0x${h.addr}…")
                     val old = call { d -> runCatching { d.send("read ${h.addr} ${h.type}", quiet = true).status }.getOrNull() } ?: continue
                     // Float e Double também (antes só testava inteiro); disfarçado ×k: +7 na tela é +7k na memória
                     val o = old.toDoubleOrNull() ?: continue
-                    val t = o + 7 * k
+                    // +20 na tela: longe do que o número anda sozinho em 1 s (abates, energia, alguém tocando) — com +7 e
+                    // conferência exata, o número que andou 1 reprovava o endereço certo
+                    val t = o + 20 * k
                     val whole = !(h.type.contains("f32") || h.type.contains("f64"))
                     write(h.addr, h.type, if (whole) t.toLong().toString() else t.toString())
                     delay(1200)
                     val seen = readAt(screenNumbers(), place)
                     write(h.addr, h.type, old)  // volta como estava
                     Diag.add("Achar sozinho: teste 0x${h.addr} = $t, a tela mostrou $seen")
-                    if (seen == kotlin.math.floor(t / k).toLong()) {
+                    val before = kotlin.math.floor(o / k).toLong()
+                    val expect = kotlin.math.floor(t / k).toLong()
+                    // pulou com a escrita (pelo menos 12 dos 20) e ficou perto do escrito (o número pode ter andado um pouco)
+                    if (seen != null && seen - before >= 12 && kotlin.math.abs(seen - expect) <= 8) {
                         if (label != null) learnResult(label, kind(h.type), true, System.currentTimeMillis() - t0, from, borrowed)
                         withContext(Dispatchers.Main) { Session.autoFindWinner = h }
                         say("Achei: 0x${h.addr} muda o número da tela" + (if (k > 1) " (guardado ×$k: para pôr 50, escreva ${50 * k})" else "") + ". Toque em Salvar.")
