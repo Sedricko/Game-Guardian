@@ -1937,6 +1937,7 @@ class Engine private constructor(private val app: Context) {
         // o 🔒 comum (chave antes) e o ×2 aparecem sozinhos na busca normal: guarda o tipo base; cifrado com a chave em outro
         // lugar (xi32@4) só acha pelo tipo exato: guarda inteiro
         val base = if ('@' in type) type else type.removePrefix("x").removeSuffix("x2")
+        if (base.startsWith("auto")) return  // "auto" não é um tipo: o erro dele (auto*100) só sujava o que ele sabe
         val at = java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.US).format(java.util.Date())
         storeKnowledge(record(knowledge(), g, label, base, ok, ms, at, from, tips))
         Diag.add("Agente offline ${if (ok) "acertou" else "errou"}: ${learnKey(label)} como $base")

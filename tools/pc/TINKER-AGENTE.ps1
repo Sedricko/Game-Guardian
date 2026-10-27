@@ -833,8 +833,13 @@ function Run-Missions($v) {
         Step "fixar jogo_bonus_ouro 5" | Out-Null
         & $adb shell am force-stop $game
         Start-Sleep 2; Front-Game; Start-Sleep 10  # o Tinker escolhe o jogo de novo e liga os patches salvos
-        $o = Val "Ouro"; Tap "+1 ouro"; Start-Sleep 1
-        $d = (Val "Ouro") - $o
+        # emulador lento (a tela trava 3 a 5 s): o Tinker pode levar mais que 10 s para religar; espera ate 30 s mais
+        for ($i = 0; $i -lt 4; $i++) {
+            $o = Val "Ouro"; Tap "+1 ouro"; Start-Sleep 1
+            $d = (Val "Ouro") - $o
+            if ($d -eq 5) { break }
+            Start-Sleep 8
+        }
         Step "escolher" | Out-Null
         Step "despatch" | Out-Null
         if ($d -ne 5) { throw "depois de reabrir o ouro subiu $d (esperava 5: o patch nao voltou)" }
