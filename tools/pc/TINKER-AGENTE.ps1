@@ -439,7 +439,13 @@ function Tap($text) {
 }
 # um passo do Tinker (escolher/buscar/refinar/desconhecido/comparar/escrever/congelar); devolve a contagem
 function Step($cmd) {
-    & $adb shell rm -f /data/data/$app/files/missao.txt
+    $rm = (& $adb shell rm -f /data/data/$app/files/missao.txt 2>&1) -join " "
+    # o adbd do emulador reiniciou sem root (Permission denied): pede o root de novo, senao nenhuma resposta do Tinker e lida
+    if ($rm -match "Permission denied") {
+        Say "o adb perdeu o root no emulador: pedindo de novo"
+        & $adb root | Out-Null; Start-Sleep 3; & $adb wait-for-device
+        & $adb shell rm -f /data/data/$app/files/missao.txt
+    }
     $o = (& $adb shell am start -f 0x10008000 -n "$app/.MainActivity" --es missao "'$cmd'" 2>&1) -join " "
     # o Android do emulador reiniciou (o sistema ainda nao acha os apps): espera ligar e deixa a missao tentar de novo
     if ($o -match "does not exist|Can't find service") {

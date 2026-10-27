@@ -1416,7 +1416,8 @@ class Engine private constructor(private val app: Context) {
             // 🎯 Achar sozinho no Jogo de Teste: põe o jogo na frente, lê a tela e refina sozinho (até 2 minutos)
             "sozinho" -> {
                 withContext(Dispatchers.Main) { app.packageManager.getLaunchIntentForPackage(TEST_GAME)?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)?.let(app::startActivity) }
-                autoFindStart(w[1], setOf(w.getOrElse(2) { "i32" }), waitMs = 2500)  // "auto" deixa o agente offline escolher o tipo
+                // "auto" = nenhum tipo marcado (como o Auto da tela): o agente offline escolhe o tipo
+                autoFindStart(w[1], w.getOrElse(2) { "i32" }.let { if (it == "auto") emptySet() else setOf(it) }, waitMs = 2500)
                 val end = System.currentTimeMillis() + 120_000
                 while (autoJob?.isActive == true && System.currentTimeMillis() < end) delay(500)
                 delay(300)  // a última frase chega pela thread da tela
@@ -1971,7 +1972,8 @@ class Engine private constructor(private val app: Context) {
         // agente offline: pelo nome, vai direto no tipo que já acertou (ou que se sabe); a pessoa escolheu um tipo: vale o dela
         val t0 = System.currentTimeMillis()
         val (knownType, tips) = if (label != null && Session.offlineAgent) pickType(knowAll(), savedPkg.orEmpty(), label) else null to ""
-        val useTypes = if (knownType != null && types == setOf("auto")) setOf(knownType) else types
+        // Auto na tela é o conjunto vazio (Session.types)
+        val useTypes = if (knownType != null && (types.isEmpty() || types == setOf("auto"))) setOf(knownType) else types
         var usedType = useTypes.singleOrNull() ?: "auto"
         val from = if (borrowed.isEmpty()) "aprendeu" else "IA"
         fun fail(t: String) {
