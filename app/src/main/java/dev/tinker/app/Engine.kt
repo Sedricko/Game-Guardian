@@ -1975,6 +1975,7 @@ class Engine private constructor(private val app: Context) {
         // Auto na tela é o conjunto vazio (Session.types)
         val useTypes = if (knownType != null && (types.isEmpty() || types == setOf("auto"))) setOf(knownType) else types
         var usedType = useTypes.singleOrNull() ?: "auto"
+        var searchTypes = useTypes
         val from = if (borrowed.isEmpty()) "aprendeu" else "IA"
         fun fail(t: String) {
             if (label != null) learnResult(label, usedType, false, 0, from)
@@ -2001,7 +2002,7 @@ class Engine private constructor(private val app: Context) {
                 aiBusy { resultsText(search(useTypes, first)) }
                 if (useTypes != types && (Session.count ?: 0L) == 0L) {
                     // o tipo aprendido errou neste jogo: guarda o erro e busca como a pessoa pediu
-                    learnResult(label!!, usedType, false, 0); usedType = types.singleOrNull() ?: "auto"
+                    learnResult(label!!, usedType, false, 0); usedType = types.singleOrNull() ?: "auto"; searchTypes = types
                     aiBusy { resultsText(search(types, first)) }
                 }
                 Diag.add("Achar sozinho: $target em ${spots.size} lugar(es) da tela, ${Session.count} resultados")
@@ -2027,7 +2028,9 @@ class Engine private constructor(private val app: Context) {
                         // 2 seguidos sem nada: o número já tinha mudado entre ler a tela e buscar, e o certo ficou de fora; busca de novo
                         if (++misses >= 2) {
                             misses = 0
-                            aiBusy { resultsText(search(types, ahead(cur))) }
+                            // o tipo que o agente sabia não segura o número (sobrou 0 duas vezes): é erro dele; segue como a pessoa pediu
+                            if (searchTypes != types) { learnResult(label!!, usedType, false, 0); usedType = types.singleOrNull() ?: "auto"; searchTypes = types }
+                            aiBusy { resultsText(search(searchTypes, ahead(cur))) }
                             Diag.add("Achar sozinho: busquei de novo com $cur, ${Session.count} resultados")
                         }
                     } else misses = 0
@@ -4045,7 +4048,7 @@ class Engine private constructor(private val app: Context) {
             val i = Session.saved.indexOfFirst { it.addr == hit.addr && it.type == hit.type }
             when {
                 i < 0 -> recordValue(SavedItem(hit.addr, hit.type, hit.region, hit.value, frozen, pid = currentPid, name = name), hit.value, System.currentTimeMillis())
-                    .also { Session.saved.add(it); added += it }
+                    .also { Session.saved.add(it); added += it; if (name.isNotBlank()) learnSaved(name, hit.type) }
                 // o salvo antigo está de novo nesse endereço: passa a valer nesta vez do jogo
                 stale(Session.saved[i]) -> Session.saved[i] = Session.saved[i].copy(pid = currentPid, value = hit.value, frozen = frozen || Session.saved[i].frozen, trusted = true)
                 frozen -> Session.saved[i] = Session.saved[i].copy(frozen = true)
@@ -4212,6 +4215,14 @@ class Engine private constructor(private val app: Context) {
     fun rename(item: SavedItem, name: String) {
         Diag.add("Salvo 0x${item.addr} renomeado para \"$name\"")
         replace(item) { it.copy(name = name.trim()) }
+        if (name.trim() != item.name) learnSaved(name, item.type)
+    }
+
+    /** Salvo com nome ("Ouro"): o agente offline aprende o tipo desse nome neste jogo (o jeito mais comum de achar um valor). */
+    private fun learnSaved(name: String, type: String) {
+        val n = name.trim().removePrefix("missão ").trim()
+        if (n.length < 2 || n.none(Char::isLetter)) return
+        scope.launch(Dispatchers.IO) { runCatching { learnResult(n, type, true, 0) } }
     }
 
     /** Lista de salvos em JSON, para guardar ou passar para outra pessoa (base das tabelas de cheat). */

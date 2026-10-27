@@ -672,6 +672,32 @@ function Run-Missions($v) {
         if ($f[1] -ne "i32" -or [int]$f[2] -lt 1) { throw "nao guardou o acerto ($($script:last -replace "`n", ' | '))" }
         "sobraram $c; o agente sabe: Abates e Dword, $($f[2]) acertos e $($f[3]) erros"
     }
+    # treino do agente offline em outros nomes da tela: o numero muda sozinho (energia) ou por um botao tocado ao fundo
+    function Train($label, $button) {
+        $job = $null
+        if ($button) {
+            $job = Start-Job -ArgumentList $adb, $game, $button -ScriptBlock {
+                param($adb, $game, $b)
+                for ($i = 0; $i -lt 30; $i++) { Start-Sleep 4; & $adb shell am broadcast -p $game -a dev.tinker.testgame.ACAO --es acao "'$b'" | Out-Null }
+            }
+        }
+        try { $c = Step "sozinho $label auto"; $msg = ($script:last -split "`n")[0] } finally { if ($job) { Stop-Job $job; Remove-Job $job -Force } }
+        Step "aprendido $label" | Out-Null
+        $f = (($script:last -split "`n")[0]) -split ' '
+        [pscustomobject]@{ c = $c; msg = $msg; type = $f[1]; wins = [int]$f[2]; fails = [int]$f[3] }
+    }
+    Mission "agente offline treina: energia (muda sozinha)" {
+        $t = Train "Energia" $null
+        if ($t.wins -lt 1) { throw "nao aprendeu ($($t.msg); sabe: $($t.type), $($t.wins) acertos, $($t.fails) erros)" }
+        "aprendeu Energia como $($t.type): $($t.wins) acertos, $($t.fails) erros"
+    }
+    # Madeira aparece inteira, mas o jogo guarda Float: o que o Claude ensinou (Dword) erra; o agente tem de aprender com o erro
+    Mission "agente offline aprende com o erro: madeira (ensinado Dword, e Float)" {
+        $t = Train "Madeira" "+1 madeira"
+        if ($t.type -ne "f32" -or $t.wins -lt 1) { $t = Train "Madeira" "+1 madeira" }
+        if ($t.type -ne "f32" -or $t.wins -lt 1) { throw "nao aprendeu que Madeira e Float ($($t.msg); sabe: $($t.type), $($t.wins) acertos, $($t.fails) erros)" }
+        "aprendeu Madeira como Float depois de $($t.fails) erro(s) com Dword"
+    }
     Mission "unreal: objeto pelo nome (tabelas de nomes e objetos)" {
         $c = Step "unreal jogador"
         if ($script:last -notmatch "ueobj [0-9a-f]+ BP_Jogador_C Jogador") { throw "nao achou Jogador da classe BP_Jogador_C ($($script:last -replace "`n", ' | '))" }
