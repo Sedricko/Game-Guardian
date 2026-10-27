@@ -6,6 +6,14 @@ import org.junit.Test
 class LearnTest {
     private val all = SEED + TECHNIQUES
 
+    @Test fun jeitoQueEnganouPerdeParaOProvado() {
+        var k = emptyList<Know>()
+        repeat(4) { k = record(k, "jogo.a", "Cristais", "i32", ok = true, ms = 0, at = "") }  // cópia do número da tela
+        repeat(3) { k = record(k, "jogo.a", "Cristais", "i32", ok = false, ms = 0, at = "") }  // o teste de escrita reprovou
+        k = record(k, "jogo.a", "Cristais", "i32*10", ok = true, ms = 0, at = "")
+        assertEquals("i32*10", pickType(all + k, "jogo.a", "Cristais").first)
+    }
+
     @Test fun disfarceAprendidoVoltaComOTipo() {
         val k = record(emptyList(), "jogo.a", "Cristais", "i32*10", ok = true, ms = 0, at = "")
         assertEquals("i32*10", pickType(all + k, "jogo.a", "cristais").first)

@@ -109,7 +109,8 @@ internal fun pickType(all: Collection<Know>, game: String, label: String): Pair<
     // "save" é onde o campo fica no arquivo do jogo (editor de save), não um tipo para buscar na memória
     val here = all.filter { it.game == game && it.name == k && it.type != "save" }
     val tips = all.firstOrNull { it.game == "*" && k.split(' ').any { w -> w.startsWith(it.name) } }?.tips.orEmpty()
-    here.filter { it.wins > 0 }.maxByOrNull { it.wins - it.fails }?.let { return it.type to tips }
+    // um erro pesa o dobro de um acerto: um jeito que já enganou (cópia do número da tela) perde para o que foi provado
+    here.filter { it.wins > 0 }.maxByOrNull { it.wins - 2 * it.fails }?.let { return it.type to tips }
     // errou aqui e nunca acertou: esse tipo sai da frente
     val wrong = here.filter { it.wins == 0 && it.fails > 0 }.map { it.type }.toSet()
     val others = all.filter { it.game != "*" && it.game != game && it.name == k && it.wins > 0 && it.type != "save" }.groupBy { it.type }

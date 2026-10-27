@@ -1417,11 +1417,14 @@ class Engine private constructor(private val app: Context) {
             "sozinho" -> {
                 withContext(Dispatchers.Main) { app.packageManager.getLaunchIntentForPackage(TEST_GAME)?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)?.let(app::startActivity) }
                 // "auto" = nenhum tipo marcado (como o Auto da tela): o agente offline escolhe o tipo
+                // no Jogo de Teste o teste de 2 s vale sempre: é o que separa o valor verdadeiro das cópias do número da tela
+                val canTest = Session.aiCanTest
+                withContext(Dispatchers.Main) { Session.aiCanTest = true }
                 autoFindStart(w[1], w.getOrElse(2) { "i32" }.let { if (it == "auto") emptySet() else setOf(it) }, waitMs = 2500)
                 val end = System.currentTimeMillis() + 170_000  // disfarçado leva mais: testa ×1, ×10… até um segurar
                 while (autoJob?.isActive == true && System.currentTimeMillis() < end) delay(500)
                 delay(300)  // a última frase chega pela thread da tela
-                (Session.autoFind ?: "parou").also { autoFindStop() }
+                (Session.autoFind ?: "parou").also { autoFindStop(); withContext(Dispatchers.Main) { Session.aiCanTest = canTest } }
             }
             "unreal" -> return unrealObjects(arg).let { (msg, l) -> "ok $msg\ncount ${l.size}\n" + l.joinToString("\n") { "ueobj ${it.addr} ${it.cls} ${it.name}" } }
             "cronometros" -> return findTimers(arg.toLongOrNull()).also { timerHits = it }.let { "ok ${it.size}\ncount ${it.size}\n" + it.joinToString("\n") { t -> "timer ${t.addr} ${t.leftSec}" } }
@@ -1964,7 +1967,7 @@ class Engine private constructor(private val app: Context) {
      * value: o número que a pessoa vê agora. Acha ele na tela, busca, e a cada mudança na tela refina sozinho. Com até 3
      * resultados (e "IA pode testar valores" ligado), testa cada um: o que faz o número da tela mudar é o verdadeiro.
      */
-    fun autoFindStart(value: String, types: Set<String>, waitMs: Long = 600, borrowed: String = "") {
+    fun autoFindStart(value: String, types: Set<String>, waitMs: Long = 600, borrowed: String = "", tryFrom: Int = 0) {
         autoFindStop()
         Session.autoFindWinner = null
         // número ("113") ou o nome escrito ao lado dele na tela ("Abates"): com o nome, o número pode mudar à vontade
@@ -1975,15 +1978,18 @@ class Engine private constructor(private val app: Context) {
         val t0 = System.currentTimeMillis()
         val (knownType, tips) = if (label != null && Session.offlineAgent) pickType(knowAll(), savedPkg.orEmpty(), label) else null to ""
         // Auto na tela é o conjunto vazio (Session.types)
-        val applied = knownType != null && (types.isEmpty() || types == setOf("auto"))
+        // jeitos de guardar que ele tenta, em ordem, quando o número da tela não segura (ou o teste reprova todos)
+        val tries = listOf(types to 1L, types to 10L, types to 100L, types to 2L, setOf("xi32@4") to 1L, setOf("xi32@8") to 1L, setOf("xi32@-8") to 1L)
+        val applied = tryFrom == 0 && knownType != null && (types.isEmpty() || types == setOf("auto"))
         // "i32*10" = Dword guardado ×10 (a tela mostra 23, a memória tem 230): o agente aprendeu o disfarce
-        var k = if (applied) knownType!!.substringAfter('*', "1").toLongOrNull() ?: 1L else 1L
-        val useTypes = if (applied) setOf(knownType!!.substringBefore('*')) else types
+        var k = if (applied) knownType!!.substringAfter('*', "1").toLongOrNull() ?: 1L else tries[tryFrom.coerceIn(tries.indices)].second
+        val useTypes = if (applied) setOf(knownType!!.substringBefore('*')) else tries[tryFrom.coerceIn(tries.indices)].first
         var usedType = (useTypes.singleOrNull() ?: "auto") + if (k > 1) "*$k" else ""
         // o número da tela vira o da memória (faixa "a~b" também)
         fun sc(r: String) = if (k == 1L) r else r.split('~').joinToString("~") { (it.trim().toLong() * k).toString() }
         fun kind(t: String) = t + if (k > 1) "*$k" else ""
         var searchTypes = useTypes
+        var exploring = tryFrom > 0  // já está tentando outros jeitos de guardar (não é mais o tipo aprendido)
         val from = if (borrowed.isEmpty()) "aprendeu" else "IA"
         fun fail(t: String) {
             if (label != null) learnResult(label, usedType, false, 0, from)
@@ -2027,7 +2033,6 @@ class Engine private constructor(private val app: Context) {
                 var last = start
                 var misses = 0
                 var still = 0
-                var exploring = false  // já está tentando outros jeitos de guardar (não é mais o tipo aprendido)
                 var changes = 0  // quantas mudanças da tela o refino já seguiu
                 val end = System.currentTimeMillis() + 10 * 60_000L
                 while (System.currentTimeMillis() < end) {
@@ -2049,7 +2054,9 @@ class Engine private constructor(private val app: Context) {
                         // outro contador subindo) não é o número da tela. "Não mudou" tira esses impostores; sobrou 0: desfaz
                         if (++still == 2 && count > 3) {
                             aiBusy { resultsText(compare("same")) }
-                            if ((Session.count ?: 0L) == 0L) aiBusy { resultsText(undo()) }
+                            // a tela mudou enquanto comparava (o número verdadeiro mudou na memória no meio): o "não mudou" valeu errado
+                            val after = readAt(screenNumbers(), place)
+                            if ((Session.count ?: 0L) == 0L || (after != null && after != cur)) aiBusy { resultsText(undo()) }
                             Diag.add("Achar sozinho: tela parada em $cur, não mudou: ${Session.count} resultados")
                         }
                         continue
@@ -2069,7 +2076,6 @@ class Engine private constructor(private val app: Context) {
                             // guardar (×10, ×100, dobro, cifrado com a chave depois ou mais longe). O verdadeiro sobrevive aos
                             // refinos; o lixo de cada tentativa some
                             else if (label != null) {
-                                val tries = listOf(types to 1L, types to 10L, types to 100L, types to 2L, setOf("xi32@4") to 1L, setOf("xi32@8") to 1L, setOf("xi32@-8") to 1L)
                                 val i = tries.indexOfFirst { it.first == searchTypes && it.second == k }
                                 tries[(i + 1) % tries.size].let { (ty, m) -> searchTypes = ty; k = m }
                                 exploring = true
@@ -2084,30 +2090,45 @@ class Engine private constructor(private val app: Context) {
                 }
                 val finalists = list().second
                 // várias cópias que seguiram todas as mudanças: o agente aprende o tipo delas; o endereço fica para a pessoa (Ficha)
-                finalists.map { it.type }.distinct().singleOrNull()?.takeIf { finalists.size in 4..10 && label != null }?.let { t ->
+                finalists.map { it.type }.distinct().singleOrNull()?.takeIf { finalists.size in 4..10 && label != null && !Session.aiCanTest }?.let { t ->
                     learnResult(label!!, kind(t), true, System.currentTimeMillis() - t0, from, borrowed)
                     say("Sobraram ${finalists.size}, todos ${TYPE_NAMES[t] ?: t}, seguindo cada mudança da tela: são cópias do mesmo número. Abra cada um na Ficha ou mude no jogo de novo.")
                     return@launch
                 }
-                if (finalists.size > 3) { fail("10 minutos e ainda ${Session.count} resultados: o número mudou pouco. Continue pela busca normal."); return@launch }
+                if (finalists.size > if (Session.aiCanTest) 10 else 3) { fail("10 minutos e ainda ${Session.count} resultados: o número mudou pouco. Continue pela busca normal."); return@launch }
                 if (finalists.isEmpty()) { fail("Nenhum resultado ficou: o número da tela pode não estar guardado como número. Tente outro valor."); return@launch }
-                // o agente aprende o tipo: com 1 a 3 do mesmo tipo já se sabe (o teste depois só escolhe o endereço)
-                finalists.map { it.type }.distinct().singleOrNull()?.let { t -> if (label != null) learnResult(label, kind(t), true, System.currentTimeMillis() - t0, from, borrowed) }
-                if (!Session.aiCanTest) { say("Sobraram ${finalists.size}. Ligue \"IA pode testar valores\" em Ajustes para eu descobrir o verdadeiro, ou abra cada um na Ficha."); return@launch }
+                // sem poder testar, o tipo de 1 a 3 do mesmo tipo é o que se sabe; com teste, só o que mudou a tela ensina
+                if (!Session.aiCanTest) {
+                    finalists.map { it.type }.distinct().singleOrNull()?.let { t -> if (label != null) learnResult(label, kind(t), true, System.currentTimeMillis() - t0, from, borrowed) }
+                    say("Sobraram ${finalists.size}. Ligue \"IA pode testar valores\" em Ajustes para eu descobrir o verdadeiro, ou abra cada um na Ficha."); return@launch
+                }
                 for (h in finalists) {
                     say("Testando 0x${h.addr}…")
                     val old = call { d -> runCatching { d.send("read ${h.addr} ${h.type}", quiet = true).status }.getOrNull() } ?: continue
-                    val test = (old.toLongOrNull() ?: continue) + 7 * k  // disfarçado ×k: +7 na tela
-                    write(h.addr, h.type, test.toString())
+                    // Float e Double também (antes só testava inteiro); disfarçado ×k: +7 na tela é +7k na memória
+                    val o = old.toDoubleOrNull() ?: continue
+                    val t = o + 7 * k
+                    val whole = !(h.type.contains("f32") || h.type.contains("f64"))
+                    write(h.addr, h.type, if (whole) t.toLong().toString() else t.toString())
                     delay(1200)
                     val seen = readAt(screenNumbers(), place)
                     write(h.addr, h.type, old)  // volta como estava
-                    Diag.add("Achar sozinho: teste 0x${h.addr} = $test, a tela mostrou $seen")
-                    if (seen == test / k) {
+                    Diag.add("Achar sozinho: teste 0x${h.addr} = $t, a tela mostrou $seen")
+                    if (seen == kotlin.math.floor(t / k).toLong()) {
+                        if (label != null) learnResult(label, kind(h.type), true, System.currentTimeMillis() - t0, from, borrowed)
                         withContext(Dispatchers.Main) { Session.autoFindWinner = h }
                         say("Achei: 0x${h.addr} muda o número da tela" + (if (k > 1) " (guardado ×$k: para pôr 50, escreva ${50 * k})" else "") + ". Toque em Salvar.")
                         return@launch
                     }
+                }
+                // nenhum mexe na tela: eram cópias do número da tela; o jeito de guardar é outro (×10, cifrado…): tenta o próximo
+                val idx = tries.indexOfFirst { it.first == searchTypes && it.second == k }
+                if (label != null && idx + 1 in tries.indices) {
+                    learnResult(label, usedType, false, 0, from)
+                    val (nt, nk) = tries[idx + 1]
+                    say("Os ${finalists.size} que sobraram são cópias (não mexem na tela). Tentando ${typeLabel((nt.singleOrNull() ?: "auto") + if (nk > 1) "*$nk" else "")}…")
+                    withContext(Dispatchers.Main) { autoFindStart(value, types, 0, borrowed, idx + 1) }
+                    return@launch
                 }
                 say("Nenhum dos ${finalists.size} mudou a tela no teste: o número da tela é calculado de outro lugar. Abra cada um na Ficha.")
             } catch (e: kotlinx.coroutines.CancellationException) {

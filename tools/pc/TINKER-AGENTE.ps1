@@ -899,9 +899,18 @@ function Test-Version {
     if ((& $adb shell pm list packages $game) -match $game) {
         # parou no meio: o motivo vai para a planilha (antes ficava so nesta janela e o resultado das missoes sumia)
         try { Run-Missions $v } catch {
-            $why = "$($_.Exception.Message) (linha $($_.InvocationInfo.ScriptLineNumber): $($_.InvocationInfo.Line.Trim()))"
-            Say "missoes pararam: $why"
-            Post-Sheet "agente PC: missoes pararam" $why (($script:mres + $script:curva) -join "`n") $v
+            # o Android do emulador reiniciou no meio: espera ligar e roda as missoes de novo (uma vez)
+            if ($_.Exception.Message -match "reiniciou") {
+                Say "o emulador reiniciou durante as missoes: esperando e rodando de novo"
+                & $adb wait-for-device; Wait-Booted | Out-Null; & $adb root | Out-Null; Start-Sleep 5; & $adb wait-for-device
+                $err = $null
+                try { Run-Missions $v } catch { $err = $_ }
+            } else { $err = $_ }
+            if ($err) {
+                $why = "$($err.Exception.Message) (linha $($err.InvocationInfo.ScriptLineNumber): $($err.InvocationInfo.Line.Trim()))"
+                Say "missoes pararam: $why"
+                Post-Sheet "agente PC: missoes pararam" $why (($script:mres + $script:curva) -join "`n") $v
+            }
         }
     }
     Set-Content $done $v
