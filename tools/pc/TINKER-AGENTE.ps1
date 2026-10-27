@@ -737,6 +737,14 @@ function Run-Missions($v) {
         }
     }
     if ($script:curva) { Post-Sheet "agente PC: curva de aprendizagem" "" ($script:curva -join "`n") $v }
+    # pedido da pessoa "Honra = 500": o agente acha pelo nome e ja poe o valor; conferido na tela (os toques podem somar uns 3)
+    Mission "pedido: Honra = 500 (acha e poe o valor pedido)" {
+        $t = Train "Honra=500" "+1 honra"
+        Start-Sleep 2
+        $now = Val "Honra"
+        if ($now -lt 500 -or $now -gt 505) { throw "a tela mostra $now ($($t.msg))" }
+        "a tela mostra $now ($($t.msg))"
+    }
     # nivel 5: o jogo atualiza e tudo muda de lugar; o agente tem de reachar pelo que ja aprendeu (uma vez cada, conferido na tela)
     $script:curva5 = @()
     # comeca limpo: a curva escreve no jogo e o Vigor deixa a busca pela mudanca grande; o nivel 5 nao herda nada disso

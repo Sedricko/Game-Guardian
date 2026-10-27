@@ -1980,9 +1980,13 @@ class Engine private constructor(private val app: Context) {
      * value: o número que a pessoa vê agora. Acha ele na tela, busca, e a cada mudança na tela refina sozinho. Com até 3
      * resultados (e "IA pode testar valores" ligado), testa cada um: o que faz o número da tela mudar é o verdadeiro.
      */
-    fun autoFindStart(value: String, types: Set<String>, waitMs: Long = 600, borrowed: String = "", tryFrom: Int = 0) {
+    fun autoFindStart(asked: String, types: Set<String>, waitMs: Long = 600, borrowed: String = "", tryFrom: Int = 0) {
         autoFindStop()
         Session.autoFindWinner = null
+        // pedido "Gemas = 9999" (ou "Gemas para 9999"): acha pelo nome e, provado, já põe o valor pedido
+        val pedido = Regex("""^(.*\p{L}.*?)\s*(?:=|->|→|\bpara\b)\s*(-?\d+(?:[.,]\d+)?)\s*$""").find(asked.trim())
+        val value = pedido?.groupValues?.get(1) ?: asked
+        val want = pedido?.groupValues?.get(2)?.replace(',', '.')?.toDoubleOrNull()
         // número ("113") ou o nome escrito ao lado dele na tela ("Abates"): com o nome, o número pode mudar à vontade
         val label = value.trim().takeIf { screenNumber(it) == null && it.any(Char::isLetter) }
         val target = screenNumber(value) ?: if (label != null) 0L else run { Session.autoFind = null; Session.status = "Digite o número que aparece na tela, ou o nome escrito ao lado dele."; return }
@@ -2173,6 +2177,14 @@ class Engine private constructor(private val app: Context) {
                     if (back) {
                         if (label != null) learnResult(label, kind(h.type), true, System.currentTimeMillis() - t0, from, borrowed)
                         withContext(Dispatchers.Main) { Session.autoFindWinner = h }
+                        if (want != null) {
+                            // na memória: ×k no disfarçado; pela mudança a tela é base + bônus, então soma a diferença na base
+                            val w = if (k == -1L) o + (want - before) else want * km()
+                            write(h.addr, h.type, if (whole) kotlin.math.round(w).toLong().toString() else w.toString())
+                            delay(1500)
+                            say("Pronto: ${label ?: value} = ${want.toLong()} (0x${h.addr}; a tela mostra ${readAt(screenNumbers(), place) ?: "?"}). Toque em Salvar para manter.")
+                            return@launch
+                        }
                         say("Achei: 0x${h.addr} muda o número da tela" + (if (k > 1) " (guardado ×$k: para pôr 50, escreva ${50 * k})" else "") + ". Toque em Salvar.")
                         return@launch
                     }
@@ -2183,7 +2195,7 @@ class Engine private constructor(private val app: Context) {
                     learnResult(label, usedType, false, 0, from)
                     val (nt, nk) = tries[idx + 1]
                     say("Os ${finalists.size} que sobraram são cópias (não mexem na tela). Tentando ${typeLabel((nt.singleOrNull() ?: "auto") + if (nk > 1) "*$nk" else "")}…")
-                    withContext(Dispatchers.Main) { autoFindStart(value, types, 0, borrowed, idx + 1) }
+                    withContext(Dispatchers.Main) { autoFindStart(asked, types, 0, borrowed, idx + 1) }
                     return@launch
                 }
                 say("Nenhum dos ${finalists.size} mudou a tela no teste: o número da tela é calculado de outro lugar. Abra cada um na Ficha.")
