@@ -706,7 +706,7 @@ function Run-Missions($v) {
     }
     # curva de aprendizagem: 4 nomes que o agente nunca viu (o Claude nao ensinou), 3 vezes cada. So o que foi medido:
     # o tipo que ele ia usar antes de cada vez, o tempo, o que sobrou, o que ele guardou e a conferencia na tela do jogo
-    $gab = [ordered]@{ "Rubis" = @("+1 rubi", "f64"); "Sementes" = @("+1 semente", "i64"); "Honra" = @("+1 honra", "i32"); "Brilho" = @("+1 brilho", "f32"); "Cristais" = @("+1 cristal", "i32*10"); "Runas" = @("+1 runa", "i32"); "Vigor" = @("+1 vigor", "i32^") }  # Runas: XOR e simetrico, o cifrado comum (🔒, guardado como i32) acha
+    $gab = [ordered]@{ "Rubis" = @("+1 rubi", "f64"); "Sementes" = @("+1 semente", "i64"); "Honra" = @("+1 honra", "i32"); "Brilho" = @("+1 brilho", "f32"); "Cristais" = @("+1 cristal", "i32*10"); "Runas" = @("+1 runa", "i32"); "Vigor" = @("+1 vigor", "i32^"); "Crystals" = @("+1 crystal", "i32*10") }  # Runas: XOR e simetrico, o cifrado comum (🔒, guardado como i32) acha
     $script:curva = @()
     foreach ($nome in $gab.Keys) {
         Mission "curva de aprendizagem: $nome (gabarito $($gab[$nome][1]))" {

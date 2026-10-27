@@ -14,6 +14,11 @@ class LearnTest {
         assertEquals("i32*10", pickType(all + k, "jogo.a", "Cristais").first)
     }
 
+    @Test fun outroIdiomaUsaOQueSabeDoMesmoValor() {
+        val k = record(emptyList(), "jogo.a", "Cristais", "i32*10", ok = true, ms = 0, at = "")
+        assertEquals("i32*10", pickType(all + k, "jogo.a", "Crystals").first)
+    }
+
     @Test fun disfarceAprendidoVoltaComOTipo() {
         val k = record(emptyList(), "jogo.a", "Cristais", "i32*10", ok = true, ms = 0, at = "")
         assertEquals("i32*10", pickType(all + k, "jogo.a", "cristais").first)

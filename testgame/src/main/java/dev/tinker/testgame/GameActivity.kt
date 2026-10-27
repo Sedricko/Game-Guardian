@@ -78,6 +78,7 @@ class GameActivity : Activity() {
         putInt(24, Random.nextInt(10, 60) * 10)  // Cristais: guardado ×10 (disfarçado; a tela mostra /10)
         Random.nextInt().let { k -> putInt(32, k); putInt(28, Random.nextInt(20, 90) xor k) }  // Runas (aqui o unk ainda não existe)
         putInt(36, Random.nextInt(10, 60)); putInt(40, Random.nextInt(100, 300))  // Vigor (nível 7): base e bônus; a tela mostra a soma
+        putInt(44, Random.nextInt(10, 60) * 10)  // Crystals (nível 8): os Cristais com o nome em inglês, guardado ×10 do mesmo jeito
     }
     // Runas (nível 4): cifrado como os jogos protegidos, valor XOR chave com a chave 4 bytes depois, chave nova a cada mudança
     private var runas: Int
@@ -162,6 +163,7 @@ class GameActivity : Activity() {
         actions["+1 cristal"] = { unk.putInt(24, unk.getInt(24) + 10) }
         actions["+1 runa"] = { runas += 1 }
         actions["+1 vigor"] = { unk.putInt(36, unk.getInt(36) + 1) }
+        actions["+1 crystal"] = { unk.putInt(44, unk.getInt(44) + 10) }
         val grid = android.widget.GridLayout(this).apply { columnCount = 2 }
         actions.forEach { (label, act) -> grid.addView(Button(this).apply { text = label; setOnClickListener { act(); save(); show() } }) }
         setContentView(android.widget.ScrollView(this).apply {
@@ -231,7 +233,7 @@ class GameActivity : Activity() {
 
     private fun show() {
         val t = "Fase $fase · versão ${if (base == 0) 1 else 2}\nOuro: $gold\nGemas: $gems\nVida: ${"%.1f".format(hp)}\nEnergia: $energy\nPontos: $points\nDiamantes: $diamonds\nMadeira: $wood\nPoções: $potions\nTempo: ${"%.1f".format(java.util.Locale.ROOT, time)}\nAbates: $kills\nVelocidade: ${"%.1f".format(java.util.Locale.ROOT, speed)}\nObra: $buildLeft\nEspada: ${shop.getInt(4)}\nNivel: $level\nMoedas: $coins" +
-            "\nRubis: ${unk.getDouble(0).toLong()}\nSementes: ${unk.getLong(8)}\nHonra: ${unk.getInt(16)}\nBrilho: ${unk.getFloat(20).toInt()}\nCristais: ${unk.getInt(24) / 10}\nRunas: $runas\nVigor: ${unk.getInt(36) + unk.getInt(40)}"
+            "\nRubis: ${unk.getDouble(0).toLong()}\nSementes: ${unk.getLong(8)}\nHonra: ${unk.getInt(16)}\nBrilho: ${unk.getFloat(20).toInt()}\nCristais: ${unk.getInt(24) / 10}\nRunas: $runas\nVigor: ${unk.getInt(36) + unk.getInt(40)}\nCrystals: ${unk.getInt(44) / 10}"
         if (t == shown) return  // a tela só muda quando um valor muda
         shown = t
         text.text = t

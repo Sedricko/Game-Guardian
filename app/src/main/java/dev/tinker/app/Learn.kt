@@ -105,10 +105,24 @@ internal val TECHNIQUES: List<Know> = listOf(
 private val NEXT = mapOf("i32" to listOf("f32", "i64"), "f32" to listOf("i32", "f64"), "f64" to listOf("f32", "i64"), "i64" to listOf("i32"))
 
 /** O que se sabe de um nome: o tipo para buscar primeiro (null = Auto) e a dica das técnicas. */
+// o mesmo valor com nome em outro idioma (o jogo trocou de idioma, ou a versão em inglês): vale o que já se sabe do outro nome
+private val SAME = listOf(
+    setOf("ouro", "gold", "oro", "or"), setOf("moedas", "moeda", "coins", "coin", "monedas"), setOf("gemas", "gema", "gems", "gem"),
+    setOf("diamantes", "diamante", "diamonds", "diamond"), setOf("cristais", "cristal", "crystals", "crystal", "cristales"),
+    setOf("vida", "hp", "health", "life", "saude"), setOf("energia", "energy", "stamina"), setOf("madeira", "wood", "madera"),
+    setOf("pedra", "stone", "piedra"), setOf("rubis", "rubi", "rubies", "ruby"), setOf("honra", "honor", "honour"),
+    setOf("abates", "abate", "kills", "kill"), setOf("pontos", "ponto", "points", "score"), setOf("nivel", "level"),
+    setOf("pocoes", "pocao", "potions", "potion"), setOf("sementes", "semente", "seeds", "seed"), setOf("municao", "ammo"),
+    setOf("runas", "runa", "runes", "rune"), setOf("brilho", "shine", "glow"), setOf("vigor", "might"),
+)
+internal fun sameNames(k: String): Set<String> = SAME.firstOrNull { k in it } ?: setOf(k)
+
 internal fun pickType(all: Collection<Know>, game: String, label: String): Pair<String?, String> {
     val k = learnKey(label)
     // "save" é onde o campo fica no arquivo do jogo (editor de save), não um tipo para buscar na memória
+    // o nome exato primeiro; sem nada dele, o mesmo valor com o nome em outro idioma (Crystals = Cristais)
     val here = all.filter { it.game == game && it.name == k && it.type != "save" }
+        .ifEmpty { all.filter { it.game == game && it.name in sameNames(k) && it.type != "save" } }
     val tips = all.firstOrNull { it.game == "*" && k.split(' ').any { w -> w.startsWith(it.name) } }?.tips.orEmpty()
     // um erro pesa o dobro de um acerto: um jeito que já enganou (cópia do número da tela) perde para o que foi provado
     here.filter { it.wins > 0 }.maxByOrNull { it.wins - 2 * it.fails }?.let { return it.type to tips }
