@@ -2139,15 +2139,22 @@ class Engine private constructor(private val app: Context) {
                     val shown = if (k == -1L) readAt(screenNumbers(), place) else null  // a tela antes de escrever (pela mudança)
                     val whole = !(h.type.contains("f32") || h.type.contains("f64"))
                     write(h.addr, h.type, if (whole) t.toLong().toString() else t.toString())
-                    delay(1200)
-                    val seen = readAt(screenNumbers(), place)
+                    // a tela do jogo pode travar 10 s ou mais (emulador lento): olhar só uma vez em 1,2 s reprovava o
+                    // endereço certo e ensinava erro no tipo certo; olha até 8 vezes (~10 s) enquanto não pular
+                    val base0 = if (k == -1L) shown ?: kotlin.math.floor(o).toLong() else kotlin.math.floor(o / km()).toLong()
+                    var onScreen: Long? = null
+                    for (look in 1..8) {
+                        delay(1200)
+                        onScreen = readAt(screenNumbers(), place)
+                        if (onScreen != null && onScreen - base0 >= 12) break
+                    }
                     write(h.addr, h.type, old)  // volta como estava
-                    Diag.add("Achar sozinho: teste 0x${h.addr} = $t, a tela mostrou $seen")
+                    Diag.add("Achar sozinho: teste 0x${h.addr} = $t, a tela mostrou $onScreen")
                     // pela mudança, a tela é a base mais o bônus: vale o pulo de +20, não o número escrito
-                    val before = if (k == -1L) shown ?: kotlin.math.floor(o).toLong() else kotlin.math.floor(o / km()).toLong()
+                    val before = base0
                     val expect = before + 20
                     // pulou com a escrita (pelo menos 12 dos 20) e ficou perto do escrito (o número pode ter andado um pouco)
-                    if (seen != null && seen - before >= 12 && kotlin.math.abs(seen - expect) <= 8) {
+                    if (onScreen != null && onScreen - before >= 12 && kotlin.math.abs(onScreen - expect) <= 8) {
                         if (label != null) learnResult(label, kind(h.type), true, System.currentTimeMillis() - t0, from, borrowed)
                         withContext(Dispatchers.Main) { Session.autoFindWinner = h }
                         say("Achei: 0x${h.addr} muda o número da tela" + (if (k > 1) " (guardado ×$k: para pôr 50, escreva ${50 * k})" else "") + ". Toque em Salvar.")
