@@ -73,7 +73,7 @@ class GameActivity : Activity() {
     private val coins get() = odd.getInt(16) xor 0x5A17C3
     // nomes que o agente offline nunca viu (nem o Claude ensinou), cada um guardado de um jeito: a curva de aprendizagem
     // mede se ele acha e aprende sozinho. Gabarito (Cristais = Dword ×10, disfarçado): Rubis = Double, Sementes = Qword (acima de 4 bilhões: um Dword não confunde), Honra = Dword, Brilho = Float
-    private val unk = ByteBuffer.allocateDirect(64).order(ByteOrder.LITTLE_ENDIAN).apply {
+    private var unk = ByteBuffer.allocateDirect(64).order(ByteOrder.LITTLE_ENDIAN).apply {
         putDouble(0, Random.nextInt(20, 80).toDouble()); putLong(8, 9_000_000_000L + Random.nextInt(1000)); putInt(16, Random.nextInt(40, 99)); putFloat(20, Random.nextInt(10, 60).toFloat())
         putInt(24, Random.nextInt(10, 60) * 10)  // Cristais: guardado ×10 (disfarçado; a tela mostra /10)
         Random.nextInt().let { k -> putInt(32, k); putInt(28, Random.nextInt(20, 90) xor k) }  // Runas (aqui o unk ainda não existe)
@@ -221,6 +221,10 @@ class GameActivity : Activity() {
         for (i in 0 until 160) old.put(i, 0)
         base = if (base == 0) 56 else 0
         gold = vals[0]; gems = vals[1]; energy = vals[2]; points = vals[3]; xp = vals[4]; wood = vals[5]; kills = vals[6]; hp = h; diamonds = dm; time = tm
+        // nível 5: os valores novos (Rubis, Honra, Cristais…) também mudam de lugar, como numa atualização de verdade
+        val nu = ByteBuffer.allocateDirect(64).order(ByteOrder.LITTLE_ENDIAN)
+        for (i in 0 until 64) { nu.put(i, unk.get(i)); unk.put(i, 0) }
+        unk = nu
     }
 
     private fun show() {

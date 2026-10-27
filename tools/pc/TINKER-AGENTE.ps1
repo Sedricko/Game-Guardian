@@ -733,6 +733,28 @@ function Run-Missions($v) {
         }
     }
     if ($script:curva) { Post-Sheet "agente PC: curva de aprendizagem" "" ($script:curva -join "`n") $v }
+    # nivel 5: o jogo atualiza e tudo muda de lugar; o agente tem de reachar pelo que ja aprendeu (uma vez cada, conferido na tela)
+    $script:curva5 = @()
+    Tap "Atualizar jogo"; Start-Sleep 2
+    foreach ($nome in @("Rubis", "Honra", "Cristais")) {
+        Mission "nivel 5, depois de atualizar o jogo: $nome (gabarito $($gab[$nome][1]))" {
+            Step "aprendido $nome" | Out-Null
+            $ia = ((($script:last -split "`n")[0]) -split ' ')[1]
+            $t0 = Get-Date
+            $t = Train $nome $gab[$nome][0]
+            $seg = [int]((Get-Date) - $t0).TotalSeconds
+            $want = [double](Val $nome) + 50
+            $k = if ($gab[$nome][1] -match "\*(\d+)$") { [double]$Matches[1] } else { 1 }
+            Step "escrever $($want * $k)" | Out-Null; Start-Sleep 2
+            $escreveu = ($script:last -split "`n" | Select-Object -First 4) -join " / "
+            $now = Val $nome
+            $linha = "$nome (depois de atualizar) | gabarito $($gab[$nome][1]) | ia usar $ia, $seg s, sobraram $($t.c), guardou $($t.type) ($($t.wins) acertos, $($t.fails) erros) | conferido na tela: escrevi $want, a tela mostra $now | resultados: $escreveu"
+            $script:curva5 += $linha
+            if ($now -ne $want) { throw "a tela nao mudou ($linha)" }
+            $linha
+        }
+    }
+    if ($script:curva5) { Post-Sheet "agente PC: curva nivel 5 (depois de atualizar o jogo)" "" ($script:curva5 -join "`n") $v }
     # a conferencia escreve nos que sobraram: se algum nao era o certo, o jogo ficou mexido; reabre limpo para as outras missoes
     & $adb shell am force-stop $game; Start-Sleep 2; Front-Game; Start-Sleep 3; Step "escolher" | Out-Null
     Mission "unreal: objeto pelo nome (tabelas de nomes e objetos)" {
