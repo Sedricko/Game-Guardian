@@ -157,16 +157,18 @@ function Ui-Nodes {
     throw "nao consegui ler a tela (uiautomator)"
 }
 # tamanho da tela agora (em pe ou deitado): os deslizes sao proporcionais, valem nas duas posicoes
-$script:W = 1440; $script:H = 3120
+$script:W = 1440; $script:H = 3120; $script:SX = 30
 function Set-Rot($r) {
     & $adb shell settings put system user_rotation $r
     Start-Sleep 3
     $sz = (& $adb shell wm size) -join " "
     if ($sz -match "(\d+)x(\d+)") { $a = [int]$Matches[1]; $b = [int]$Matches[2] } else { $a = 1440; $b = 3120 }
     if ($r -eq 1) { $script:W = [Math]::Max($a, $b); $script:H = [Math]::Min($a, $b) } else { $script:W = [Math]::Min($a, $b); $script:H = [Math]::Max($a, $b) }
+    # deitado, a barra de navegacao do Android fica na lateral: deslizar em x=30 caia nela e a lista nao rolava
+    $script:SX = if ($r -eq 1) { [int]($script:W * 0.12) } else { 30 }
 }
 # rola pela margem esquerda (x=30, fora dos botoes): no meio, com a lista ja no topo, o deslize virava toque num tipo (Dword)
-function Scroll-Down { & $adb shell input swipe 30 ([int]($script:H * 0.62)) 30 ([int]($script:H * 0.3)) 300; Start-Sleep -Milliseconds 700 }
+function Scroll-Down { & $adb shell input swipe $script:SX ([int]($script:H * 0.62)) $script:SX ([int]($script:H * 0.3)) 300; Start-Sleep -Milliseconds 700 }
 # acha um texto (regex) na tela; sem achar, rola para baixo e tenta de novo
 function Find-Ui($re, $scrolls = 6) {
     for ($k = 0; $k -le $scrolls; $k++) {
@@ -195,7 +197,7 @@ function Close-Pad {
         if ($ok) { Tap-At $ok }
     }
 }
-function Top-Ui { Close-Pad; for ($k = 0; $k -lt 4; $k++) { & $adb shell input swipe 30 ([int]($script:H * 0.22)) 30 ([int]($script:H * 0.62)) 200 }; Start-Sleep -Milliseconds 500 }
+function Top-Ui { Close-Pad; for ($k = 0; $k -lt 4; $k++) { & $adb shell input swipe $script:SX ([int]($script:H * 0.22)) $script:SX ([int]($script:H * 0.62)) 200 }; Start-Sleep -Milliseconds 500 }
 # botao da fileira de ferramentas (rola para o lado): sem achar na tela, desliza a fileira ate 3 vezes
 function Tap-Chip($re) {
     Top-Ui
@@ -229,10 +231,13 @@ function Overlay-Frames {
 }
 function Open-Bubble {
     & $adb shell am force-stop $app
-    Step "aba 0" | Out-Null; Start-Sleep 3
+    Step "aba 0" | Out-Null
+    # o Tinker acabou de abrir (tela de abertura): espera o botao aparecer antes de tocar
+    if (-not (Wait-Ui "^⧉$" 20)) { throw "o Tinker nao mostrou o botao do menu flutuante" }
     Tap-Ui "^⧉$" 0  # o botao do menu flutuante no topo do Tinker
-    Start-Sleep 3
-    $b = Overlay-Frames | Sort-Object { $_.w * $_.h } | Select-Object -First 1
+    # a bolinha aparece quando o Tinker sai da frente: espera ela ficar visivel (com superficie)
+    $b = $null
+    for ($k = 0; $k -lt 10 -and -not $b; $k++) { Start-Sleep 1; $b = Overlay-Frames | Sort-Object { $_.w * $_.h } | Select-Object -First 1 }
     if (-not $b) {
         # o que o Android diz das janelas do Tinker, para saber por que nao achou
         $d = (& $adb shell dumpsys window windows) -split "`n" | Where-Object { $_ -match "tinker|ty=|frame=|mHasSurface" } | Select-Object -First 40
