@@ -147,6 +147,10 @@ function Ui-Nodes {
         & $adb shell uiautomator dump /sdcard/tinker-ui.xml 2>&1 | Out-Null
         $x = (& $adb shell cat /sdcard/tinker-ui.xml 2>$null) -join ""
         if ($x -match "<hierarchy") {
+            # emulador lento: o Android mostra "isn't responding" sobre o Tinker; toca em Wait e le de novo
+            if ($x -match "isn.t responding" -and $x -match 'text="Wait"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"') {
+                & $adb shell input tap ([int](([int]$Matches[1] + [int]$Matches[3]) / 2)) ([int](([int]$Matches[2] + [int]$Matches[4]) / 2)); Start-Sleep 3; continue
+            }
             return [regex]::Matches($x, '<node [^>]*?text="([^"]*)"[^>]*?content-desc="([^"]*)"[^>]*?bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"') | ForEach-Object {
                 [pscustomobject]@{ t = [Net.WebUtility]::HtmlDecode($_.Groups[1].Value + " " + $_.Groups[2].Value).Trim()
                                    x = ([int]$_.Groups[3].Value + [int]$_.Groups[5].Value) / 2; y = ([int]$_.Groups[4].Value + [int]$_.Groups[6].Value) / 2 }

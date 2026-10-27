@@ -12,7 +12,9 @@ data class Know(val game: String, val name: String, val type: String, val wins: 
 
 /** "Moedas:" e "moedas" são o mesmo nome; acento e maiúscula não contam. */
 internal fun learnKey(label: String): String =
-    Normalizer.normalize(label.trim().lowercase(), Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "").trimEnd(':', ' ').trim()
+    // "⏩ Velocidade:" é "velocidade": sem acento, maiúscula, emoji nem pontuação
+    Normalizer.normalize(label.trim().lowercase(), Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
+        .replace(Regex("[^\\p{L}\\p{N} ]+"), " ").replace(Regex(" +"), " ").trim()
 
 private fun seed(name: String, type: String, tips: String) = Know("*", name, type, tips = tips, from = "Claude")
 

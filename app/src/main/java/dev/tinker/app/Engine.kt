@@ -4220,7 +4220,7 @@ class Engine private constructor(private val app: Context) {
 
     /** Salvo com nome ("Ouro"): o agente offline aprende o tipo desse nome neste jogo (o jeito mais comum de achar um valor). */
     private fun learnSaved(name: String, type: String) {
-        val n = name.trim().removePrefix("missão ").trim()
+        val n = name.trim().replace(Regex("^missão\\s*"), "")  // "missão ouro" ensina "ouro"; só "missão" não ensina nada
         if (n.length < 2 || n.none(Char::isLetter)) return
         scope.launch(Dispatchers.IO) { runCatching { learnResult(n, type, true, 0) } }
     }

@@ -6,6 +6,11 @@ import org.junit.Test
 class LearnTest {
     private val all = SEED + TECHNIQUES
 
+    @Test fun nomeSemEmojiNemPontuacao() {
+        assertEquals("velocidade", learnKey("⏩ Velocidade:"))
+        assertEquals("pocoes", learnKey("Poções"))
+    }
+
     @Test fun usaOQueOClaudeEnsinou() {
         assertEquals("i32", pickType(all, "jogo.a", "Moedas:").first)
         assertEquals("f32", pickType(all, "jogo.a", "Vida").first)
