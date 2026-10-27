@@ -223,7 +223,8 @@ function Open-Tool($chip, $shows) {
 function Overlay-Frames {
     $d = (& $adb shell dumpsys window windows) -join "`n"
     $d -split "Window #" | Where-Object { $_ -match "APPLICATION_OVERLAY|ty=2038" -and $_ -match "dev\.tinker\.app" -and $_ -notmatch "mHasSurface=false" } | ForEach-Object {
-        if ($_ -match "[\s{]frame=\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]") {
+        # Android 12+ escreve "mFrame=[l,t][r,b]"; os mais antigos, "frame=[...]" (o -match do PowerShell nao liga para maiuscula)
+        if ($_ -match "[\s{m]frame=\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]") {
             $l = [int]$Matches[1]; $t = [int]$Matches[2]; $r = [int]$Matches[3]; $b = [int]$Matches[4]
             [pscustomobject]@{ x = ($l + $r) / 2; y = ($t + $b) / 2; w = $r - $l; h = $b - $t }
         }
