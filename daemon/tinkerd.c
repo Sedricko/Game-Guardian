@@ -2612,7 +2612,20 @@ static int run_quiet(char *const argv[]) {
 
 // Backup do save do jogo: a pasta de dados do app (/data/data/pacote, sem cache) vira um .tar guardado pelo Tinker.
 // Antes de experimentar (Foto do jogo, patch), um backup deixa voltar o progresso se algo der errado.
-static const char *data_dir(void) { const char *d = getenv("TINKER_DATA_DIR"); return d ? d : "/data/data"; }
+// a pasta de dados de PKG: no Android 11+ o daemon (aberto pelo Tinker) herda o isolamento do app e /data/data só
+// mostra a pasta do próprio Tinker; a pasta real de cada app continua em /data_mirror/data_ce/null/0
+static const char *data_dir_of(const char *pkg) {
+    const char *d = getenv("TINKER_DATA_DIR");
+    if (d) return d;
+    static const char *bases[] = {"/data/data", "/data_mirror/data_ce/null/0", "/data/user/0"};
+    char p[600];
+    struct stat st;
+    for (size_t i = 0; i < sizeof bases / sizeof *bases; i++) {
+        snprintf(p, sizeof p, "%s/%s", bases[i], pkg);
+        if (!stat(p, &st) && S_ISDIR(st.st_mode)) return bases[i];
+    }
+    return bases[0];
+}
 // a pasta externa do jogo (Android/data/PKG) pelo caminho real: /sdcard passa por FUSE e o root nem sempre enxerga
 static const char *ext_dir(void) { const char *d = getenv("TINKER_EXT_DIR"); return d ? d : "/data/media/0/Android/data"; }
 static const char *saves_dir(void) { const char *d = getenv("TINKER_SAVES_DIR"); return d ? d : "/data/local/tmp/tinker-saves"; }
@@ -2626,7 +2639,7 @@ static int valid_pkg(const char *p) {
 static void cmd_backup(const char *pkg) {
     if (!valid_pkg(pkg)) { puts("err pacote inválido"); return; }
     char src[512], dir[512], file[600], name[64];
-    snprintf(src, sizeof src, "%s/%s", data_dir(), pkg);
+    snprintf(src, sizeof src, "%s/%s", data_dir_of(pkg), pkg);
     struct stat st;
     if (stat(src, &st) || !S_ISDIR(st.st_mode)) { printf("err sem pasta de dados: %s\n", src); return; }
     snprintf(dir, sizeof dir, "%s/%s", saves_dir(), pkg);
@@ -2638,7 +2651,7 @@ static void cmd_backup(const char *pkg) {
     char exc1[200], exc2[200];
     snprintf(exc1, sizeof exc1, "--exclude=%s/cache", pkg);
     snprintf(exc2, sizeof exc2, "--exclude=%s/code_cache", pkg);
-    char *tar[] = {"tar", "-cf", file, exc1, exc2, "-C", (char *)data_dir(), (char *)pkg, NULL};
+    char *tar[] = {"tar", "-cf", file, exc1, exc2, "-C", (char *)data_dir_of(pkg), (char *)pkg, NULL};
     int r = run_quiet(tar);
     if (r && stat(file, &st)) { printf("err o tar falhou (%d)\n", r); return; }
     // a pasta externa vai num tar irmão (NOME-ext.tar): volta junto com o principal
@@ -2664,7 +2677,7 @@ static int valid_rel(const char *r) {
 // REL do editor de save: "ext/..." é a pasta externa do jogo (Android/data/PKG); o resto, a interna (/data/data/PKG)
 static void save_path(char *out, size_t n, const char *pkg, const char *rel) {
     if (!strncmp(rel, "ext/", 4)) snprintf(out, n, "%s/%s/%s", ext_dir(), pkg, rel + 4);
-    else snprintf(out, n, "%s/%s/%s", data_dir(), pkg, rel);
+    else snprintf(out, n, "%s/%s/%s", data_dir_of(pkg), pkg, rel);
 }
 
 static int tinker_path(const char *p) {
@@ -2700,7 +2713,7 @@ static void list_saves(const char *root, const char *pfx, const char *rel, int d
 static void cmd_savefiles(const char *pkg) {
     if (!valid_pkg(pkg)) { puts("err pacote inválido"); return; }
     char root[512];
-    snprintf(root, sizeof root, "%s/%s", data_dir(), pkg);
+    snprintf(root, sizeof root, "%s/%s", data_dir_of(pkg), pkg);
     int n = 0;
     list_saves(root, "", "", 0, &n);
     // muitos jogos (Unity, Godot) guardam o progresso na pasta externa: aparece como ext/...
@@ -2775,13 +2788,13 @@ static void cmd_restoresave(const char *pkg, const char *name) {
     if (L < 5 || L > 60 || strcmp(name + L - 4, ".tar") || strchr(name, '/') || strstr(name, "..")) { puts("err backup inválido"); return; }
     char file[800], dst[512], own[64];
     snprintf(file, sizeof file, "%s/%s/%s", saves_dir(), pkg, name);
-    snprintf(dst, sizeof dst, "%s/%s", data_dir(), pkg);
+    snprintf(dst, sizeof dst, "%s/%s", data_dir_of(pkg), pkg);
     struct stat st, ds;
     if (stat(file, &st)) { puts("err esse backup não existe"); return; }
     if (stat(dst, &ds)) { printf("err sem pasta de dados: %s\n", dst); return; }
     char *stop[] = {"am", "force-stop", (char *)pkg, NULL};
     run_quiet(stop);  // jogo aberto escreveria o save de novo por cima
-    char *tar[] = {"tar", "-xf", file, "-C", (char *)data_dir(), NULL};
+    char *tar[] = {"tar", "-xf", file, "-C", (char *)data_dir_of(pkg), NULL};
     int r = run_quiet(tar);
     if (r) { printf("err o tar falhou (%d)\n", r); return; }
     snprintf(own, sizeof own, "%u:%u", (unsigned)ds.st_uid, (unsigned)ds.st_gid);
