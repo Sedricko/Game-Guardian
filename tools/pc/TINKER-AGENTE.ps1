@@ -206,7 +206,7 @@ function Top-Ui { Close-Pad; for ($k = 0; $k -lt 4; $k++) { & $adb shell input s
 function Tap-Chip($re) {
     Top-Ui
     # com jogo escolhido ou deitado a fileira fica abaixo da dobra: rola ate ela aparecer
-    Find-Ui '(^|\s)(F.{1,2}cil|Velocidade|Cron.metros|Loja|Disfar.ado)$' 6 | Out-Null
+    Find-Ui '(^|\s)(F.{1,2}cil|Velocidade|Cron.metros|Loja|Disfar.ado)$' 14 | Out-Null  # deitado, com a caixa da IA aberta, fica bem abaixo
     $n = Find-Ui $re 0
     for ($k = 0; $k -lt 3 -and -not $n; $k++) {
         $row = Find-Ui '(^|\s)(Loja|Velocidade|Cron.metros)$' 0
@@ -243,6 +243,8 @@ function Open-Bubble {
     # a bolinha aparece quando o Tinker sai da frente: espera ela ficar visivel (com superficie)
     $b = $null
     for ($k = 0; $k -lt 10 -and -not $b; $k++) { Start-Sleep 1; $b = Overlay-Frames | Sort-Object { $_.w * $_.h } | Select-Object -First 1 }
+    # o toque caiu enquanto a tela ainda mudava: toca de novo uma vez
+    if (-not $b -and (Find-Ui "^⧉$" 0)) { Tap-Ui "^⧉$" 0; for ($k = 0; $k -lt 10 -and -not $b; $k++) { Start-Sleep 1; $b = Overlay-Frames | Sort-Object { $_.w * $_.h } | Select-Object -First 1 } }
     if (-not $b) {
         # o que o Android diz das janelas do Tinker, para saber por que nao achou
         $d = (& $adb shell dumpsys window windows) -split "`n" | Where-Object { $_ -match "tinker|ty=|frame=|mHasSurface" } | Select-Object -First 40
@@ -303,7 +305,7 @@ function Ui-Tour($v) {
         "Menu flutuante no topo, IA mais abaixo"
     }
     Check "Ajuda" {
-        Tap-Ui "Para que serve o Tinker" 12
+        Tap-Ui "Para que serve o Tinker" 24  # os Ajustes cresceram (Agente offline): rola mais
         if (-not (Find-Ui "Editor de mem" 2)) { throw "o item da Ajuda nao abriu" }
         Snap "Ajuda"
     }
@@ -458,7 +460,7 @@ function Step($cmd) {
         & $adb wait-for-device; Wait-Booted | Out-Null
         throw "o Android do emulador reiniciou no meio do passo '$cmd'"
     }
-    for ($k = 0; $k -lt 420; $k++) {  # ate 210 s: o sozinho espera ate 170 s
+    for ($k = 0; $k -lt 680; $k++) {  # ate 340 s: o sozinho espera ate 300 s
         Start-Sleep -Milliseconds 500
         $t = & $adb shell cat /data/data/$app/files/missao.txt 2>$null
         if ($LASTEXITCODE -eq 0 -and $t) {
@@ -682,7 +684,7 @@ function Run-Missions($v) {
         if ($button) {
             $job = Start-Job -ArgumentList $adb, $game, $button -ScriptBlock {
                 param($adb, $game, $b)
-                for ($i = 0; $i -lt 45; $i++) { Start-Sleep 4; & $adb shell am broadcast -p $game -a dev.tinker.testgame.ACAO --es acao "'$b'" | Out-Null }
+                for ($i = 0; $i -lt 80; $i++) { Start-Sleep 4; & $adb shell am broadcast -p $game -a dev.tinker.testgame.ACAO --es acao "'$b'" | Out-Null }
             }
         }
         try { $c = Step "sozinho $label auto"; $msg = ($script:last -split "`n")[0] } finally { if ($job) { Stop-Job $job; Remove-Job $job -Force } }
@@ -704,7 +706,7 @@ function Run-Missions($v) {
     }
     # curva de aprendizagem: 4 nomes que o agente nunca viu (o Claude nao ensinou), 3 vezes cada. So o que foi medido:
     # o tipo que ele ia usar antes de cada vez, o tempo, o que sobrou, o que ele guardou e a conferencia na tela do jogo
-    $gab = [ordered]@{ "Rubis" = @("+1 rubi", "f64"); "Sementes" = @("+1 semente", "i64"); "Honra" = @("+1 honra", "i32"); "Brilho" = @("+1 brilho", "f32"); "Cristais" = @("+1 cristal", "i32*10"); "Runas" = @("+1 runa", "i32") }  # Runas: XOR e simetrico, o cifrado comum (🔒, guardado como i32) acha
+    $gab = [ordered]@{ "Rubis" = @("+1 rubi", "f64"); "Sementes" = @("+1 semente", "i64"); "Honra" = @("+1 honra", "i32"); "Brilho" = @("+1 brilho", "f32"); "Cristais" = @("+1 cristal", "i32*10"); "Runas" = @("+1 runa", "i32"); "Vigor" = @("+1 vigor", "i32^") }  # Runas: XOR e simetrico, o cifrado comum (🔒, guardado como i32) acha
     $script:curva = @()
     foreach ($nome in $gab.Keys) {
         Mission "curva de aprendizagem: $nome (gabarito $($gab[$nome][1]))" {
@@ -722,7 +724,9 @@ function Run-Missions($v) {
             $want = [double](Val $nome) + 50
             # disfarcado (i32*10): na memoria vai o numero da tela vezes 10
             $k = if ($gab[$nome][1] -match "\*(\d+)$") { [double]$Matches[1] } else { 1 }
-            Step "escrever $($want * $k)" | Out-Null; Start-Sleep 2
+            # numero da tela calculado (i32^): soma 50 na base que ele achou; a tela tem de subir 50
+            if ($gab[$nome][1] -like "*^") { Step "somar 50" | Out-Null } else { Step "escrever $($want * $k)" | Out-Null }
+            Start-Sleep 2
             $escreveu = ($script:last -split "`n" | Select-Object -First 5) -join " / "  # o que o Tinker escreveu e onde (addr tipo valor)
             $now = Val $nome
             $linha += " | conferido na tela: escrevi $want, a tela mostra $now | resultados: $escreveu"

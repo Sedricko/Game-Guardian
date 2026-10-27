@@ -1421,7 +1421,7 @@ class Engine private constructor(private val app: Context) {
                 val canTest = Session.aiCanTest
                 withContext(Dispatchers.Main) { Session.aiCanTest = true }
                 autoFindStart(w[1], w.getOrElse(2) { "i32" }.let { if (it == "auto") emptySet() else setOf(it) }, waitMs = 2500)
-                val end = System.currentTimeMillis() + 170_000  // disfarçado leva mais: testa ×1, ×10… até um segurar
+                val end = System.currentTimeMillis() + 300_000  // disfarçado e calculado levam mais: testa ×1, ×10, cifrado, pela mudança… até um segurar
                 while (autoJob?.isActive == true && System.currentTimeMillis() < end) delay(500)
                 delay(300)  // a última frase chega pela thread da tela
                 (Session.autoFind ?: "parou").also { autoFindStop(); withContext(Dispatchers.Main) { Session.aiCanTest = canTest } }
@@ -1467,6 +1467,13 @@ class Engine private constructor(private val app: Context) {
             "desconhecido" -> startUnknown(setOf(w.getOrElse(1) { "i32" }))
             "comparar" -> compare(w[1], w.drop(2).joinToString(" "))
             "escrever" -> writeAll(arg)
+            // soma N em cada resultado (o número da tela calculado: a missão confere que a tela subiu N)
+            "somar" -> list().second.joinToString(" ") { h ->
+                val v = call { d -> d.send("read ${h.addr} ${h.type}", quiet = true).status }.toDoubleOrNull() ?: return@joinToString "?"
+                val n = v + (arg.toDoubleOrNull() ?: 0.0)
+                write(h.addr, h.type, if (h.type.contains("f")) n.toString() else n.toLong().toString())
+                "${h.addr}=${n.toLong()}"
+            }
             // "congelar 10": trava no número escrito, mesmo que o jogo já tenha mudado ele de novo (valor que corre sozinho)
             "congelar" -> list().second.take(1).map { if (arg.isEmpty()) it else it.copy(value = arg) }.also { withContext(Dispatchers.Main) { addSaved(it, frozen = true, name = "missão") } }.let { "congelado ${it.size}" }
             // tira os salvos de missões anteriores (cada rodada começa do zero)
@@ -1979,15 +1986,19 @@ class Engine private constructor(private val app: Context) {
         val (knownType, tips) = if (label != null && Session.offlineAgent) pickType(knowAll(), savedPkg.orEmpty(), label) else null to ""
         // Auto na tela é o conjunto vazio (Session.types)
         // jeitos de guardar que ele tenta, em ordem, quando o número da tela não segura (ou o teste reprova todos)
-        val tries = listOf(types to 1L, types to 10L, types to 100L, types to 2L, setOf("xi32@4") to 1L, setOf("xi32@8") to 1L, setOf("xi32@-8") to 1L)
+        // k = -1: pela mudança (o número da tela é calculado, base + bônus: nenhum valor da tela está na memória; a base muda
+        // junto com a tela, então busca sem valor e refina por "aumentou d")
+        val tries = listOf(types to 1L, types to 10L, types to 100L, types to 2L, setOf("xi32@4") to 1L, setOf("xi32@8") to 1L, setOf("xi32@-8") to 1L,
+            setOf("i32") to -1L)
         val applied = tryFrom == 0 && knownType != null && (types.isEmpty() || types == setOf("auto"))
         // "i32*10" = Dword guardado ×10 (a tela mostra 23, a memória tem 230): o agente aprendeu o disfarce
-        var k = if (applied) knownType!!.substringAfter('*', "1").toLongOrNull() ?: 1L else tries[tryFrom.coerceIn(tries.indices)].second
-        val useTypes = if (applied) setOf(knownType!!.substringBefore('*')) else tries[tryFrom.coerceIn(tries.indices)].first
+        var k = if (applied) (if (knownType!!.endsWith("^")) -1L else knownType.substringAfter('*', "1").toLongOrNull() ?: 1L) else tries[tryFrom.coerceIn(tries.indices)].second
+        val useTypes = if (applied) setOf(knownType!!.substringBefore('*').removeSuffix("^")) else tries[tryFrom.coerceIn(tries.indices)].first
         var usedType = (useTypes.singleOrNull() ?: "auto") + if (k > 1) "*$k" else ""
         // o número da tela vira o da memória (faixa "a~b" também)
         fun sc(r: String) = if (k == 1L) r else r.split('~').joinToString("~") { (it.trim().toLong() * k).toString() }
-        fun kind(t: String) = t + if (k > 1) "*$k" else ""
+        fun kind(t: String) = t + if (k > 1) "*$k" else if (k == -1L) "^" else ""
+        val km get() = if (k > 1) k else 1L  // fator da tela para a memória (pela mudança é 1)
         var searchTypes = useTypes
         var exploring = tryFrom > 0  // já está tentando outros jeitos de guardar (não é mais o tipo aprendido)
         val from = if (borrowed.isEmpty()) "aprendeu" else "IA"
@@ -2013,7 +2024,9 @@ class Engine private constructor(private val app: Context) {
                 // pelo nome o número costuma andar sozinho (abates, tempo): até a busca terminar ele já passou do que a tela
                 // mostrou; uma faixa para frente não deixa o certo de fora (refinar depois corta os outros)
                 val first = if (byLabel != null || near != null) ahead(start) else start.toString()
-                aiBusy { resultsText(search(useTypes, sc(first))) }
+                // pela mudança: começa sem valor (o número da tela não está na memória)
+                suspend fun seek(v: String) = if (k == -1L) startUnknown(searchTypes) else search(searchTypes, sc(v))
+                aiBusy { resultsText(seek(first)) }
                 if (useTypes != types && (Session.count ?: 0L) == 0L) {
                     // o tipo aprendido errou neste jogo: guarda o erro e busca como a pessoa pediu
                     learnResult(label!!, usedType, false, 0); k = 1; usedType = types.singleOrNull() ?: "auto"; searchTypes = types
@@ -2023,7 +2036,7 @@ class Engine private constructor(private val app: Context) {
                 if (label != null && (Session.count ?: 0L) == 0L) {
                     for (m in listOf(10L, 100L, 2L)) {
                         k = m
-                        aiBusy { resultsText(search(searchTypes, sc(first))) }
+                        aiBusy { resultsText(seek(first)) }
                         if ((Session.count ?: 0L) > 0L) break
                     }
                     if ((Session.count ?: 0L) == 0L) k = 1 else { usedType = kind(searchTypes.singleOrNull() ?: "auto"); Diag.add("Achar sozinho: $label parece guardado ×$k") }
@@ -2063,7 +2076,7 @@ class Engine private constructor(private val app: Context) {
                     }
                     still = 0
                     changes++
-                    val r = aiBusy { resultsText(refine(sc(followRange(last, cur)))) }
+                    val r = aiBusy { resultsText(if (k == -1L) compare(if (cur > last) "incby" else "decby", kotlin.math.abs(cur - last).toString()) else refine(sc(followRange(last, cur)))) }
                     Diag.add("Achar sozinho: $last → $cur, ${Session.count} resultados")
                     if ((Session.count ?: 0L) == 0L) {
                         aiBusy { resultsText(undo()) }.also { Diag.add("Achar sozinho: nenhum ficou ($r), desfeito") }
@@ -2082,7 +2095,7 @@ class Engine private constructor(private val app: Context) {
                                 usedType = kind(searchTypes.singleOrNull() ?: "auto")
                                 Diag.add("Achar sozinho: $label não segura; tentando ${typeLabel(usedType)}")
                             }
-                            aiBusy { resultsText(search(searchTypes, sc(ahead(cur)))) }
+                            aiBusy { resultsText(seek(ahead(cur))) }
                             Diag.add("Achar sozinho: busquei de novo com $cur, ${Session.count} resultados")
                         }
                     } else misses = 0
@@ -2113,15 +2126,17 @@ class Engine private constructor(private val app: Context) {
                     val o = old.toDoubleOrNull() ?: continue
                     // +20 na tela: longe do que o número anda sozinho em 1 s (abates, energia, alguém tocando) — com +7 e
                     // conferência exata, o número que andou 1 reprovava o endereço certo
-                    val t = o + 20 * k
+                    val t = o + 20 * km
+                    val shown = if (k == -1L) readAt(screenNumbers(), place) else null  // a tela antes de escrever (pela mudança)
                     val whole = !(h.type.contains("f32") || h.type.contains("f64"))
                     write(h.addr, h.type, if (whole) t.toLong().toString() else t.toString())
                     delay(1200)
                     val seen = readAt(screenNumbers(), place)
                     write(h.addr, h.type, old)  // volta como estava
                     Diag.add("Achar sozinho: teste 0x${h.addr} = $t, a tela mostrou $seen")
-                    val before = kotlin.math.floor(o / k).toLong()
-                    val expect = kotlin.math.floor(t / k).toLong()
+                    // pela mudança, a tela é a base mais o bônus: vale o pulo de +20, não o número escrito
+                    val before = if (k == -1L) shown ?: kotlin.math.floor(o).toLong() else kotlin.math.floor(o / km).toLong()
+                    val expect = before + 20
                     // pulou com a escrita (pelo menos 12 dos 20) e ficou perto do escrito (o número pode ter andado um pouco)
                     if (seen != null && seen - before >= 12 && kotlin.math.abs(seen - expect) <= 8) {
                         if (label != null) learnResult(label, kind(h.type), true, System.currentTimeMillis() - t0, from, borrowed)

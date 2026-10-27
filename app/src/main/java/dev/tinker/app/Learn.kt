@@ -11,7 +11,8 @@ data class Know(val game: String, val name: String, val type: String, val wins: 
                 val tips: String = "", val from: String = "aprendeu", val at: String = "")
 
 /** "i32*10" = "Dword ×10" (guardado disfarçado: a tela mostra 23, a memória tem 230). */
-internal fun typeLabel(t: String): String = t.substringBefore('*').let { TYPE_NAMES[it] ?: it } + t.substringAfter('*', "").let { if (it.isEmpty()) "" else " ×$it" }
+internal fun typeLabel(t: String): String = t.substringBefore('*').removeSuffix("^").let { TYPE_NAMES[it] ?: it } +
+    t.substringAfter('*', "").let { if (it.isEmpty()) "" else " ×$it" } + if (t.endsWith("^")) " (pela mudança: o número da tela é calculado)" else ""
 
 /** "Moedas:" e "moedas" são o mesmo nome; acento e maiúscula não contam. */
 internal fun learnKey(label: String): String =
