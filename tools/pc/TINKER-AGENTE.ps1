@@ -698,6 +698,33 @@ function Run-Missions($v) {
         if ($t.type -ne "f32" -or $t.wins -lt 1) { throw "nao aprendeu que Madeira e Float ($($t.msg); sabe: $($t.type), $($t.wins) acertos, $($t.fails) erros)" }
         "aprendeu Madeira como Float depois de $($t.fails) erro(s) com Dword"
     }
+    # curva de aprendizagem: 4 nomes que o agente nunca viu (o Claude nao ensinou), 3 vezes cada. So o que foi medido:
+    # o tipo que ele ia usar antes de cada vez, o tempo, o que sobrou, o que ele guardou e a conferencia na tela do jogo
+    $gab = [ordered]@{ "Rubis" = @("+1 rubi", "f64"); "Sementes" = @("+1 semente", "i64"); "Honra" = @("+1 honra", "i32"); "Brilho" = @("+1 brilho", "f32") }
+    $script:curva = @()
+    foreach ($nome in $gab.Keys) {
+        Mission "curva de aprendizagem: $nome (gabarito $($gab[$nome][1]))" {
+            $linha = "$nome | gabarito $($gab[$nome][1])"
+            for ($vez = 1; $vez -le 3; $vez++) {
+                Step "aprendido $nome" | Out-Null
+                $ia = ((($script:last -split "`n")[0]) -split ' ')[1]
+                $t0 = Get-Date
+                $t = Train $nome $gab[$nome][0]
+                $seg = [int]((Get-Date) - $t0).TotalSeconds
+                $linha += " | vez ${vez}: ia usar $ia, $seg s, sobraram $($t.c), guardou $($t.type) ($($t.wins) acertos, $($t.fails) erros)"
+            }
+            # conferencia: escreve um numero nos que sobraram e le a tela do jogo
+            $want = [int](Val $nome) + 50
+            Step "escrever $want" | Out-Null; Start-Sleep 2
+            $now = Val $nome
+            $linha += " | conferido na tela: escrevi $want, a tela mostra $now"
+            $script:curva += $linha
+            if ($now -ne $want) { throw "a tela nao mudou ($linha)" }
+            if ($t.type -ne $gab[$nome][1]) { throw "guardou o tipo errado ($linha)" }
+            $linha
+        }
+    }
+    if ($script:curva) { Post-Sheet "agente PC: curva de aprendizagem" "" ($script:curva -join "`n") $v }
     Mission "unreal: objeto pelo nome (tabelas de nomes e objetos)" {
         $c = Step "unreal jogador"
         if ($script:last -notmatch "ueobj [0-9a-f]+ BP_Jogador_C Jogador") { throw "nao achou Jogador da classe BP_Jogador_C ($($script:last -replace "`n", ' | '))" }
