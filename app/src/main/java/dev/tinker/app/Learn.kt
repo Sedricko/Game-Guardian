@@ -101,12 +101,13 @@ private val NEXT = mapOf("i32" to listOf("f32", "i64"), "f32" to listOf("i32", "
 /** O que se sabe de um nome: o tipo para buscar primeiro (null = Auto) e a dica das técnicas. */
 internal fun pickType(all: Collection<Know>, game: String, label: String): Pair<String?, String> {
     val k = learnKey(label)
-    val here = all.filter { it.game == game && it.name == k }
+    // "save" é onde o campo fica no arquivo do jogo (editor de save), não um tipo para buscar na memória
+    val here = all.filter { it.game == game && it.name == k && it.type != "save" }
     val tips = all.firstOrNull { it.game == "*" && k.split(' ').any { w -> w.startsWith(it.name) } }?.tips.orEmpty()
     here.filter { it.wins > 0 }.maxByOrNull { it.wins - it.fails }?.let { return it.type to tips }
     // errou aqui e nunca acertou: esse tipo sai da frente
     val wrong = here.filter { it.wins == 0 && it.fails > 0 }.map { it.type }.toSet()
-    val others = all.filter { it.game != "*" && it.game != game && it.name == k && it.wins > 0 }.groupBy { it.type }
+    val others = all.filter { it.game != "*" && it.game != game && it.name == k && it.wins > 0 && it.type != "save" }.groupBy { it.type }
         .mapValues { e -> e.value.sumOf { it.wins } }.entries.sortedByDescending { it.value }.map { it.key }
     val known = all.firstOrNull { it.game == "*" && k.split(' ').any { w -> w.startsWith(it.name) } }?.type
     val order = (others + listOfNotNull(known) + listOfNotNull(known).flatMap { NEXT[it].orEmpty() }).distinct()

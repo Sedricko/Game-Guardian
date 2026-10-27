@@ -2613,6 +2613,8 @@ static int run_quiet(char *const argv[]) {
 // Backup do save do jogo: a pasta de dados do app (/data/data/pacote, sem cache) vira um .tar guardado pelo Tinker.
 // Antes de experimentar (Foto do jogo, patch), um backup deixa voltar o progresso se algo der errado.
 static const char *data_dir(void) { const char *d = getenv("TINKER_DATA_DIR"); return d ? d : "/data/data"; }
+// a pasta externa do jogo (Android/data/PKG) pelo caminho real: /sdcard passa por FUSE e o root nem sempre enxerga
+static const char *ext_dir(void) { const char *d = getenv("TINKER_EXT_DIR"); return d ? d : "/data/media/0/Android/data"; }
 static const char *saves_dir(void) { const char *d = getenv("TINKER_SAVES_DIR"); return d ? d : "/data/local/tmp/tinker-saves"; }
 
 static int valid_pkg(const char *p) {
@@ -2639,6 +2641,14 @@ static void cmd_backup(const char *pkg) {
     char *tar[] = {"tar", "-cf", file, exc1, exc2, "-C", (char *)data_dir(), (char *)pkg, NULL};
     int r = run_quiet(tar);
     if (r && stat(file, &st)) { printf("err o tar falhou (%d)\n", r); return; }
+    // a pasta externa vai num tar irmão (NOME-ext.tar): volta junto com o principal
+    char ext[512], efile[640];
+    snprintf(ext, sizeof ext, "%s/%s", ext_dir(), pkg);
+    if (!stat(ext, &st) && S_ISDIR(st.st_mode)) {
+        snprintf(efile, sizeof efile, "%s/%.*s-ext.tar", dir, (int)(strlen(name) - 4), name);
+        char *etar[] = {"tar", "-cf", efile, exc1, exc2, "-C", (char *)ext_dir(), (char *)pkg, NULL};
+        run_quiet(etar);
+    }
     stat(file, &st);
     printf("ok %s %lld\n", name, (long long)st.st_size);
 }
@@ -2651,13 +2661,19 @@ static int valid_rel(const char *r) {
     return 1;
 }
 
+// REL do editor de save: "ext/..." é a pasta externa do jogo (Android/data/PKG); o resto, a interna (/data/data/PKG)
+static void save_path(char *out, size_t n, const char *pkg, const char *rel) {
+    if (!strncmp(rel, "ext/", 4)) snprintf(out, n, "%s/%s/%s", ext_dir(), pkg, rel + 4);
+    else snprintf(out, n, "%s/%s/%s", data_dir(), pkg, rel);
+}
+
 static int tinker_path(const char *p) {
     const char *t = getenv("TINKER_APP_DIR");
     if (t) return !strncmp(p, t, strlen(t)) && !strstr(p, "..");
     return (!strncmp(p, "/data/data/dev.tinker.app/", 26) || !strncmp(p, "/data/user/0/dev.tinker.app/", 28)) && !strstr(p, "..");
 }
 
-static void list_saves(const char *root, const char *rel, int depth, int *n) {
+static void list_saves(const char *root, const char *pfx, const char *rel, int depth, int *n) {
     char path[700];
     snprintf(path, sizeof path, "%s/%s", root, rel);
     DIR *d = opendir(path);
@@ -2670,10 +2686,11 @@ static void list_saves(const char *root, const char *rel, int depth, int *n) {
         if (lstat(f, &st)) continue;
         if (S_ISDIR(st.st_mode)) {
             // cache, código e bibliotecas não são save
-            if (depth < 3 && strcmp(e->d_name, "cache") && strcmp(e->d_name, "code_cache") && strcmp(e->d_name, "lib") && strcmp(e->d_name, "app_webview"))
-                list_saves(root, r, depth + 1, n);
+            if (depth < 3 && strcmp(e->d_name, "cache") && strcmp(e->d_name, "code_cache") && strcmp(e->d_name, "lib") && strcmp(e->d_name, "app_webview")
+                && strcmp(e->d_name, "il2cpp") && strcmp(e->d_name, "UnityCache"))
+                list_saves(root, pfx, r, depth + 1, n);
         } else if (S_ISREG(st.st_mode) && st.st_size > 0 && st.st_size <= (4 << 20) && valid_rel(r)) {
-            printf("file %s %lld\n", r, (long long)st.st_size);
+            printf("file %s%s %lld\n", pfx, r, (long long)st.st_size);
             (*n)++;
         }
     }
@@ -2685,7 +2702,10 @@ static void cmd_savefiles(const char *pkg) {
     char root[512];
     snprintf(root, sizeof root, "%s/%s", data_dir(), pkg);
     int n = 0;
-    list_saves(root, "", 0, &n);
+    list_saves(root, "", "", 0, &n);
+    // muitos jogos (Unity, Godot) guardam o progresso na pasta externa: aparece como ext/...
+    snprintf(root, sizeof root, "%s/%s", ext_dir(), pkg);
+    list_saves(root, "ext/", "", 0, &n);
     printf("ok %d\n", n);
 }
 
@@ -2709,7 +2729,7 @@ static int copy_file(const char *from, const char *to) {
 static void cmd_readsave(const char *pkg, const char *rel, const char *dest) {
     if (!valid_pkg(pkg) || !valid_rel(rel) || !tinker_path(dest)) { puts("err caminho inválido"); return; }
     char src[700];
-    snprintf(src, sizeof src, "%s/%s/%s", data_dir(), pkg, rel);
+    save_path(src, sizeof src, pkg, rel);
     if (copy_file(src, dest)) { printf("err não copiou: %s\n", strerror(errno)); return; }
     chmod(dest, 0644);
     puts("ok");
@@ -2719,7 +2739,7 @@ static void cmd_readsave(const char *pkg, const char *rel, const char *dest) {
 static void cmd_writesave(const char *pkg, const char *rel, const char *srcp) {
     if (!valid_pkg(pkg) || !valid_rel(rel) || !tinker_path(srcp)) { puts("err caminho inválido"); return; }
     char dst[700];
-    snprintf(dst, sizeof dst, "%s/%s/%s", data_dir(), pkg, rel);
+    save_path(dst, sizeof dst, pkg, rel);
     struct stat st;
     if (stat(dst, &st)) { printf("err o arquivo do jogo não existe: %s\n", rel); return; }
     if (copy_file(srcp, dst)) { printf("err não gravou: %s\n", strerror(errno)); return; }
@@ -2738,7 +2758,7 @@ static void cmd_backups(const char *pkg) {
     int n = 0;
     for (struct dirent *e; d && (e = readdir(d));) {
         size_t L = strlen(e->d_name);
-        if (L < 5 || strcmp(e->d_name + L - 4, ".tar")) continue;
+        if (L < 5 || strcmp(e->d_name + L - 4, ".tar") || (L > 8 && !strcmp(e->d_name + L - 8, "-ext.tar"))) continue;
         char f[800];
         struct stat st;
         snprintf(f, sizeof f, "%s/%s", dir, e->d_name);
@@ -2769,6 +2789,19 @@ static void cmd_restoresave(const char *pkg, const char *name) {
     run_quiet(ch);
     char *rc[] = {"restorecon", "-R", dst, NULL};
     run_quiet(rc);  // fora do Android não existe: tudo bem
+    // e a pasta externa, se o backup tem ela
+    char efile[860], edst[512];
+    snprintf(efile, sizeof efile, "%s/%s/%.*s-ext.tar", saves_dir(), pkg, (int)(L - 4), name);
+    snprintf(edst, sizeof edst, "%s/%s", ext_dir(), pkg);
+    if (!stat(efile, &st) && !stat(edst, &ds)) {
+        char *etar[] = {"tar", "-xf", efile, "-C", (char *)ext_dir(), NULL};
+        if (run_quiet(etar)) { puts("err o tar da pasta externa falhou"); return; }
+        snprintf(own, sizeof own, "%u:%u", (unsigned)ds.st_uid, (unsigned)ds.st_gid);
+        char *ech[] = {"chown", "-R", own, edst, NULL};
+        run_quiet(ech);
+        char *erc[] = {"restorecon", "-R", edst, NULL};
+        run_quiet(erc);
+    }
     puts("ok");
 }
 

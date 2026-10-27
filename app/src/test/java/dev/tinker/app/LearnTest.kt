@@ -36,4 +36,9 @@ class LearnTest {
         assertEquals("IA", k.single().from)
         assertEquals("i64", pickType(all + k, "jogo.a", "Ouro").first)
     }
+
+    @Test fun campoDoSaveNaoViraTipoDeBusca() {
+        val k = record(emptyList(), "jogo.a", "gold", "save", ok = true, ms = 0, at = "", tips = "arquivo shared_prefs/x.xml, campo gold")
+        assertEquals("i32", pickType(all + k, "jogo.a", "gold").first)
+    }
 }

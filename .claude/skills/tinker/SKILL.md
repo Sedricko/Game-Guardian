@@ -44,7 +44,7 @@ O texto completo de cada opção está em `docs/tutorial/ajuda.py` (fonte única
 - **Memória**: Ficha (IL2CPP com `text`/`count` do daemon, struct ≤16 bytes vira (x, y, z), `copyFicha` só números), métodos
   (`il2methods`, contar chamadas, sempre devolver), funções da lib sem IDA (`syms`/`func`/`calls`, `patchNative` com `sym`),
   Unreal (`ue`), Lua (`luatable`).
-- **Outros**: autoteste no `tests/target.c` (libtinkertarget.so), atualizar e testar sozinho, editor de save, foto do jogo,
+- **Outros**: autoteste no `tests/target.c` (libtinkertarget.so), atualizar e testar sozinho, editor de save (interna + `ext/` = `/data/media/0/Android/data/PKG`, backup `NOME-ext.tar` irmão; missões `savelista`/`saveeditar`), foto do jogo,
   📍 onde o jogo escreve, exportar .CT, IA (Gemini/Groq) que não edita sozinha, vigia da tela ("Onde a tela travou:").
 - **Daemon**: threads extras da varredura com `setpriority` 10 (a tela e o jogo não param na busca).
 

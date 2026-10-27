@@ -53,8 +53,10 @@ AJUDA = [
  "Começar, carregue o jogo ou uma fase, Ver: mostra as regiões da memória onde o jogo escreveu. Usar nas buscas deste jogo faz a busca "
  "começar só nelas; se não achar, procura em tudo sozinha."),
 ("Busca", "💾 Editor de save",
- "Lista os arquivos de progresso do jogo. Os de texto (XML, PlayerPrefs do Unity, JSON) mostram cada número pelo nome; mude e toque em "
- "Gravar: o Tinker faz backup, fecha o jogo e devolve o arquivo. Save binário ou cifrado não dá. Só jogo offline."),
+ "Lista os arquivos de progresso do jogo, da pasta interna e da externa (Android/data, aparecem como ext/...). Os de texto (XML, "
+ "PlayerPrefs do Unity, JSON) mostram cada número pelo nome; mude e toque em Gravar: o Tinker faz backup das duas pastas, fecha o "
+ "jogo e devolve o arquivo. O agente offline guarda qual arquivo e campo você mudou em cada jogo. Save binário ou cifrado não dá. "
+ "Só jogo offline."),
 ("Ferramentas", "🧰 Ferramentas",
  "Logo abaixo da busca, uma fileira de botões; só a escolhida abre embaixo. Toque de novo para fechar."),
 ("Ferramentas", "🧭 Fácil",

@@ -1473,6 +1473,14 @@ class Engine private constructor(private val app: Context) {
                 val now = runCatching { call { d -> d.send("read ${i.addr} ${i.type}", quiet = true).status } }.getOrDefault("?")
                 "salvo ${i.name.substringAfter("missão ")} ${i.addr} ${if (i.pid == currentPid) "voltou" else "perdido"} $now ${i.pointer.ifEmpty { "-" }}"
             }.joinToString("\n") + "\n" + Diag.lines.lastOrNull { "Não voltou: missão" in it || "Restauração dos salvos" in it }.orEmpty()
+            // editor de save: os arquivos do Jogo de Teste (interna e ext/ = Android/data) e trocar um campo pelo nome
+            "savelista" -> return saveFiles().let { l -> "ok ${l.size}\ncount ${l.size}\n" + l.joinToString("\n") { "file ${it.first} ${it.second}" } }
+            "saveeditar" -> {
+                val (rel, key, v) = w.drop(1).takeIf { it.size == 3 } ?: error("use saveeditar <arquivo> <campo> <valor>")
+                val text = readSave(rel)
+                val f = saveFields(text).firstOrNull { it.key == key } ?: error("sem o campo $key em $rel")
+                return "ok " + writeSave(rel, text, mapOf(f to v)) + "\ncount 1"
+            }
             else -> error("passo desconhecido: $cmd")
         }
         val (count, hits) = list()
@@ -3381,6 +3389,8 @@ class Engine private constructor(private val app: Context) {
         val tmp = File(app.cacheDir, "save-edit.tmp").apply { writeText(text) }
         call { d -> d.send("writesave ${gamePkg()} $rel ${tmp.absolutePath}") }
         Diag.add("Editor de save: $rel com ${edits.size} campo(s) mudado(s)")
+        // o agente guarda onde fica cada campo do save deste jogo (tipo "save"): depois de atualizar, ele sabe o arquivo
+        edits.keys.forEach { f -> learnResult(f.key, "save", true, 0, tips = "arquivo $rel, campo ${f.key}") }
         return "Save gravado (${edits.size} campo(s)). $backup Abra o jogo de novo."
     }
 

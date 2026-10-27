@@ -344,7 +344,8 @@ internal fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit,
                 val mine = know.filter { it.game != "*" }
                 Section("O que ele sabe", "${mine.size} aprendidos jogando · ${know.count { it.game == "*" }} ensinados") {
                     mine.sortedByDescending { it.at }.take(30).forEach { k ->
-                        Text("${k.name} · ${TYPE_NAMES[k.type] ?: k.type} · ${k.wins} acertos, ${k.fails} erros · ${k.game}" + if (k.from == "IA") " · da IA" else "",
+                        Text(if (k.type == "save") "${k.name} · no save: ${k.tips.removePrefix("arquivo ")} · ${k.game}"
+                            else "${k.name} · ${TYPE_NAMES[k.type] ?: k.type} · ${k.wins} acertos, ${k.fails} erros · ${k.game}" + if (k.from == "IA") " · da IA" else "",
                             style = MaterialTheme.typography.bodySmall)
                     }
                     if (mine.isEmpty()) Text("Ainda nada aprendido jogando: use o 🎯 Achar sozinho com o nome ao lado do número.", style = MaterialTheme.typography.bodySmall,
@@ -374,7 +375,7 @@ private val HELP = listOf(
     Triple("Busca", "Mais buscas", "Recolhido embaixo da busca: Sem valor, Busca por bytes (AOB: pares hex com ?? de curinga, em Dados ou Código), Foto do jogo, Onde o jogo escreve, Editor de save e Ir para endereço."),
     Triple("Busca", "Foto do jogo", "Para pegar de novo uma recompensa (jogo offline): 1) Tirar foto, parado 4 s. 2) Pegue a recompensa. 3) Ver o que mudou: só o que mudou com a ação. 4) Voltar como estava: os valores voltam aos da foto e a recompensa fica para pegar de novo. Se travar, feche e abra o jogo."),
     Triple("Busca", "📍 Onde o jogo escreve", "Começar, carregue o jogo ou uma fase, Ver: mostra as regiões da memória onde o jogo escreveu. Usar nas buscas deste jogo faz a busca começar só nelas; se não achar, procura em tudo sozinha."),
-    Triple("Busca", "💾 Editor de save", "Lista os arquivos de progresso do jogo. Os de texto (XML, PlayerPrefs do Unity, JSON) mostram cada número pelo nome; mude e toque em Gravar: o Tinker faz backup, fecha o jogo e devolve o arquivo. Save binário ou cifrado não dá. Só jogo offline."),
+    Triple("Busca", "💾 Editor de save", "Lista os arquivos de progresso do jogo, da pasta interna e da externa (Android/data, aparecem como ext/...). Os de texto (XML, PlayerPrefs do Unity, JSON) mostram cada número pelo nome; mude e toque em Gravar: o Tinker faz backup das duas pastas, fecha o jogo e devolve o arquivo. O agente offline guarda qual arquivo e campo você mudou em cada jogo. Save binário ou cifrado não dá. Só jogo offline."),
     Triple("Ferramentas", "🧰 Ferramentas", "Logo abaixo da busca, uma fileira de botões; só a escolhida abre embaixo. Toque de novo para fechar."),
     Triple("Ferramentas", "🧭 Fácil", "Passo a passo para quem não conhece Dword, Float ou cifrado: pergunta só o número da tela e se aumentou ou diminuiu. O tipo, o cifrado, o dobro e as cópias o Tinker resolve sozinho. Abre sozinho na primeira vez."),
     Triple("Ferramentas", "⏩ Velocidade (Unity)", "Fique no menu ou numa fase parada e toque em Achar a velocidade: o Tinker acha a escala de tempo do Unity pelo relógio do motor. Escolha 0.5x, 2x, 3x ou 5x; 1x volta ao normal. Muda só o valor do motor, sem entrar no jogo."),

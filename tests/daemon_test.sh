@@ -193,6 +193,21 @@ grep -q "^file shared_prefs/com.teste.jogo.v2.playerprefs.xml " <<<"$sv" && ! gr
     && grep -q 'value="9999"' "$out/data/com.teste.jogo/shared_prefs/com.teste.jogo.v2.playerprefs.xml" \
     && [ "$(grep -c '^err caminho inválido' <<<"$sv")" = 2 ] || { echo "FALHOU: editor de save"; exit 1; }
 
+# Editor de save na pasta externa (Android/data/PKG): aparece como ext/..., grava e o backup leva e devolve ela junto
+mkdir -p "$out/ext/com.teste.jogo/files"
+echo '{"gems": 12}' > "$out/ext/com.teste.jogo/files/progresso.json"
+ex=$( { printf '%s\n' "savefiles com.teste.jogo" "backup com.teste.jogo" "readsave com.teste.jogo ext/files/progresso.json $out/app/e.json"; sleep 0.3
+        sed -i 's/12/77/' "$out/app/e.json" 2>/dev/null
+        printf '%s\n' "writesave com.teste.jogo ext/files/progresso.json $out/app/e.json" "readsave com.teste.jogo ext/../../x $out/app/y" "backups com.teste.jogo"; } \
+    | TINKER_DATA_DIR="$out/data" TINKER_EXT_DIR="$out/ext" TINKER_SAVES_DIR="$out/saves" TINKER_APP_DIR="$out/app" "$out/tinkerd")
+echo "$ex"
+ename=$(grep -oE '^ok [0-9-]+\.tar' <<<"$ex" | tail -1 | cut -d' ' -f2)
+grep -q "^file ext/files/progresso.json " <<<"$ex" && grep -q '"gems": 77' "$out/ext/com.teste.jogo/files/progresso.json" \
+    && grep -qx "err caminho inválido" <<<"$ex" && ! grep -q -- "-ext.tar" <<<"$(grep '^save ' <<<"$ex")" && [ -f "$out/saves/com.teste.jogo/${ename%.tar}-ext.tar" ] \
+    || { echo "FALHOU: editor de save na pasta externa"; exit 1; }
+rx=$(printf '%s\n' "restoresave com.teste.jogo $ename" | TINKER_DATA_DIR="$out/data" TINKER_EXT_DIR="$out/ext" TINKER_SAVES_DIR="$out/saves" "$out/tinkerd")
+[ "$(tail -1 <<<"$rx")" = ok ] && grep -q '"gems": 12' "$out/ext/com.teste.jogo/files/progresso.json" || { echo "FALHOU: backup da pasta externa ($rx)"; exit 1; }
+
 # Ponteiros: acha root → +10 → +20 e o caminho volta a dar no mesmo endereço
 ptr=$(printf '%s\n' "attach $pid" "pointers $paddr 256 3" | "$out/tinkerd")
 echo "$ptr" | head -20

@@ -746,6 +746,20 @@ function Run-Missions($v) {
         if ((Val "Ouro") -ne 8888) { throw "na versao nova a tela nao mudou" }
         "achou de novo: sobraram $($r[0]) em $($r[1]) refinos"
     }
+    # editor de save: troca um campo no arquivo do jogo (o Tinker faz backup e fecha o jogo), reabre e confere na tela
+    function Save-Mission($rel, $field, $label) {
+        Step "savelista" | Out-Null
+        if ($script:last -notmatch "file $([regex]::Escape($rel)) ") { throw "o editor nao listou $rel ($((($script:last -split "`n") | Select-Object -First 8) -join ' | '))" }
+        $want = [int](Val $label) + 3
+        Step "saveeditar $rel $field $want" | Out-Null
+        Start-Sleep 2; Front-Game; Start-Sleep 4
+        $now = Val $label
+        Step "escolher" | Out-Null
+        if ($now -ne $want) { throw "a tela mostra $now, esperava $want" }
+        "$label $want pelo arquivo $rel, a tela mostra igual"
+    }
+    Mission "editor de save: pocoes no arquivo da pasta interna" { Save-Mission "shared_prefs/jogo.xml" "potions" "Poções" }
+    Mission "editor de save: gemas no JSON da pasta externa (Android/data)" { Save-Mission "ext/files/progresso.json" "gems" "Gemas" }
     $ok = ($script:mres | Where-Object { $_ -like "OK*" }).Count
     $fails = ($script:mres | Where-Object { $_ -like "FALHA*" }) -join "`n"
     # o Tinker ou o jogo fecharam durante as missoes: o Android guarda o motivo no buffer de crash

@@ -116,6 +116,8 @@ class GameActivity : Activity() {
         prefs = getSharedPreferences("jogo", MODE_PRIVATE)
         gold = prefs.getInt("gold", Random.nextInt(1000, 9000))
         gems = prefs.getInt("gems", Random.nextInt(10, 90))
+        // as gemas também ficam num save JSON na pasta externa (Android/data): o editor de save do Tinker acha como ext/files/progresso.json
+        runCatching { org.json.JSONObject(java.io.File(getExternalFilesDir(null), "progresso.json").readText()).getInt("gems") }.onSuccess { gems = it }
         hp = prefs.getFloat("hp", 87.5f)
         energy = Random.nextInt(10, 50)
         points = prefs.getInt("points", Random.nextInt(100, 900))
@@ -154,6 +156,7 @@ class GameActivity : Activity() {
         })
         val filter = IntentFilter("dev.tinker.testgame.ACAO")
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED) else registerReceiver(receiver, filter)
+        save()  // o save JSON externo já existe desde a primeira abertura (o editor de save do Tinker acha ele)
         show()
         ui.post(object : Runnable { override fun run() { show(); ui.postDelayed(this, 500) } })
         ui.post(object : Runnable { override fun run() { energy += 1; ui.postDelayed(this, 1000) } })
@@ -177,8 +180,11 @@ class GameActivity : Activity() {
         super.onDestroy()
     }
 
-    private fun save() = prefs.edit().putInt("gold", gold).putInt("gems", gems).putFloat("hp", hp)
-        .putInt("points", points).putLong("diamonds", diamonds).putInt("xp", xp).putInt("wood", wood).putInt("potions", potions).apply()
+    private fun save() {
+        prefs.edit().putInt("gold", gold).putInt("gems", gems).putFloat("hp", hp)
+            .putInt("points", points).putLong("diamonds", diamonds).putInt("xp", xp).putInt("wood", wood).putInt("potions", potions).apply()
+        runCatching { java.io.File(getExternalFilesDir(null), "progresso.json").writeText(org.json.JSONObject().put("gems", gems).toString()) }
+    }
 
     /** Fase nova: os valores vão para outra memória e a antiga é apagada, como quando o jogo recria o jogador. */
     private fun nextLevel() {
