@@ -1466,7 +1466,9 @@ class Engine private constructor(private val app: Context) {
             "despatch" -> "desfeitos ${clearMissionPatches()}"
             "desconhecido" -> startUnknown(setOf(w.getOrElse(1) { "i32" }))
             "comparar" -> compare(w[1], w.drop(2).joinToString(" "))
-            "escrever" -> writeAll(arg)
+            // o achar sozinho já provou qual muda a tela: escreve só nele (escrever em todos pôs 640 numa cópia nativa do
+            // desenho do texto e derrubou o Jogo de Teste, SIGSEGV na libgui)
+            "escrever" -> Session.autoFindWinner?.takeIf { h -> list().second.any { it.addr == h.addr } }?.let { write(it.addr, it.type, arg); "1 valores alterados.\n${it.addr} ${it.type} $arg" } ?: writeAll(arg)
             // soma N em cada resultado (o número da tela calculado: a missão confere que a tela subiu N)
             // map (inline) e não joinToString: dentro do lambda dele não dá para chamar o daemon (suspend)
             "somar" -> list().second.map { h ->
@@ -2026,7 +2028,12 @@ class Engine private constructor(private val app: Context) {
                 // mostrou; uma faixa para frente não deixa o certo de fora (refinar depois corta os outros)
                 val first = if (byLabel != null || near != null) ahead(start) else start.toString()
                 // pela mudança: começa sem valor (o número da tela não está na memória)
-                suspend fun seek(v: String) = if (k == -1L) startUnknown(searchTypes) else search(searchTypes, sc(v))
+                // pela mudança só nas regiões onde jogo guarda valor (Java, malloc, .bss, anônima): em tudo eram 171 milhões de
+                // posições (680 MB) e o refino não cabia nos 5 minutos; a pessoa que desmarcou regiões manda nas dela
+                suspend fun seek(v: String) = if (k != -1L) search(searchTypes, sc(v)) else if (Session.regions.any { !it.enabled }) startUnknown(searchTypes) else {
+                    call { d -> d.send("ranges ${(focusRegions() + listOf("Jh", "J", "Ca", "Cb", "A")).joinToString(",")}", quiet = true) }
+                    try { startUnknown(searchTypes) } finally { call { d -> d.send("ranges all", quiet = true) } }
+                }
                 aiBusy { resultsText(seek(first)) }
                 if (useTypes != types && (Session.count ?: 0L) == 0L) {
                     // o tipo aprendido errou neste jogo: guarda o erro e busca como a pessoa pediu

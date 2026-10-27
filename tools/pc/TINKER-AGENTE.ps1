@@ -739,6 +739,8 @@ function Run-Missions($v) {
     if ($script:curva) { Post-Sheet "agente PC: curva de aprendizagem" "" ($script:curva -join "`n") $v }
     # nivel 5: o jogo atualiza e tudo muda de lugar; o agente tem de reachar pelo que ja aprendeu (uma vez cada, conferido na tela)
     $script:curva5 = @()
+    # comeca limpo: a curva escreve no jogo e o Vigor deixa a busca pela mudanca grande; o nivel 5 nao herda nada disso
+    & $adb shell am force-stop $game; Start-Sleep 2; Front-Game; Start-Sleep 3; Step "escolher" | Out-Null
     Tap "Atualizar jogo"; Start-Sleep 2
     foreach ($nome in @("Rubis", "Honra", "Cristais")) {
         Mission "nivel 5, depois de atualizar o jogo: $nome (gabarito $($gab[$nome][1]))" {
