@@ -140,7 +140,7 @@ internal fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                     // número que muda rápido (tempo, abates): pelo nome escrito ao lado dele na tela
                     var label by remember { mutableStateOf("") }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        TinkerTextField(label, { label = it }, "ou o nome ao lado (ex.: Moedas)", Modifier.weight(1f))
+                        TinkerTextField(label, { label = it }, "ou o nome (Moedas) ou um pedido (Moedas = 9999)", Modifier.weight(1f))
                         OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { engine.autoFindStart(label.ifBlank { s.value }, s.types) },
                             enabled = enabled && (label.isNotBlank() || s.value.isNotBlank())) { Text("🎯 Achar sozinho") }
                     }
