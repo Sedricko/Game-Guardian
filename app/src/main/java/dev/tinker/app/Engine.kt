@@ -1471,7 +1471,9 @@ class Engine private constructor(private val app: Context) {
             "escrever" -> Session.autoFindWinner?.takeIf { h -> list().second.any { it.addr == h.addr } }?.let { write(it.addr, it.type, arg); "1 valores alterados.\n${it.addr} ${it.type} $arg" } ?: writeAll(arg)
             // soma N em cada resultado (o número da tela calculado: a missão confere que a tela subiu N)
             // map (inline) e não joinToString: dentro do lambda dele não dá para chamar o daemon (suspend)
-            "somar" -> list().second.map { h ->
+            // só no provado (ou nos da memória Java): somar nos 7 da busca pela mudança escreveu em nativos e o jogo caiu
+            // ("Scudo ERROR: invalid chunk state")
+            "somar" -> (Session.autoFindWinner?.let { listOf(it) } ?: list().second.filter { it.region.startsWith("J") }).map { h ->
                 val v = call { d -> d.send("read ${h.addr} ${h.type}", quiet = true).status }.toDoubleOrNull() ?: return@map "?"
                 val n = v + (arg.toDoubleOrNull() ?: 0.0)
                 write(h.addr, h.type, if (h.type.contains("f")) n.toString() else n.toLong().toString())
@@ -2136,12 +2138,17 @@ class Engine private constructor(private val app: Context) {
                     // +20 na tela: longe do que o número anda sozinho em 1 s (abates, energia, alguém tocando) — com +7 e
                     // conferência exata, o número que andou 1 reprovava o endereço certo
                     val t = o + 20 * km()
-                    val shown = if (k == -1L) readAt(screenNumbers(), place) else null  // a tela antes de escrever (pela mudança)
+                    val shown = readAt(screenNumbers(), place)  // a tela antes de escrever
+                    // cópia velha (ficou para trás, 12 a 28 abaixo da tela) passava no teste sem mexer em nada: só testa quem
+                    // guarda o número da tela agora (pela mudança a tela é base + bônus, não dá para comparar)
+                    if (k != -1L && shown != null && kotlin.math.abs(kotlin.math.floor(o / km()).toLong() - shown) > 3) {
+                        Diag.add("Achar sozinho: 0x${h.addr} tem ${(o / km()).toLong()}, a tela $shown: cópia velha, não testo"); continue
+                    }
                     val whole = !(h.type.contains("f32") || h.type.contains("f64"))
                     write(h.addr, h.type, if (whole) t.toLong().toString() else t.toString())
                     // a tela do jogo pode travar 10 s ou mais (emulador lento): olhar só uma vez em 1,2 s reprovava o
                     // endereço certo e ensinava erro no tipo certo; olha até 8 vezes (~10 s) enquanto não pular
-                    val base0 = if (k == -1L) shown ?: kotlin.math.floor(o).toLong() else kotlin.math.floor(o / km()).toLong()
+                    val base0 = shown ?: kotlin.math.floor(o / km()).toLong()
                     var onScreen: Long? = null
                     for (look in 1..8) {
                         delay(1200)
@@ -2154,7 +2161,16 @@ class Engine private constructor(private val app: Context) {
                     val before = base0
                     val expect = before + 20
                     // pulou com a escrita (pelo menos 12 dos 20) e ficou perto do escrito (o número pode ter andado um pouco)
-                    if (onScreen != null && onScreen - before >= 12 && kotlin.math.abs(onScreen - expect) <= 8) {
+                    // e voltou quando desfiz: só o pulo podia ser outro número lido no lugar (8 olhadas em 10 s dão chance
+                    // ao acaso); subir com a escrita e descer com o desfazer é causa, não coincidência
+                    var back = false
+                    if (onScreen != null && onScreen - before >= 12 && kotlin.math.abs(onScreen - expect) <= 8) for (look in 1..8) {
+                        delay(1200)
+                        val now = readAt(screenNumbers(), place)
+                        if (now != null && now - before < 12) { back = true; break }
+                    }
+                    Diag.add("Achar sozinho: 0x${h.addr} ${if (back) "voltou" else "não voltou"} ao desfazer")
+                    if (back) {
                         if (label != null) learnResult(label, kind(h.type), true, System.currentTimeMillis() - t0, from, borrowed)
                         withContext(Dispatchers.Main) { Session.autoFindWinner = h }
                         say("Achei: 0x${h.addr} muda o número da tela" + (if (k > 1) " (guardado ×$k: para pôr 50, escreva ${50 * k})" else "") + ". Toque em Salvar.")
