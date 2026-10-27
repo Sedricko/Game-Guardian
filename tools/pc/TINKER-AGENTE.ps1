@@ -740,9 +740,13 @@ function Run-Missions($v) {
     # pedido da pessoa "Honra = 500": o agente acha pelo nome e ja poe o valor; conferido na tela (os toques podem somar uns 3)
     Mission "pedido: Honra = 500 (acha e poe o valor pedido)" {
         $t = Train "Honra=500" "+1 honra"
+        $logo = Val "Honra"  # logo depois, sem esperar
         Start-Sleep 2
         $now = Val "Honra"
-        if ($now -lt 500 -or $now -gt 505) { throw "a tela mostra $now ($($t.msg))" }
+        # o que ficou no endereco que o agente usou: separa "o valor voltou" de "o jogo reiniciou e o endereco mudou"
+        $mem = if ($t.msg -match "0x([0-9a-f]+)") { Step "ler $($Matches[1]) i32" | Out-Null; ($script:last -split "`n")[0] } else { "?" }
+        $pid2 = (& $adb shell pidof $game) -join ""
+        if ($now -lt 500 -or $now -gt 505) { throw "a tela mostra $now (logo depois: $logo; no endereco: $mem; pid do jogo: $pid2) ($($t.msg))" }
         "a tela mostra $now ($($t.msg))"
     }
     # nivel 10: decidir sem escrever. O Ouro tem 6 copias (iscas) que seguem cada mudanca; so lendo, o agente aponta o

@@ -1407,6 +1407,8 @@ class Engine private constructor(private val app: Context) {
             "refinar" -> refine(arg)
             // "endereco 7a01 i32 4321": escreve num endereço só (a missão confere na tela o palpite feito sem escrever)
             "endereco" -> write(w[1], w[2], w[3])
+            // "ler 7a01 i32": o valor que está no endereço agora (a missão separa "o valor voltou" de "o jogo reiniciou")
+            "ler" -> call { d -> d.send("read ${w[1]} ${w[2]}", quiet = true).status }
             // funções da lib do jogo pelo nome, quem uma função chama, fixar o retorno e desfazer (patch)
             "funcoes" -> return nativeFunctions(arg).let { (n, l) -> "ok $n\n" + l.joinToString("\n") { "fn ${it.addr} ${it.name}" } }
             "chama" -> return nativeFunctions(arg).second.firstOrNull { it.name == arg }?.let { f -> "ok\n" + callsOf(f.addr).joinToString("\n") { "call ${it.first} ${it.second}" } }
