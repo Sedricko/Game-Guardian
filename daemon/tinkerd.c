@@ -2617,7 +2617,8 @@ static int run_quiet(char *const argv[]) {
 static const char *data_dir_of(const char *pkg) {
     const char *d = getenv("TINKER_DATA_DIR");
     if (d) return d;
-    static const char *bases[] = {"/data/data", "/data_mirror/data_ce/null/0", "/data/user/0"};
+    // /proc/1/root: a visão do init (sem o isolamento), caso o aparelho não tenha o /data_mirror
+    static const char *bases[] = {"/data/data", "/data_mirror/data_ce/null/0", "/proc/1/root/data/data", "/data/user/0"};
     char p[600];
     struct stat st;
     for (size_t i = 0; i < sizeof bases / sizeof *bases; i++) {
