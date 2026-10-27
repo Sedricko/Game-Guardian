@@ -745,6 +745,23 @@ function Run-Missions($v) {
         if ($now -lt 500 -or $now -gt 505) { throw "a tela mostra $now ($($t.msg))" }
         "a tela mostra $now ($($t.msg))"
     }
+    # nivel 10: decidir sem escrever. O Ouro tem 6 copias (iscas) que seguem cada mudanca; so lendo, o agente aponta o
+    # provavel pela vizinhanca (o verdadeiro mora junto de outros numeros da tela). A conferencia escreve so no palpite
+    Mission "nivel 10: decidir sem escrever (Ouro com 6 copias, so lendo)" {
+        $job = Start-Job -ArgumentList $adb, $game -ScriptBlock {
+            param($adb, $game)
+            for ($i = 0; $i -lt 80; $i++) { Start-Sleep 4; & $adb shell am broadcast -p $game -a dev.tinker.testgame.ACAO --es acao "'+1 ouro'" | Out-Null }
+        }
+        try { Step "sozinho Ouro auto leitura" | Out-Null } finally { Stop-Job $job; Remove-Job $job -Force }
+        $msg = ($script:last -split "`n")[0]
+        if ($msg -notmatch "0x([0-9a-f]+) \(fica junto") { throw "sem palpite ($msg)" }
+        $g = $Matches[1]
+        $want = [double](Val "Ouro") + 77
+        Step "endereco $g i32 $want" | Out-Null; Start-Sleep 2
+        $now = Val "Ouro"
+        if ($now -ne $want) { throw "palpite 0x$g errado: escrevi $want, a tela mostra $now ($msg)" }
+        "palpite 0x$g certo: escrevi $want, a tela mostra $now ($msg)"
+    }
     # nivel 9: o valor nunca muda (ninguem toca no Ouro) e ha copias dele (iscas); o agente tem de se virar sozinho
     # (busca em grupo com outro numero da tela) e por o valor pedido, sem pedir nada
     Mission "nivel 9: pedido sem o valor mudar (Ouro = 9999, ninguem toca)" {

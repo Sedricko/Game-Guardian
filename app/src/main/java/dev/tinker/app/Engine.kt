@@ -1405,6 +1405,8 @@ class Engine private constructor(private val app: Context) {
         val msg = when (w.firstOrNull()) {
             "buscar" -> search(if (w[1] == "auto") emptySet() else setOf(w[1]), w.drop(2).joinToString(" "))
             "refinar" -> refine(arg)
+            // "endereco 7a01 i32 4321": escreve num endereço só (a missão confere na tela o palpite feito sem escrever)
+            "endereco" -> write(w[1], w[2], w[3])
             // funções da lib do jogo pelo nome, quem uma função chama, fixar o retorno e desfazer (patch)
             "funcoes" -> return nativeFunctions(arg).let { (n, l) -> "ok $n\n" + l.joinToString("\n") { "fn ${it.addr} ${it.name}" } }
             "chama" -> return nativeFunctions(arg).second.firstOrNull { it.name == arg }?.let { f -> "ok\n" + callsOf(f.addr).joinToString("\n") { "call ${it.first} ${it.second}" } }
@@ -1419,7 +1421,8 @@ class Engine private constructor(private val app: Context) {
                 // "auto" = nenhum tipo marcado (como o Auto da tela): o agente offline escolhe o tipo
                 // no Jogo de Teste o teste de 2 s vale sempre: é o que separa o valor verdadeiro das cópias do número da tela
                 val canTest = Session.aiCanTest
-                withContext(Dispatchers.Main) { Session.aiCanTest = true }
+                // "sozinho Ouro auto leitura": sem escrever nada (como quem não liga o teste); a missão confere o palpite pela vizinhança
+                withContext(Dispatchers.Main) { Session.aiCanTest = w.getOrNull(3) != "leitura" }
                 autoFindStart(w[1], w.getOrElse(2) { "i32" }.let { if (it == "auto") emptySet() else setOf(it) }, waitMs = 2500)
                 val end = System.currentTimeMillis() + 300_000  // disfarçado e calculado levam mais: testa ×1, ×10, cifrado, pela mudança… até um segurar
                 while (autoJob?.isActive == true && System.currentTimeMillis() < end) delay(500)
@@ -2132,10 +2135,24 @@ class Engine private constructor(private val app: Context) {
                     last = cur
                 }
                 val finalists = list().second
+                // sem escrever: o verdadeiro costuma morar junto de outros números da tela (ouro ao lado de abates); a cópia
+                // para desenhar o texto fica no meio de letras. Conta quantos números da tela há a até 128 bytes de cada um
+                suspend fun hoodGuess(cands: List<Hit>): String {
+                    val others = runCatching { screenNumbers() }.getOrDefault(emptyList()).map { it.first }.filter { it >= 2 && it != last }.toSet()
+                    val hood = cands.associateWith { h ->
+                        val a = h.addr.toLongOrNull(16) ?: return@associateWith emptySet<Long>()
+                        runCatching { call { d -> d.send("dump ${(a - 128).toString(16)} i32 64", quiet = true).lines } }.getOrDefault(emptyList())
+                            .mapNotNull { it.substringAfter(' ').toLongOrNull() }.filter { it in others }.toSet()
+                    }
+                    val best = hood.entries.sortedByDescending { it.value.size }
+                    val guess = best.firstOrNull()?.takeIf { it.value.isNotEmpty() && (best.size < 2 || best[1].value.size < it.value.size) }
+                    Diag.add("Achar sozinho: vizinhança " + hood.entries.joinToString { "0x${it.key.addr}: ${it.value.joinToString("/")}" })
+                    return guess?.let { " Provável: 0x${it.key.addr} (fica junto de ${it.value.joinToString(", ")}, que também estão na tela)." } ?: ""
+                }
                 // várias cópias que seguiram todas as mudanças: o agente aprende o tipo delas; o endereço fica para a pessoa (Ficha)
                 finalists.map { it.type }.distinct().singleOrNull()?.takeIf { finalists.size in 4..10 && label != null && !Session.aiCanTest }?.let { t ->
                     learnResult(label!!, kind(t), true, System.currentTimeMillis() - t0, from, borrowed)
-                    say("Sobraram ${finalists.size}, todos ${TYPE_NAMES[t] ?: t}, seguindo cada mudança da tela: são cópias do mesmo número. Abra cada um na Ficha ou mude no jogo de novo.")
+                    say("Sobraram ${finalists.size}, todos ${TYPE_NAMES[t] ?: t}, seguindo cada mudança da tela: são cópias do mesmo número." + hoodGuess(finalists) + " Abra cada um na Ficha ou mude no jogo de novo.")
                     return@launch
                 }
                 if (finalists.size > if (Session.aiCanTest) 10 else 3) { fail("10 minutos e ainda ${Session.count} resultados: o número mudou pouco. Continue pela busca normal."); return@launch }
@@ -2143,7 +2160,8 @@ class Engine private constructor(private val app: Context) {
                 // sem poder testar, o tipo de 1 a 3 do mesmo tipo é o que se sabe; com teste, só o que mudou a tela ensina
                 if (!Session.aiCanTest) {
                     finalists.map { it.type }.distinct().singleOrNull()?.let { t -> if (label != null) learnResult(label, kind(t), true, System.currentTimeMillis() - t0, from, borrowed) }
-                    say("Sobraram ${finalists.size}. Ligue \"IA pode testar valores\" em Ajustes para eu descobrir o verdadeiro, ou abra cada um na Ficha."); return@launch
+                    say("Sobraram ${finalists.size}." + hoodGuess(finalists) +
+                        " Ligue \"IA pode testar valores\" em Ajustes para eu provar, ou abra cada um na Ficha."); return@launch
                 }
                 // primeiro os da memória do jogo (Java); as cópias do número da tela moram na memória nativa do desenho do texto
                 // (libhwui) e escrever nelas, mesmo por 1 s, derrubou o Jogo de Teste: essas vão por último e no máximo 4 testes
