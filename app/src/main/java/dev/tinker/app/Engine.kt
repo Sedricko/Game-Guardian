@@ -2102,7 +2102,9 @@ class Engine private constructor(private val app: Context) {
                     finalists.map { it.type }.distinct().singleOrNull()?.let { t -> if (label != null) learnResult(label, kind(t), true, System.currentTimeMillis() - t0, from, borrowed) }
                     say("Sobraram ${finalists.size}. Ligue \"IA pode testar valores\" em Ajustes para eu descobrir o verdadeiro, ou abra cada um na Ficha."); return@launch
                 }
-                for (h in finalists) {
+                // primeiro os da memória do jogo (Java); as cópias do número da tela moram na memória nativa do desenho do texto
+                // (libhwui) e escrever nelas, mesmo por 1 s, derrubou o Jogo de Teste: essas vão por último e no máximo 4 testes
+                for (h in finalists.sortedBy { if (it.region.startsWith("J")) 0 else 1 }.take(4)) {
                     say("Testando 0x${h.addr}…")
                     val old = call { d -> runCatching { d.send("read ${h.addr} ${h.type}", quiet = true).status }.getOrNull() } ?: continue
                     // Float e Double também (antes só testava inteiro); disfarçado ×k: +7 na tela é +7k na memória
