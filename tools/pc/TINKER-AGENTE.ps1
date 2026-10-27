@@ -375,7 +375,7 @@ function Ui-Tour($v) {
     foreach ($tool in $tools) {
         Check "Deitado: ferramenta $($tool[2])" { Open-Tool $tool[0] $tool[1]; Snap "Deitado Ferramenta $($tool[2])"; Tap-Chip $tool[0] }
     }
-    Check "Deitado: Mais buscas" { Top-Ui; Tap-Ui "Mais buscas"; if (-not (Find-Ui "Come.ar sem valor" 4)) { throw "nao mostrou 'Comecar sem valor'" }; Snap "Deitado Mais buscas"; Top-Ui; Tap-Ui "Mais buscas" }
+    Check "Deitado: Mais buscas" { Top-Ui; Tap-Ui "Mais buscas"; if (-not (Find-Ui "Come.ar sem valor" 8)) { throw "nao mostrou 'Comecar sem valor'" }; Snap "Deitado Mais buscas"; Top-Ui; Tap-Ui "Mais buscas" }
     Check "Deitado: Ficha" { Step "aba 2" | Out-Null; Start-Sleep 2; Top-Ui; Tap-Ui "^Ficha$" 0; if (-not (Find-Ui "classe|nome|ouro" 3)) { throw "a Ficha nao abriu" }; Snap "Deitado Ficha" }
     Set-Rot 0
 
@@ -891,7 +891,12 @@ function Test-Version {
     Send-Shots $v
     try { Ui-Tour $v } catch { Say "a volta pelo app parou: $($_.Exception.Message)" }
     if ((& $adb shell pm list packages $game) -match $game) {
-        try { Run-Missions $v } catch { Say "missoes pararam: $($_.Exception.Message)" }
+        # parou no meio: o motivo vai para a planilha (antes ficava so nesta janela e o resultado das missoes sumia)
+        try { Run-Missions $v } catch {
+            $why = "$($_.Exception.Message) (linha $($_.InvocationInfo.ScriptLineNumber): $($_.InvocationInfo.Line.Trim()))"
+            Say "missoes pararam: $why"
+            Post-Sheet "agente PC: missoes pararam" $why (($script:mres + $script:curva) -join "`n") $v
+        }
     }
     Set-Content $done $v
 }
