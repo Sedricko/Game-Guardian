@@ -1476,7 +1476,8 @@ class Engine private constructor(private val app: Context) {
             // map (inline) e não joinToString: dentro do lambda dele não dá para chamar o daemon (suspend)
             // só no provado (ou nos da memória Java): somar nos 7 da busca pela mudança escreveu em nativos e o jogo caiu
             // ("Scudo ERROR: invalid chunk state")
-            "somar" -> (Session.autoFindWinner?.let { listOf(it) } ?: list().second.filter { it.region.startsWith("J") }).map { h ->
+            // só no provado: sem ele, somar em todos (29 na busca pela mudança) mexia em 28 endereços errados para acertar 1
+            "somar" -> (Session.autoFindWinner?.let { listOf(it) } ?: return "err nenhum endereço provado para somar").map { h ->
                 val v = call { d -> d.send("read ${h.addr} ${h.type}", quiet = true).status }.toDoubleOrNull() ?: return@map "?"
                 val n = v + (arg.toDoubleOrNull() ?: 0.0)
                 write(h.addr, h.type, if (h.type.contains("f")) n.toString() else n.toLong().toString())
@@ -2166,6 +2167,9 @@ class Engine private constructor(private val app: Context) {
                 // primeiro os da memória do jogo (Java); as cópias do número da tela moram na memória nativa do desenho do texto
                 // (libhwui) e escrever nelas, mesmo por 1 s, derrubou o Jogo de Teste: essas vão por último e no máximo 4 testes
                 // com algum da memória Java, só eles são testados (escrever na nativa já corrompeu o malloc: "Scudo corrupted chunk")
+                // pelo nome, relê o número ao lado do nome a cada olhada: com a tela do jogo rolando um pouco, o lugar guardado
+                // passava a ler a linha vizinha (Brilho 116 no lugar de Cristais 92) e um endereço errado "pulava" junto
+                suspend fun look(): Long? = if (label != null) labeledNumber(label)?.first else readAt(screenNumbers(), place)
                 val javaFirst = finalists.filter { it.region.startsWith("J") }.ifEmpty { finalists }
                 for (h in javaFirst.take(4)) {
                     say("Testando 0x${h.addr}…")
@@ -2175,7 +2179,7 @@ class Engine private constructor(private val app: Context) {
                     // +20 na tela: longe do que o número anda sozinho em 1 s (abates, energia, alguém tocando) — com +7 e
                     // conferência exata, o número que andou 1 reprovava o endereço certo
                     val t = o + 20 * km()
-                    val shown = readAt(screenNumbers(), place)  // a tela antes de escrever
+                    val shown = look()  // a tela antes de escrever
                     // cópia velha (ficou para trás, 12 a 28 abaixo da tela) passava no teste sem mexer em nada: só testa quem
                     // guarda o número da tela agora (pela mudança a tela é base + bônus, não dá para comparar)
                     if (k != -1L && shown != null && kotlin.math.abs(kotlin.math.floor(o / km()).toLong() - shown) > 3) {
@@ -2189,7 +2193,7 @@ class Engine private constructor(private val app: Context) {
                     var onScreen: Long? = null
                     for (look in 1..8) {
                         delay(1200)
-                        onScreen = readAt(screenNumbers(), place)
+                        onScreen = look()
                         if (onScreen != null && onScreen - base0 >= 12) break
                     }
                     write(h.addr, h.type, old)  // volta como estava
@@ -2203,7 +2207,7 @@ class Engine private constructor(private val app: Context) {
                     var back = false
                     if (onScreen != null && onScreen - before >= 12 && kotlin.math.abs(onScreen - expect) <= 8) for (look in 1..8) {
                         delay(1200)
-                        val now = readAt(screenNumbers(), place)
+                        val now = look()
                         if (now != null && now - before < 12) { back = true; break }
                     }
                     Diag.add("Achar sozinho: 0x${h.addr} ${if (back) "voltou" else "não voltou"} ao desfazer")
@@ -2215,7 +2219,7 @@ class Engine private constructor(private val app: Context) {
                             val w = if (k == -1L) o + (want - before) else want * km()
                             write(h.addr, h.type, if (whole) kotlin.math.round(w).toLong().toString() else w.toString())
                             delay(1500)
-                            say("Pronto: ${label ?: value} = ${want.toLong()} (0x${h.addr}; a tela mostra ${readAt(screenNumbers(), place) ?: "?"}). Toque em Salvar para manter.")
+                            say("Pronto: ${label ?: value} = ${want.toLong()} (0x${h.addr}; a tela mostra ${look() ?: "?"}). Toque em Salvar para manter.")
                             return@launch
                         }
                         say("Achei: 0x${h.addr} muda o número da tela" + (if (k > 1) " (guardado ×$k: para pôr 50, escreva ${50 * k})" else "") + ". Toque em Salvar.")
