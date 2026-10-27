@@ -2010,10 +2010,15 @@ class Engine private constructor(private val app: Context) {
                 var last = start
                 var misses = 0
                 var still = 0
+                var changes = 0  // quantas mudanças da tela o refino já seguiu
                 val end = System.currentTimeMillis() + 10 * 60_000L
                 while (System.currentTimeMillis() < end) {
                     val count = Session.count ?: 0L
-                    if (count in 1L..3L) break
+                    // prova antes de parar: um número solto da memória acompanha 1 ou 2 mudanças por acaso, 3 seguidas quase nunca
+                    // (no Jogo de Teste sobrava 1 depois de 1 refino e era o endereço errado)
+                    if (count in 1L..3L && (changes >= 3 || byLabel == null && near == null)) break
+                    // muitos que seguem todas as mudanças (cópias do mesmo número): o tipo já está provado, o endereço não
+                    if (count in 4L..10L && changes >= 8) break
                     say("$count resultados · na tela: $last · jogue para o número mudar")
                     delay(1200)
                     val nums = screenNumbers()
@@ -2032,6 +2037,7 @@ class Engine private constructor(private val app: Context) {
                         continue
                     }
                     still = 0
+                    changes++
                     val r = aiBusy { resultsText(refine(followRange(last, cur))) }
                     Diag.add("Achar sozinho: $last → $cur, ${Session.count} resultados")
                     if ((Session.count ?: 0L) == 0L) {
@@ -2048,6 +2054,12 @@ class Engine private constructor(private val app: Context) {
                     last = cur
                 }
                 val finalists = list().second
+                // várias cópias que seguiram todas as mudanças: o agente aprende o tipo delas; o endereço fica para a pessoa (Ficha)
+                finalists.map { it.type }.distinct().singleOrNull()?.takeIf { finalists.size in 4..10 && label != null }?.let { t ->
+                    learnResult(label!!, t, true, System.currentTimeMillis() - t0, from, borrowed)
+                    say("Sobraram ${finalists.size}, todos ${TYPE_NAMES[t] ?: t}, seguindo cada mudança da tela: são cópias do mesmo número. Abra cada um na Ficha ou mude no jogo de novo.")
+                    return@launch
+                }
                 if (finalists.size > 3) { fail("10 minutos e ainda ${Session.count} resultados: o número mudou pouco. Continue pela busca normal."); return@launch }
                 if (finalists.isEmpty()) { fail("Nenhum resultado ficou: o número da tela pode não estar guardado como número. Tente outro valor."); return@launch }
                 // o agente aprende o tipo: com 1 a 3 do mesmo tipo já se sabe (o teste depois só escolhe o endereço)
