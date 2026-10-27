@@ -53,12 +53,6 @@ internal fun LogTab(engine: Engine, overlay: Boolean, onMinimize: () -> Unit, on
         Spacer(Modifier.height(8.dp))
         Panel {
         Text("Relatório e testes", style = MaterialTheme.typography.titleSmall)
-        Text(
-            "Tudo que o Tinker faz fica registrado. Se o jogo fechar, o motivo é anexado sozinho. " +
-                "O relatório junta registro, falhas do Android e logcat do jogo num arquivo .txt.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Button(shape = MaterialTheme.shapes.medium, onClick = {
                 fetch {
