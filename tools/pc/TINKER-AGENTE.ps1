@@ -718,10 +718,12 @@ function Run-Missions($v) {
                 $linha += " | vez ${vez}: ia usar $ia, $seg s, sobraram $($t.c), guardou $($t.type) ($($t.wins) acertos, $($t.fails) erros)"
             }
             # conferencia: escreve um numero nos que sobraram e le a tela do jogo
-            $want = [int](Val $nome) + 50
+            # [double]: Sementes passa de 4 bilhoes ([int] estourava)
+            $want = [double](Val $nome) + 50
             Step "escrever $want" | Out-Null; Start-Sleep 2
+            $escreveu = ($script:last -split "`n" | Select-Object -First 5) -join " / "  # o que o Tinker escreveu e onde (addr tipo valor)
             $now = Val $nome
-            $linha += " | conferido na tela: escrevi $want, a tela mostra $now"
+            $linha += " | conferido na tela: escrevi $want, a tela mostra $now | resultados: $escreveu"
             $script:curva += $linha
             if ($now -ne $want) { throw "a tela nao mudou ($linha)" }
             if ($t.type -ne $gab[$nome][1]) { throw "guardou o tipo errado ($linha)" }
@@ -729,6 +731,8 @@ function Run-Missions($v) {
         }
     }
     if ($script:curva) { Post-Sheet "agente PC: curva de aprendizagem" "" ($script:curva -join "`n") $v }
+    # a conferencia escreve nos que sobraram: se algum nao era o certo, o jogo ficou mexido; reabre limpo para as outras missoes
+    & $adb shell am force-stop $game; Start-Sleep 2; Front-Game; Start-Sleep 3; Step "escolher" | Out-Null
     Mission "unreal: objeto pelo nome (tabelas de nomes e objetos)" {
         $c = Step "unreal jogador"
         if ($script:last -notmatch "ueobj [0-9a-f]+ BP_Jogador_C Jogador") { throw "nao achou Jogador da classe BP_Jogador_C ($($script:last -replace "`n", ' | '))" }
@@ -819,7 +823,7 @@ function Run-Missions($v) {
     function Save-Mission($rel, $field, $label) {
         Step "savelista" | Out-Null
         if ($script:last -notmatch "file $([regex]::Escape($rel)) ") { throw "o editor nao listou $rel ($((($script:last -split "`n") | Select-Object -First 8) -join ' | '))" }
-        $want = [int](Val $label) + 3
+        $want = [double](Val $label) + 3
         Step "saveeditar $rel $field $want" | Out-Null
         Start-Sleep 2; Front-Game; Start-Sleep 4
         $now = Val $label

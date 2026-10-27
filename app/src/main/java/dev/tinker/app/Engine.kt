@@ -2009,6 +2009,7 @@ class Engine private constructor(private val app: Context) {
                 var place = spots.first()
                 var last = start
                 var misses = 0
+                var still = 0
                 val end = System.currentTimeMillis() + 10 * 60_000L
                 while (System.currentTimeMillis() < end) {
                     val count = Session.count ?: 0L
@@ -2020,7 +2021,17 @@ class Engine private constructor(private val app: Context) {
                     val now = spots.map { it to readAt(nums, it) }.firstOrNull { it.second != null && it.second != last }
                     if (now != null && spots.size > 1) { place = now.first; spots.retainAll { it == place } }
                     val cur = readAt(nums, place) ?: continue
-                    if (cur == last) continue
+                    if (cur == last) {
+                        // a tela ficou parada duas leituras seguidas: o que mudou na memória nesse tempo (relógio, tempo de jogo,
+                        // outro contador subindo) não é o número da tela. "Não mudou" tira esses impostores; sobrou 0: desfaz
+                        if (++still == 2 && count > 3) {
+                            aiBusy { resultsText(compare("same")) }
+                            if ((Session.count ?: 0L) == 0L) aiBusy { resultsText(undo()) }
+                            Diag.add("Achar sozinho: tela parada em $cur, não mudou: ${Session.count} resultados")
+                        }
+                        continue
+                    }
+                    still = 0
                     val r = aiBusy { resultsText(refine(followRange(last, cur))) }
                     Diag.add("Achar sozinho: $last → $cur, ${Session.count} resultados")
                     if ((Session.count ?: 0L) == 0L) {
@@ -3391,7 +3402,8 @@ class Engine private constructor(private val app: Context) {
         require(text != original) { "Nada mudou." }
         val backup = backupSave()
         if (Session.process != null) runCatching { killGame() }
-        val tmp = File(app.cacheDir, "save-edit.tmp").apply { writeText(text) }
+        // o readsave do daemon (root) deixou este arquivo como dono root: apaga antes (a pasta é do app) senão EACCES
+        val tmp = File(app.cacheDir, "save-edit.tmp").apply { delete(); writeText(text) }
         call { d -> d.send("writesave ${gamePkg()} $rel ${tmp.absolutePath}") }
         Diag.add("Editor de save: $rel com ${edits.size} campo(s) mudado(s)")
         // o agente guarda onde fica cada campo do save deste jogo (tipo "save"): depois de atualizar, ele sabe o arquivo
