@@ -1891,9 +1891,17 @@ class Engine private constructor(private val app: Context) {
         return withContext(Dispatchers.Default) {
             val bmp = android.graphics.BitmapFactory.decodeByteArray(png, 0, png.size) ?: throw IOException("o print veio vazio")
             val text = com.google.android.gms.tasks.Tasks.await(ocr.process(com.google.mlkit.vision.common.InputImage.fromBitmap(bmp, 0)))
-            text.textBlocks.flatMap { it.lines }.filter { it.text.contains(label, ignoreCase = true) }.firstNotNullOfOrNull { l ->
-                l.elements.firstNotNullOfOrNull { e -> val n = screenNumber(e.text) ?: return@firstNotNullOfOrNull null; val b = e.boundingBox ?: return@firstNotNullOfOrNull null; n to b }
-            }
+            // "Ouro: 7794" antes de "+1 OURO" (o botão também tem o nome e um número): primeiro a linha que começa pelo nome,
+            // e o número depois dele; com o do botão o pedido Ouro = 9999 seguia o "1" e nunca achava
+            text.textBlocks.flatMap { it.lines }.filter { it.text.contains(label, ignoreCase = true) }
+                .sortedBy { if (it.text.trim().startsWith(label, ignoreCase = true)) 0 else 1 }.firstNotNullOfOrNull { l ->
+                    val at = l.elements.firstOrNull { it.text.contains(label, ignoreCase = true) }?.boundingBox?.left ?: Int.MIN_VALUE
+                    l.elements.firstNotNullOfOrNull { e ->
+                        val n = screenNumber(e.text) ?: return@firstNotNullOfOrNull null
+                        val b = e.boundingBox?.takeIf { it.left >= at } ?: return@firstNotNullOfOrNull null
+                        n to b
+                    }
+                }
         }
     }
 
