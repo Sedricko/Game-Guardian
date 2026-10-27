@@ -194,7 +194,7 @@ class OverlayService : Service() {
                 Session.panelLeft -> RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp)
                 else -> RoundedCornerShape(topStart = 24.dp, bottomStart = 24.dp)
             }
-            Box(Modifier.fillMaxSize().graphicsLayer { alpha = if (Session.peek) 0.06f else Session.alpha }.clip(shape)) {
+            Box(Modifier.fillMaxSize().graphicsLayer { alpha = if (Session.peek) 0.06f else 1f }.clip(shape)) {
                 TinkerPanel(Engine.get(this@OverlayService), overlay = true, onMinimize = ::closePanel, onResize = ::resizePanel, onExit = {
                     Engine.get(this@OverlayService).shutdown()
                     stopSelf()

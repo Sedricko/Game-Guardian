@@ -113,7 +113,8 @@ fun TinkerPanel(
     LaunchedEffect(s.aiHidePanel) { if (s.aiHidePanel && overlay) onMinimize() }
 
     // o tamanho que vale é o do painel (metade, de lado, tela dividida), não o da tela: tudo se ajusta a ele
-    Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) { BoxWithConstraints {
+    // a transparência vale só para o fundo: com o painel todo transparente, as letras se misturavam com o jogo atrás
+    Surface(color = MaterialTheme.colorScheme.background.let { if (overlay) it.copy(alpha = s.alpha) else it }, modifier = Modifier.fillMaxSize()) { BoxWithConstraints {
         CompositionLocalProvider(LocalPanelSize provides DpSize(maxWidth, maxHeight)) {
         Column {
             // deitado (jogo na horizontal) a altura é pouca: cabeçalho e abas numa linha só, sobra mais para a lista
