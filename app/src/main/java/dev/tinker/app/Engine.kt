@@ -442,7 +442,7 @@ class Engine private constructor(private val app: Context) {
         AiConversations.clear()
         Session.engine = detectEngine(p.pkg)?.also { Diag.add("Motor do jogo: $it") }
         // Unity: os valores ficam em Ca/Cb/A; o resto (Java, outros) passava de 15 GB no Orecraft e cada busca levava minutos
-        d.send(if (Session.engine?.startsWith("Unity") == true) "rangesdefault Ca,Cb,A" else "rangesdefault all", quiet = true)
+        d.send(if (Session.engine?.name?.startsWith("Unity") == true) "rangesdefault Ca,Cb,A" else "rangesdefault all", quiet = true)
         // a restauração roda em segundo plano (a cada 3 s): aqui ela segurava a escolha do jogo por até 45 s
         Session.restoreInfo = if (Session.saved.any(::stale)) "Procurando os salvos da última vez…" else ""
         "Pronto. Digite um valor que você vê no jogo e toque em Nova busca."
@@ -2163,7 +2163,7 @@ class Engine private constructor(private val app: Context) {
             val region = HashMap<String, String>()
             val t0 = System.currentTimeMillis()
             try {
-                val focus = focusRegions().ifEmpty { if (Session.engine?.startsWith("Unity") == true) setOf("Ca", "Cb", "A") else setOf("Jh", "J", "Ca", "Cb", "A") }
+                val focus = focusRegions().ifEmpty { if (Session.engine?.name?.startsWith("Unity") == true) setOf("Ca", "Cb", "A") else setOf("Jh", "J", "Ca", "Cb", "A") }
                 itemLog("👁 Regiões: ${focus.joinToString()}" + if (focusRegions().isEmpty()) " (ainda não sei onde este jogo guarda)" else " (onde este jogo guarda o que já achei)")
                 suspend fun shoot(wins: List<Pair<Long, Long>>): String {
                     val mb = call { d ->
