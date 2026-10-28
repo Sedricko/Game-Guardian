@@ -1414,6 +1414,9 @@ class Engine private constructor(private val app: Context) {
             // "itens": a lista que o 📋 Itens do jogo monta sozinho (a missão confere cada um escrevendo e lendo a tela)
             "itens" -> return scanItems().let { msg -> "ok $msg\ncount ${Session.items.count { it.hit != null }}\n" +
                 Session.items.joinToString("\n") { "item ${it.label.replace(' ', '_')} ${it.value} ${it.count} ${it.hit?.addr ?: "-"} ${it.hit?.type ?: "-"} ${it.hit?.region ?: "-"}" } }
+            // "irmaos": achou um (o 🎯 provou), acha os outros pelo formato; a missão confere escrevendo e lendo a tela
+            "irmaos" -> return Session.autoFindWinner?.let { w -> findSiblings(w, "o achado").let { l -> "ok ${l.size}\ncount ${l.size}\n" + l.joinToString("\n") { "irmao ${it.hit!!.addr} ${it.value}" } } }
+                ?: "err nenhum endereço provado (rode o sozinho antes)"
             "ler" -> call { d -> d.send("read ${w[1]} ${w[2]}", quiet = true).status }
             // funções da lib do jogo pelo nome, quem uma função chama, fixar o retorno e desfazer (patch)
             "funcoes" -> return nativeFunctions(arg).let { (n, l) -> "ok $n\n" + l.joinToString("\n") { "fn ${it.addr} ${it.name}" } }
@@ -1985,6 +1988,60 @@ class Engine private constructor(private val app: Context) {
      * busca uma vez cada um e monta a lista para salvar, editar e congelar. Com 1 resultado fica "provável"; com mais,
      * pede para usar 🎯 Achar sozinho (o valor precisa mudar). Usa a busca atual (os resultados de antes são trocados).
      */
+    /**
+     * 🧩 Achou um, acha todos: o item provado (endereço da quantidade) tem um formato na memória — campos que repetem a
+     * quantidade (a cópia em +4 do DYSMANTLE) e o jeito dos vizinhos (zero, número pequeno, endereço). Procura esse
+     * formato nos 64 KB em volta, sem olhar a tela: os outros espaços do inventário costumam estar ali. Sem campo que
+     * repete a quantidade, o formato é fraco demais (acharia lixo): não procura.
+     */
+    suspend fun findSiblings(h: Hit, label: String): List<GameItem> {
+        val a = h.addr.toLongOrNull(16) ?: return emptyList()
+        val span = 64 * 1024L
+        val words = HashMap<Long, Long>()
+        call { d ->
+            var p = a - span
+            while (p < a + span) {
+                runCatching { d.send("dump ${p.toString(16)} i32 1024", quiet = true).lines }.getOrNull()
+                    ?.forEachIndexed { i, l -> l.substringAfter(' ').toLongOrNull()?.let { words[p + 4L * i] = it } }
+                p += 4096
+            }
+        }
+        val v0 = words[a] ?: return emptyList<GameItem>().also { itemLog("🧩 Não li a memória em volta de 0x${h.addr}.") }
+        val offs = (-32..48 step 4).filter { it != 0 }
+        val copies = offs.filter { words[a + it] == v0 }
+        if (copies.isEmpty()) return emptyList<GameItem>().also { itemLog("🧩 $label não tem campo que repete a quantidade: o formato é fraco, não procuro os outros.") }
+        fun cls(x: Long?) = when { x == null -> -1; x == 0L -> 0; x in 1..1_000_000 -> 1; x in -1000L..-1L -> 2; else -> 3 }
+        val shape = offs.map { cls(words[a + it]) }
+        itemLog("🧩 Formato de $label: a quantidade se repete em " + copies.joinToString { (if (it > 0) "+" else "") + it } + "; procurando o mesmo formato perto…")
+        val found = mutableListOf<Long>()
+        var p = a - span + 32
+        while (p < a + span - 48 && found.size < 40) {
+            val v = words[p]
+            if (p != a && v != null && v in 1..1_000_000 && copies.all { words[p + it] == v } &&
+                offs.indices.count { cls(words[p + offs[it]]) == shape[it] } >= offs.size * 8 / 10) found += p
+            p += 4
+        }
+        val out = found.mapIndexed { i, x ->
+            val v = words[x].toString()
+            GameItem("Parecido ${i + 1}", v, "🧩", "i32", 1, Hit(x.toString(16), "i32", h.region, v), "mesmo formato de $label · 0x${x.toString(16)} (${if (x > a) "+" else "-"}0x${kotlin.math.abs(x - a).toString(16)})")
+        }
+        itemLog("🧩 Achei ${out.size} com o mesmo formato de $label" + if (out.isNotEmpty()) ": " + out.joinToString { it.value } else "")
+        return out
+    }
+
+    /** Pela tela: acha os parecidos no escopo do app e põe na lista do 📋 Itens do jogo. */
+    fun siblingsLater(h: Hit, label: String) {
+        scope.launch {
+            withContext(Dispatchers.Main) { Session.itemsBusy = true; Session.itemsProgress = 0.5f }
+            val got = runCatching { findSiblings(h, label) }.getOrElse { itemLog("🧩 ${it.message}"); emptyList() }
+            withContext(Dispatchers.Main) {
+                Session.items = Session.items.filter { it.icon != "🧩" } + got
+                Session.itemsBusy = false; Session.itemsProgress = 1f; Session.itemsReady = Session.items.count { it.hit != null }
+                Session.status = "🧩 ${got.size} itens com o mesmo formato de $label (sem olhar a tela). Confira: edite um e veja se o jogo muda."
+            }
+        }
+    }
+
     /**
      * Pela tela: roda no escopo do app, não no da tela — o menu sai da frente para ler o jogo e, no escopo dele, a
      * procura era cancelada junto ("rememberCoroutineScope left the composition"). O resultado vai para o status.

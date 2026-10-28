@@ -149,6 +149,8 @@ internal fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                     Text("🎯 $finding", style = MaterialTheme.typography.bodyMedium)
                     s.autoFindWinner?.let { w ->
                         FilledTonalButton(shape = MaterialTheme.shapes.medium, onClick = { engine.addSaved(listOf(w)); s.status = "Salvo: 0x${w.addr}"; engine.autoFindStop() }) { Text("Salvar 0x${w.addr}") }
+                        // achou um: os outros do mesmo inventário pelo formato, sem olhar a tela (vão para o 📋 Itens do jogo)
+                        OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { engine.siblingsLater(w, "0x${w.addr}") }, enabled = !s.itemsBusy) { Text("🧩 Achar os outros iguais") }
                     }
                     TextButton(onClick = { engine.autoFindStop() }) { Text(if (s.autoFindWinner != null || finding.startsWith("Não") || finding.startsWith("Nenhum")) "Fechar" else "⏹ Parar") }
                 }
@@ -731,6 +733,7 @@ private fun ItemsPanel(engine: Engine, enabled: Boolean, run: (suspend () -> Str
                     // salvo com o nome: a aba Salvos edita, congela e vira receita; o agente aprende o tipo deste nome
                     TextButton(onClick = { engine.addSaved(listOf(hit), name = item.label); s.status = "${item.label} salvo: edite o valor em Salvos."; s.tab = TABS.indexOf("Salvos") }) { Text("✏️ Editar") }
                     TextButton(onClick = { engine.addSaved(listOf(hit), frozen = true, name = item.label); s.status = "${item.label} congelado em ${item.value}." }) { Text("❄️ Congelar") }
+                    if (item.icon != "🧩" && item.method == null) TextButton(onClick = { engine.siblingsLater(hit, item.label) }, enabled = !s.itemsBusy) { Text("🧩 Outros iguais") }
                 } else if (item.method != null && item.fix != null) {
                     // fixar o retorno vira um patch (desfaz com um toque em Memória → Código); o nome da função volta sozinho ao reabrir
                     TextButton(onClick = { run { engine.patchReturn(item.method, item.cls, item.fix) } }, enabled = enabled) { Text("🔧 ${item.fixLabel}") }

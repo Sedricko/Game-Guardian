@@ -84,6 +84,13 @@ class GameActivity : Activity() {
     private var runas: Int
         get() = unk.getInt(28) xor unk.getInt(32)
         set(v) { val k = Random.nextInt(); unk.putInt(32, k); unk.putInt(28, v xor k) }
+    // mochila (nível 12, "achou um, acha todos"): espaços de 48 bytes como os do DYSMANTLE — quantidade em +0, cópia em +4,
+    // máximo da pilha em +8, código do item em +12 e a quantidade em Float em +0x28. Achando um, o Tinker acha os outros pelo formato
+    private val BAG = listOf("Flechas", "Pães", "Tochas", "Cordas")
+    private val bag = ByteBuffer.allocateDirect(48 * BAG.size).order(ByteOrder.LITTLE_ENDIAN).apply {
+        BAG.indices.forEach { i -> val n = Random.nextInt(5, 40); putInt(i * 48, n); putInt(i * 48 + 4, n); putInt(i * 48 + 8, 99); putInt(i * 48 + 12, 101 + i); putFloat(i * 48 + 0x28, n.toFloat()) }
+    }
+    private fun bagAdd(i: Int) { val n = bag.getInt(i * 48) + 1; bag.putInt(i * 48, n); bag.putInt(i * 48 + 4, n); bag.putFloat(i * 48 + 0x28, n.toFloat()) }
     private val buildLeft get() = ((build.getLong(8) - System.currentTimeMillis()) / 1000).coerceAtLeast(0)
 
     private fun fresh(): ByteBuffer = ByteBuffer.allocateDirect(160).order(ByteOrder.LITTLE_ENDIAN)
@@ -164,6 +171,7 @@ class GameActivity : Activity() {
         actions["+1 runa"] = { runas += 1 }
         actions["+1 vigor"] = { unk.putInt(36, unk.getInt(36) + 1) }
         actions["+1 crystal"] = { unk.putInt(44, unk.getInt(44) + 10) }
+        actions["+1 flecha"] = { bagAdd(0) }
         val grid = android.widget.GridLayout(this).apply { columnCount = 2 }
         actions.forEach { (label, act) -> grid.addView(Button(this).apply { text = label; setOnClickListener { act(); save(); show() } }) }
         setContentView(android.widget.ScrollView(this).apply {
@@ -233,7 +241,8 @@ class GameActivity : Activity() {
 
     private fun show() {
         val t = "Fase $fase · versão ${if (base == 0) 1 else 2}\nOuro: $gold\nGemas: $gems\nVida: ${"%.1f".format(hp)}\nEnergia: $energy\nPontos: $points\nDiamantes: $diamonds\nMadeira: $wood\nPoções: $potions\nTempo: ${"%.1f".format(java.util.Locale.ROOT, time)}\nAbates: $kills\nVelocidade: ${"%.1f".format(java.util.Locale.ROOT, speed)}\nObra: $buildLeft\nEspada: ${shop.getInt(4)}\nNivel: $level\nMoedas: $coins" +
-            "\nRubis: ${unk.getDouble(0).toLong()}\nSementes: ${unk.getLong(8)}\nHonra: ${unk.getInt(16)}\nBrilho: ${unk.getFloat(20).toInt()}\nCristais: ${unk.getInt(24) / 10}\nRunas: $runas\nVigor: ${unk.getInt(36) + unk.getInt(40)}\nCrystals: ${unk.getInt(44) / 10}"
+            "\nRubis: ${unk.getDouble(0).toLong()}\nSementes: ${unk.getLong(8)}\nHonra: ${unk.getInt(16)}\nBrilho: ${unk.getFloat(20).toInt()}\nCristais: ${unk.getInt(24) / 10}\nRunas: $runas\nVigor: ${unk.getInt(36) + unk.getInt(40)}\nCrystals: ${unk.getInt(44) / 10}" +
+            BAG.indices.joinToString("") { "\n${BAG[it]}: ${bag.getInt(it * 48)}" }
         if (t == shown) return  // a tela só muda quando um valor muda
         shown = t
         text.text = t

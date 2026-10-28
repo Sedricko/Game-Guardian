@@ -753,6 +753,26 @@ function Run-Missions($v) {
         if ($now -lt 500 -or $now -gt 505) { throw "a tela mostra $now (logo depois: $logo; no endereco: $mem; pid do jogo: $pid2) ($($t.msg))" }
         "a tela mostra $now ($($t.msg))"
     }
+    # nivel 12: achou um, acha todos. A mochila tem 4 espacos com o mesmo formato (quantidade, copia em +4, maximo, codigo);
+    # o agente acha as Flechas pela tela e os outros 3 so pela memoria. Cada um e conferido escrevendo +5 e lendo a tela
+    Mission "nivel 12: achou um, acha todos (mochila, sem olhar a tela)" {
+        $t = Train "Flechas" "+1 flecha"
+        Step "irmaos" | Out-Null
+        $irm = @($script:last -split "`n" | Where-Object { $_ -like "irmao *" } | ForEach-Object { $f = $_ -split ' '; [pscustomobject]@{ addr = $f[1]; v = [double]$f[2] } })
+        $ok = @(); $err = @()
+        foreach ($nome in @("Pães", "Tochas", "Cordas")) {
+            $v = [double](Val $nome)
+            $c = $irm | Where-Object { $_.v -eq $v } | Select-Object -First 1
+            if (-not $c) { $err += "$nome ($v nao estava entre os $($irm.Count))"; continue }
+            Step "endereco $($c.addr) i32 $($v + 5)" | Out-Null; Start-Sleep 2
+            $depois = Val $nome
+            Step "endereco $($c.addr) i32 $v" | Out-Null
+            if ($depois -eq $v + 5) { $ok += $nome } else { $err += "$nome (escrevi $($v + 5), a tela mostra $depois)" }
+        }
+        $linha = "Flechas achada pela tela ($($t.msg)); pela memoria: $($irm.Count) parecidos; conferidos na tela: $($ok.Count) de 3 ($($ok -join ', '))" + $(if ($err) { "; falhou: $($err -join '; ')" } else { "" })
+        if ($ok.Count -lt 3) { throw $linha }
+        $linha
+    }
     # nivel 11: 📋 Itens do jogo - sem pista nenhuma, le a tela, acha o que da para editar e monta a lista. Cada item com
     # endereco (da memoria Java: nunca escreve na nativa) e conferido: escreve +7, le a tela do jogo, volta como estava
     Mission "nivel 11: itens do jogo sozinho (lista do que da para editar)" {
