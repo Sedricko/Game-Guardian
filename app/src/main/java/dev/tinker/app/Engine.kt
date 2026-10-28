@@ -17,6 +17,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -1444,6 +1445,40 @@ class Engine private constructor(private val app: Context) {
                 val l = Session.items.filter { it.icon == "📈" }
                 "ok ${l.size}\ncount ${l.size}\n" + l.joinToString("\n") { "mudou ${it.hit!!.addr} ${it.value} ${it.hit.region.ifEmpty { "-" }}" } +
                     "\n" + Session.itemsLog.filter { "Afunilando" in it || "Rodada" in it }.takeLast(4).joinToString("\n") { "log $it" }
+            }
+            // "jogar 180": a IA joga sozinha (vê a tela, entende e toca; só ver_tela/tocar/arrastar/voltar, nunca a memória nem
+            // compras) enquanto o 👁 monitor olha a memória; devolve o que mudou por evento e o que a IA fez/aprendeu do jogo
+            "jogar" -> return run {
+                val end = System.currentTimeMillis() + (arg.toLongOrNull() ?: 180) * 1000
+                val ctl = Session.aiControl
+                val play = aiTools().filter { it.name in setOf("ver_tela", "tocar", "arrastar", "voltar") }
+                val log = mutableListOf<String>()
+                front()
+                delay(3000)
+                withContext(Dispatchers.Main) { Session.aiControl = true }
+                monitorStart()
+                try {
+                    val chat = AiChat()
+                    var q = "Você está jogando $label (offline, single-player, modo avião) para o Tinker observar a memória enquanto os números mudam. " +
+                        "Jogue de verdade: use ver_tela, entenda o jogo e faça os recursos da tela mudarem (coletar, minerar, construir, melhorar, " +
+                        "trocar com o próprio jogo). Um toque por vez, olhando o print de depois. NUNCA toque na LOJA, em compras, preços em " +
+                        "dinheiro ou anúncios. Termine cada vez com uma linha: o que você aprendeu do jogo (o que cada número é e o que o faz mudar)."
+                    while (System.currentTimeMillis() < end - 5000) {
+                        val a = withTimeoutOrNull(end - System.currentTimeMillis()) { Assistant.ask(chat, { "" }, q, play) { log += it } } ?: break
+                        log += "IA: $a"
+                        if (Assistant.lastLimitFail || AI_ERRORS.any { e -> a.startsWith(e) }) break
+                        q = "Continue jogando: faça outra coisa que mude os números da tela."
+                    }
+                } finally {
+                    monitorStop()
+                    withContext(kotlinx.coroutines.NonCancellable + Dispatchers.Main) { Session.aiControl = ctl }
+                }
+                delay(1500)
+                val l = Session.items.filter { it.icon == "📈" }
+                Diag.add("IA jogou $label: " + log.takeLast(3).joinToString(" / ").take(600))
+                "ok ${l.size}\ncount ${l.size}\n" + l.joinToString("\n") { "mudou ${it.hit!!.addr} ${it.value} ${it.hit.region.ifEmpty { "-" }}" } +
+                    "\n" + Session.itemsLog.filter { "Afunilando" in it || "Rodada" in it }.takeLast(4).joinToString("\n") { "log $it" } +
+                    "\n" + log.takeLast(40).joinToString("\n") { "ia " + it.replace('\n', ' ').take(400) }
             }
             "ler" -> call { d -> d.send("read ${w[1]} ${w[2]}", quiet = true).status }
             // funções da lib do jogo pelo nome, quem uma função chama, fixar o retorno e desfazer (patch)

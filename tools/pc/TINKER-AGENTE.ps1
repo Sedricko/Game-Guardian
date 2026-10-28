@@ -1226,9 +1226,11 @@ function Run-RealGame($dg) {
         $sz = (& $adb shell wm size) -join " "
         if ($sz -match "Override size: (\d+)x(\d+)" -or $sz -match "(\d+)x(\d+)") { & $adb shell input tap ([int]$Matches[1] / 2) ([int]([int]$Matches[2] * 0.89)); Start-Sleep 15 }
     }
-    # offline de verdade durante o teste: nada do que o Tinker escreve chega a um servidor (desliga no fim)
-    & $adb shell cmd connectivity airplane-mode enable
-    Say "modo aviao ligado no emulador durante o teste"
+    # offline de verdade durante o teste: so o JOGO fica sem internet (firewall pelo uid dele); o Tinker continua com a dele,
+    # para a IA que joga. Nada do que o Tinker escreve chega a um servidor do jogo (o bloqueio sai no fim)
+    $guid = ((& $adb shell dumpsys package $dg) | Select-String "userId=(\d+)" | Select-Object -First 1).Matches.Groups[1].Value
+    if ($guid) { Sh "iptables -I OUTPUT -m owner --uid-owner $guid -j REJECT; ip6tables -I OUTPUT -m owner --uid-owner $guid -j REJECT"; Say "o $nome esta sem internet durante o teste (uid $guid)" }
+    else { & $adb shell cmd connectivity airplane-mode enable; Say "modo aviao ligado no emulador durante o teste" }
     $res = @()
     function Items { Step "itens" | Out-Null; @(($script:last -split "`n") | Where-Object { $_ -like "item *" } | ForEach-Object { $f = $_ -split ' '; [pscustomobject]@{ nome = $f[1]; v = $f[2]; addr = $f[4] } }) }
     try {
@@ -1251,11 +1253,18 @@ function Run-RealGame($dg) {
             } catch { $res += "FALHA pedido $($i.nome) = 999 (era $($i.v)): $($_.Exception.Message)" }
             Say $res[-1]
         }
-        # ninguem joga: o agente toca sozinho (toques gravados, se houver o arquivo; senao o explorador) enquanto o monitor olha
-        $macro = "$env:USERPROFILE\tinker-macro-$dg.txt"
-        $job = if (Test-Path $macro) { Say "repetindo os toques de $macro por 3 min"; Start-Replay $macro 180 }
-               else { Say "explorando o jogo sozinho por 3 min (toques pela tela) enquanto o 👁 monitor olha a memoria"; Start-Explore $dg 180 }
-        try { Step "monitorar 180" | Out-Null } finally { Stop-Job $job; Remove-Job $job -Force }
+        # ninguem joga: a IA do Tinker joga entendendo a tela (jogar) enquanto o monitor olha; sem IA (sem chave/cota), toques
+        # gravados (se houver o arquivo) ou o explorador
+        Say "a IA do Tinker vai jogar 3 min sozinha enquanto o 👁 monitor olha a memoria"
+        $ia = 0
+        try { Step "jogar 180" | Out-Null; $ia = @(($script:last -split "`n") | Where-Object { $_ -like "ia IA:*" }).Count } catch { Say "a IA nao jogou: $($_.Exception.Message)" }
+        if ($ia) { $res += "IA jogou: " + ((($script:last -split "`n") | Where-Object { $_ -like "ia IA:*" } | Select-Object -Last 3) -join " / ") }
+        else {
+            $macro = "$env:USERPROFILE\tinker-macro-$dg.txt"
+            $job = if (Test-Path $macro) { Say "repetindo os toques de $macro por 3 min"; Start-Replay $macro 180 }
+                   else { Say "sem a IA: explorando sozinho por 3 min (toques pela tela)"; Start-Explore $dg 180 }
+            try { Step "monitorar 180" | Out-Null } finally { Stop-Job $job; Remove-Job $job -Force }
+        }
         $mon = @(($script:last -split "`n") | Where-Object { $_ -like "mudou *" })
         $logm = (($script:last -split "`n") | Where-Object { $_ -like "log *" }) -join " / "
         # os que mudaram e tem o mesmo valor de um item que a tela mostra agora: candidatos de verdade
@@ -1264,7 +1273,7 @@ function Run-RealGame($dg) {
         $res += "monitor: $($mon.Count) mudaram por evento; $($bate.Count) com o valor de um item da tela: " + ($bate -join ", ") + " | $logm"
         Say $res[-1]
     } catch { $res += "parou: $($_.Exception.Message)"; Say $res[-1] }
-    & $adb shell cmd connectivity airplane-mode disable
+    if ($guid) { Sh "iptables -D OUTPUT -m owner --uid-owner $guid -j REJECT; ip6tables -D OUTPUT -m owner --uid-owner $guid -j REJECT" } else { & $adb shell cmd connectivity airplane-mode disable }
     $fails = ($res | Where-Object { $_ -like "FALHA*" -or $_ -like "parou*" }) -join "`n"
     Post-Sheet "agente PC: $nome de verdade" $fails ($res -join "`n") $v "$nome (emulador)"
     Say "pronto. Pode fechar esta janela."
