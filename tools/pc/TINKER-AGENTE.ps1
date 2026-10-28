@@ -1231,53 +1231,101 @@ function Run-RealGame($dg) {
     $guid = ((& $adb shell dumpsys package $dg) | Select-String "(?:userId|appId)=(\d+)" | Select-Object -First 1).Matches.Groups[1].Value
     if ($guid) { Sh "iptables -I OUTPUT -m owner --uid-owner $guid -j REJECT; ip6tables -I OUTPUT -m owner --uid-owner $guid -j REJECT"; Say "o $nome esta sem internet durante o teste (uid $guid)" }
     else { & $adb shell cmd connectivity airplane-mode enable; Say "modo aviao ligado no emulador durante o teste" }
-    $res = @()
+    $script:rr = @()
     function Items { Step "itens" | Out-Null; @(($script:last -split "`n") | Where-Object { $_ -like "item *" } | ForEach-Object { $f = $_ -split ' '; [pscustomobject]@{ nome = $f[1]; v = $f[2]; addr = $f[4] } }) }
+    # um teste da lista: falha de um nao para os outros; cada um vai para a planilha com OK/FALHA e o tempo
+    function T($name, [scriptblock]$b) {
+        $t0 = Get-Date
+        try { $r = & $b; $script:rr += "OK $name`: $r ($([int]((Get-Date) - $t0).TotalSeconds) s)" }
+        catch { $script:rr += "FALHA $name`: $($_.Exception.Message) ($([int]((Get-Date) - $t0).TotalSeconds) s)" }
+        Say $script:rr[-1]
+    }
     try {
         Step "jogo $dg" | Out-Null
-        $it = Items
-        $res += "itens: $($it.Count) na lista: " + (($it | Select-Object -First 30 | ForEach-Object { "$($_.nome)=$($_.v)" }) -join ", ")
-        Say $res[-1]
-        # pedido "Item N = 999" em dois itens: o Tinker prova sozinho (escreve e le a tela); o agente confere de novo lendo a
-        # lista da tela e depois volta o valor de antes (o save da pessoa fica como estava)
-        foreach ($i in ($it | Where-Object { [double]$_.v -ge 2 -and [double]$_.v -lt 999 } | Select-Object -First 2)) {
-            $t0 = Get-Date
-            try {
+        Step "limpar" | Out-Null  # salvos de rodadas antigas fora: o teste de reabrir confere so os desta
+        $script:it = @()
+        # 1. lista de itens: os numeros da tela e o mapa do jogo (Unity), com endereco quando sobrou 1
+        T "1 lista de itens (tela + mapa do jogo)" {
+            $script:it = Items
+            $com = @($script:it | Where-Object { $_.addr -ne "-" }).Count
+            if (-not $script:it.Count) { throw "nenhum item" }
+            "$($script:it.Count) itens, $com com endereco: " + (($script:it | Select-Object -First 30 | ForEach-Object { "$($_.nome)=$($_.v)" }) -join ", ")
+        }
+        # 2. pedido "Item = 999" em ate 4 itens: o Tinker prova sozinho (escreve e le a tela); o agente le a tela de novo e
+        # volta o valor de antes. O primeiro provado fica salvo para os testes 3 (irmaos) e 7 (reabrir o jogo)
+        $script:salvo = $null
+        foreach ($i in ($script:it | Where-Object { [double]$_.v -ge 2 -and [double]$_.v -lt 999 } | Select-Object -First 4)) {
+            T "2 pedido $($i.nome) = 999 (era $($i.v))" {
                 Step "sozinho $($i.nome)=999 auto" | Out-Null
                 $msg = ($script:last -split "`n")[0]
+                # logo depois do pedido (a lista de resultados ainda e a dele; o "itens" busca de novo e troca a lista)
+                if ($msg -match "Pronto" -and -not $script:salvo) {
+                    Step "salvar $($i.nome)" | Out-Null; $script:salvo = $i.nome
+                    Step "irmaos" | Out-Null
+                    $script:irmaos = (($script:last -split "`n") | Where-Object { $_ -like "irmao *" }).Count
+                }
                 $tela = (Items | Where-Object nome -eq $i.nome | Select-Object -First 1).v
                 Step "escrever $($i.v)" | Out-Null
                 $volta = (Items | Where-Object nome -eq $i.nome | Select-Object -First 1).v
-                $ok = if ($tela -eq "999") { "OK" } else { "FALHA" }
-                $res += "$ok pedido $($i.nome) = 999 (era $($i.v)): a tela mostrou $tela; voltei para $($i.v), a tela mostra $volta ($msg) ($([int]((Get-Date) - $t0).TotalSeconds) s)"
-            } catch { $res += "FALHA pedido $($i.nome) = 999 (era $($i.v)): $($_.Exception.Message)" }
-            Say $res[-1]
+                if ($tela -ne "999") { throw "a tela mostrou $tela ($msg)" }
+                "a tela mostrou 999; voltei para $($i.v), a tela mostra $volta"
+            }
         }
-        # ninguem joga: a IA do Tinker joga entendendo a tela (jogar) enquanto o monitor olha; sem IA (sem chave/cota), toques
-        # gravados (se houver o arquivo) ou o explorador
-        Say "a IA do Tinker vai jogar 3 min sozinha enquanto o 👁 monitor olha a memoria"
-        $ia = 0
-        try { Step "jogar 180" | Out-Null; $ia = @(($script:last -split "`n") | Where-Object { $_ -like "ia IA:*" }).Count } catch { Say "a IA nao jogou: $($_.Exception.Message)" }
-        if ($ia) { $res += "IA jogou: " + ((($script:last -split "`n") | Where-Object { $_ -like "ia IA:*" } | Select-Object -Last 3) -join " / ") }
-        else {
-            $macro = "$env:USERPROFILE\tinker-macro-$dg.txt"
-            $job = if (Test-Path $macro) { Say "repetindo os toques de $macro por 3 min"; Start-Replay $macro 180 }
-                   else { Say "sem a IA: explorando sozinho por 3 min (toques pela tela)"; Start-Explore $dg 180 }
-            try { Step "monitorar 180" | Out-Null } finally { Stop-Job $job; Remove-Job $job -Force }
+        # 3. achou um, acha todos: vizinhos com o mesmo formato do primeiro provado (outros recursos do mesmo objeto)
+        T "3 achou um, acha todos (vizinhos do $($script:salvo))" {
+            if (-not $script:salvo) { throw "nenhum pedido provado para comecar" }
+            "$($script:irmaos) parecidos na memoria"
         }
-        $mon = @(($script:last -split "`n") | Where-Object { $_ -like "mudou *" })
-        $logm = (($script:last -split "`n") | Where-Object { $_ -like "log *" }) -join " / "
-        # os que mudaram e tem o mesmo valor de um item que a tela mostra agora: candidatos de verdade
-        $agora = Items
-        $bate = @($mon | Where-Object { $m = ($_ -split ' ')[2]; $agora | Where-Object v -eq $m })
-        $res += "monitor: $($mon.Count) mudaram por evento; $($bate.Count) com o valor de um item da tela: " + ($bate -join ", ") + " | $logm"
-        Say $res[-1]
-    } catch { $res += "parou: $($_.Exception.Message)"; Say $res[-1] }
+        # 4. velocidade do jogo (Unity timeScale): acha e poe 2x por 10 s, depois volta a 1x
+        T "4 velocidade do jogo" {
+            $n = Step "velocidade"
+            if (-not $n) { throw "nao achei o timeScale" }
+            Step "velocidade 2" | Out-Null; Start-Sleep 10; Step "velocidade 1" | Out-Null
+            "$n lugar(es); 2x por 10 s e voltei a 1x"
+        }
+        # 5. a IA joga 3 min sozinha (abre menus e a loja, compra com moeda do jogo) enquanto o monitor olha a memoria;
+        # sem IA (sem chave/cota): toques gravados ou o explorador
+        T "5 IA joga 3 min + monitor de memoria" {
+            $ia = 0
+            try { Step "jogar 180" | Out-Null; $ia = @(($script:last -split "`n") | Where-Object { $_ -like "ia IA:*" }).Count } catch { Say "a IA nao jogou: $($_.Exception.Message)" }
+            if (-not $ia) {
+                $macro = "$env:USERPROFILE\tinker-macro-$dg.txt"
+                $job = if (Test-Path $macro) { Start-Replay $macro 180 } else { Start-Explore $dg 180 }
+                try { Step "monitorar 180" | Out-Null } finally { Stop-Job $job; Remove-Job $job -Force }
+            }
+            $l = $script:last -split "`n"
+            $mon = @($l | Where-Object { $_ -like "mudou *" })
+            $agora = Items
+            # os que mudaram e tem o valor de um item da tela agora: candidatos de verdade
+            $bate = @($mon | Where-Object { $m = ($_ -split ' ')[2]; $agora | Where-Object v -eq $m })
+            $quem = if ($ia) { "a IA jogou ($ia vezes): " + (($l | Where-Object { $_ -like "ia IA:*" } | Select-Object -Last 2) -join " / ") } else { "sem IA (explorador)" }
+            "$quem | monitor: $($mon.Count) mudaram por evento, $($bate.Count) com o valor de um item da tela: " + ($bate -join ", ") + " | " + (($l | Where-Object { $_ -like "log *" }) -join " / ")
+        }
+        # 6. cronometros (construcao, recarga): depois da IA jogar costuma haver algo construindo
+        T "6 cronometros (construcao)" {
+            $n = Step "cronometros"
+            if (-not $n) { throw "nenhum cronometro achado (nada construindo agora?)" }
+            "$n achado(s): " + ((($script:last -split "`n") | Where-Object { $_ -like "timer *" } | Select-Object -First 5) -join ", ")
+        }
+        # 7. reabrir o jogo: o salvo do teste 2 tem de voltar sozinho no endereco novo (ponteiro), sem procurar de novo
+        T "7 reabrir o jogo (o salvo volta sozinho)" {
+            if (-not $script:salvo) { throw "nenhum salvo (nenhum pedido provado)" }
+            & $adb shell am force-stop $dg; Start-Sleep 2
+            & $adb shell monkey -p $dg -c android.intent.category.LAUNCHER 1 | Out-Null; Start-Sleep 35
+            Step "jogo $dg" | Out-Null; Start-Sleep 20
+            Step "salvos" | Out-Null
+            $l = ($script:last -split "`n") | Where-Object { $_ -like "salvo *" }
+            if (-not ($l -match " voltou ")) { throw "nao voltou: $($l -join ' / ')" }
+            ($l -join " / ")
+        }
+    } catch { $script:rr += "parou: $($_.Exception.Message)"; Say $script:rr[-1] }
+    $res = $script:rr
+    $ok = @($res | Where-Object { $_ -like "OK *" }).Count
     # o registro do Tinker vai junto: mostra onde cada passo gastou o tempo e o que achou
     $res += "=== registro do Tinker ===`n" + ((Sh "tail -n 80 /data/data/$app/files/tinker.log") -join "`n")
     if ($guid) { Sh "iptables -D OUTPUT -m owner --uid-owner $guid -j REJECT; ip6tables -D OUTPUT -m owner --uid-owner $guid -j REJECT" } else { & $adb shell cmd connectivity airplane-mode disable }
     $fails = ($res | Where-Object { $_ -like "FALHA*" -or $_ -like "parou*" }) -join "`n"
-    Post-Sheet "agente PC: $nome de verdade" $fails ($res -join "`n") $v "$nome (emulador)"
+    Post-Sheet "agente PC: $nome de verdade, $ok de $(@($script:rr | Where-Object { $_ -match '^(OK|FALHA) ' }).Count) ok" $fails ($res -join "`n") $v "$nome (emulador)"
     Say "rodada pronta (resultado na planilha). Espero a proxima versao do Tinker."
 }
 
