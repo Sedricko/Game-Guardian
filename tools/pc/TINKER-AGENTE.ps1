@@ -753,6 +753,26 @@ function Run-Missions($v) {
         if ($now -lt 500 -or $now -gt 505) { throw "a tela mostra $now (logo depois: $logo; no endereco: $mem; pid do jogo: $pid2) ($($t.msg))" }
         "a tela mostra $now ($($t.msg))"
     }
+    # nivel 11: 📋 Itens do jogo - sem pista nenhuma, le a tela, acha o que da para editar e monta a lista. Cada item com
+    # endereco (da memoria Java: nunca escreve na nativa) e conferido: escreve +7, le a tela do jogo, volta como estava
+    Mission "nivel 11: itens do jogo sozinho (lista do que da para editar)" {
+        Step "itens" | Out-Null
+        $itens = @($script:last -split "`n" | Where-Object { $_ -like "item *" })
+        $ok = @(); $err = @()
+        foreach ($l in $itens) {
+            $f = $l -split ' '
+            $nome = $f[1] -replace '_', ' '; $addr = $f[4]; $tipo = $f[5]; $reg = $f[6]
+            if ($addr -eq "-" -or $reg -notlike "J*" -or $tipo -notmatch '^(i32|i64|f32|f64)$') { continue }
+            try { $antes = [double](Val $nome) } catch { continue }
+            Step "endereco $addr $tipo $($antes + 7)" | Out-Null; Start-Sleep 2
+            $depois = Val $nome
+            Step "endereco $addr $tipo $antes" | Out-Null
+            if ($depois -eq $antes + 7) { $ok += $nome } else { $err += "$nome ($antes -> $depois)" }
+        }
+        $linha = "$($itens.Count) itens na lista; com endereco conferido na tela: $($ok.Count) certos ($($ok -join ', ')), $($err.Count) errados ($($err -join ', '))"
+        if ($itens.Count -lt 10 -or $ok.Count -lt 5 -or $err.Count -gt 0) { throw $linha }
+        $linha
+    }
     # nivel 10: decidir sem escrever. O Ouro tem 6 copias (iscas) que seguem cada mudanca; so lendo, o agente aponta o
     # provavel pela vizinhanca (o verdadeiro mora junto de outros numeros da tela). A conferencia escreve so no palpite
     Mission "nivel 10: decidir sem escrever (Ouro com 6 copias, so lendo)" {

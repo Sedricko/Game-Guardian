@@ -152,6 +152,7 @@ internal fun SearchTab(engine: Engine, run: (suspend () -> String) -> Unit) {
                     }
                     TextButton(onClick = { engine.autoFindStop() }) { Text(if (s.autoFindWinner != null || finding.startsWith("Não") || finding.startsWith("Nenhum")) "Fechar" else "⏹ Parar") }
                 }
+                ItemsPanel(engine, enabled, run)
                 if (s.canUndo) TextButton(onClick = { run { engine.undo() } }, enabled = enabled) { Text("↶ Desfazer último refino") }
                 // com resultados: refinar pelo jeito que mudou, sem precisar do número
                 if ((s.count ?: 0) > 0) CompareButtons(engine, enabled, run)
@@ -679,3 +680,41 @@ internal fun NearSearch(engine: Engine, centers: List<String>, initialType: Stri
 
 // três botões numa linha (Nova busca, Refinar, Sem valor): o espaço interno padrão (24 dp) cortava "Nova busca" em pé
 private val TIGHT = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
+
+/** 📋 Itens do jogo: o que ele achou sozinho na tela para editar e congelar; procura sozinho ao escolher um jogo. */
+@Composable
+private fun ItemsPanel(engine: Engine, enabled: Boolean, run: (suspend () -> String) -> Unit) {
+    val s = Session
+    // ao escolher um jogo (não o de teste, que as missões comandam), procura sozinho depois de o jogo carregar
+    LaunchedEffect(s.process?.pid) {
+        val p = s.process ?: return@LaunchedEffect
+        s.items = emptyList()
+        if (p.pkg != TEST_GAME) { delay(6000); run { engine.scanItems() } }
+    }
+    Panel {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("📋 Itens do jogo", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            TextButton(onClick = { run { engine.scanItems() } }, enabled = enabled) { Text(if (s.items.isEmpty()) "Procurar" else "↻ De novo") }
+        }
+        if (s.items.isEmpty()) Text(
+            "Ele lê a tela e acha sozinho o que dá para editar e congelar (dinheiro, vida, diamantes…), mesmo num jogo que nunca viu. " +
+                "Deixe na tela do jogo a parte que mostra os números (inventário, loja…) e toque em Procurar.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        s.items.forEach { item ->
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Text("${item.icon} ${item.label}", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                Text(item.value, style = MaterialTheme.typography.titleSmall)
+            }
+            Text(item.status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            val hit = item.hit
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (hit != null) {
+                    // salvo com o nome: a aba Salvos edita, congela e vira receita; o agente aprende o tipo deste nome
+                    TextButton(onClick = { engine.addSaved(listOf(hit), name = item.label); s.status = "${item.label} salvo: edite o valor em Salvos."; s.tab = TABS.indexOf("Salvos") }) { Text("✏️ Editar") }
+                    TextButton(onClick = { engine.addSaved(listOf(hit), frozen = true, name = item.label); s.status = "${item.label} congelado em ${item.value}." }) { Text("❄️ Congelar") }
+                } else if (item.count > 1 || item.type.endsWith("^")) TextButton(onClick = { engine.autoFindStart(item.label, emptySet()) }, enabled = enabled) { Text("🎯 Achar sozinho") }
+            }
+        }
+    }
+}

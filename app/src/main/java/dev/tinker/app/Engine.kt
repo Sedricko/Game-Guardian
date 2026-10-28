@@ -1410,6 +1410,9 @@ class Engine private constructor(private val app: Context) {
             // "ler 7a01 i32": o valor que está no endereço agora (a missão separa "o valor voltou" de "o jogo reiniciou")
             // as últimas linhas do Achar sozinho no registro (a missão anexa ao que falhou: mostra o teste de escrita passo a passo)
             "diag" -> return "ok\n" + Diag.lines.filter { "Achar sozinho" in it }.takeLast(arg.toIntOrNull() ?: 12).joinToString("\n")
+            // "itens": a lista que o 📋 Itens do jogo monta sozinho (a missão confere cada um escrevendo e lendo a tela)
+            "itens" -> return scanItems().let { msg -> "ok $msg\ncount ${Session.items.count { it.hit != null }}\n" +
+                Session.items.joinToString("\n") { "item ${it.label.replace(' ', '_')} ${it.value} ${it.count} ${it.hit?.addr ?: "-"} ${it.hit?.type ?: "-"} ${it.hit?.region ?: "-"}" } }
             "ler" -> call { d -> d.send("read ${w[1]} ${w[2]}", quiet = true).status }
             // funções da lib do jogo pelo nome, quem uma função chama, fixar o retorno e desfazer (patch)
             "funcoes" -> return nativeFunctions(arg).let { (n, l) -> "ok $n\n" + l.joinToString("\n") { "fn ${it.addr} ${it.name}" } }
@@ -1894,6 +1897,59 @@ class Engine private constructor(private val app: Context) {
     }
 
     /** O número escrito na mesma linha de um nome da tela ("Abates: 113" com "abates"), com o lugar dele. */
+    /** Pares "nome: número" de cada linha da tela ("Ouro: 7060", "Vida 87.5"); o valor vai como escrito (decimal ok). */
+    private suspend fun screenLabels(): List<Pair<String, String>> {
+        val png = screenPng()
+        return withContext(Dispatchers.Default) {
+            val bmp = android.graphics.BitmapFactory.decodeByteArray(png, 0, png.size) ?: throw IOException("o print veio vazio")
+            val text = com.google.android.gms.tasks.Tasks.await(ocr.process(com.google.mlkit.vision.common.InputImage.fromBitmap(bmp, 0)))
+            val pair = Regex("""^(\p{L}[\p{L} ]{1,24}?)\s*[:=]?\s*(\d[\d.,]*)$""")
+            text.textBlocks.flatMap { it.lines }.mapNotNull { pair.find(it.text.trim())?.destructured?.let { (n, v) -> n.trim() to v.trimEnd('.', ',') } }
+                .distinctBy { learnKey(it.first) }
+        }
+    }
+
+    /**
+     * 📋 Itens do jogo: sem conhecer o jogo, lê na tela cada "nome: número", escolhe o tipo pelo que o agente sabe (ou Auto),
+     * busca uma vez cada um e monta a lista para salvar, editar e congelar. Com 1 resultado fica "provável"; com mais,
+     * pede para usar 🎯 Achar sozinho (o valor precisa mudar). Usa a busca atual (os resultados de antes são trocados).
+     */
+    suspend fun scanItems(): String {
+        val game = savedPkg ?: return "Escolha o jogo primeiro."
+        // o painel em cima do jogo seria lido no lugar dele: sai da frente para o print
+        withContext(Dispatchers.Main) { Session.aiHidePanel = true }
+        delay(900)
+        val pairs = try { screenLabels() } finally { withContext(Dispatchers.Main) { Session.aiHidePanel = false } }
+        if (pairs.isEmpty()) return "Não vi nenhum \"nome: número\" na tela. Abra a tela do jogo que mostra os recursos (inventário, loja…)."
+        val all = knowAll()
+        val out = mutableListOf<GameItem>()
+        for ((label, shown) in pairs) {
+            val key = learnKey(label)
+            val icon = ITEM_ICONS.entries.firstOrNull { (_, words) -> words.any { w -> key.split(' ').any { it.startsWith(w) } } }?.key ?: "🔢"
+            val t = pickType(all, game, label).first
+            val num = shown.replace(',', '.').let { v -> if (v.count { it == '.' } > 1 || v.substringAfter('.', "").length == 3) v.replace(".", "") else v }
+            if (t != null && '^' in t) { out += GameItem(label, shown, icon, t, 0, null, "número calculado: use 🎯 Achar sozinho"); continue }
+            val k = t?.substringAfter('*', "1")?.toLongOrNull() ?: 1L
+            val base = t?.substringBefore('*')
+            val v = if (k > 1) num.toDoubleOrNull()?.let { (it * k).toLong().toString() } ?: num else num
+            runCatching { search(base?.let { setOf(it) } ?: emptySet(), v) }
+            val (n, hits) = list()
+            val c = n ?: 0L
+            val known = all.any { it.game == game && it.name == key && it.wins > 0 }
+            val status = when {
+                c == 0L -> "não achei com ${typeLabel(t ?: "auto")}"
+                c == 1L -> (if (known) "já sabia" else "provável") + " · 0x${hits.first().addr}"
+                c <= 3L -> "$c lugares: use 🎯 Achar sozinho"
+                else -> "$c lugares: jogue um pouco e use 🎯 Achar sozinho"
+            }
+            out += GameItem(label, shown, icon, t ?: "auto", c, hits.singleOrNull(), status)
+            withContext(Dispatchers.Main) { Session.items = out.toList() }
+        }
+        val ready = out.count { it.hit != null }
+        Diag.add("Itens do jogo: ${out.size} na tela, $ready com endereço: " + out.joinToString { "${it.label}=${it.value} (${it.count})" })
+        return "Itens do jogo: ${out.size} na tela, $ready prontos para editar ou congelar."
+    }
+
     private suspend fun labeledNumber(label: String): Pair<Long, android.graphics.Rect>? {
         val png = screenPng()
         return withContext(Dispatchers.Default) {

@@ -115,6 +115,17 @@ private val SAME = listOf(
     setOf("pocoes", "pocao", "potions", "potion"), setOf("sementes", "semente", "seeds", "seed"), setOf("municao", "ammo"),
     setOf("runas", "runa", "runes", "rune"), setOf("brilho", "shine", "glow"), setOf("vigor", "might"),
 )
+/** Ícone do item pela palavra no nome (começo da palavra, já sem acento): dinheiro, premium, vida, energia, recurso. */
+internal val ITEM_ICONS = linkedMapOf(
+    "💰" to listOf("ouro", "gold", "moeda", "coin", "dinheiro", "cash", "money", "prata", "silver"),
+    "💎" to listOf("diamant", "gema", "gem", "cristal", "crystal", "rubi", "ruby", "runa", "rune"),
+    "❤️" to listOf("vida", "hp", "health", "life", "saude"),
+    "⚡" to listOf("energia", "energy", "stamina", "vigor", "brilho"),
+    "🪵" to listOf("madeira", "wood", "pedra", "stone", "ferro", "iron", "sucata", "scrap", "semente", "seed", "comida", "food"),
+    "⭐" to listOf("ponto", "point", "score", "nivel", "level", "xp", "honra", "honor", "abate", "kill"),
+    "🧪" to listOf("poca", "potion", "municao", "ammo", "item"),
+)
+
 internal fun sameNames(k: String): Set<String> = SAME.firstOrNull { k in it } ?: setOf(k)
 
 internal fun pickType(all: Collection<Know>, game: String, label: String): Pair<String?, String> {
