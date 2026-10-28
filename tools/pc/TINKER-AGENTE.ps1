@@ -108,10 +108,17 @@ function Post-Sheet($motivo, $problemas, $texto, $versao, $jogo = "jogo de teste
     $url = $link.Trim() + $(if ($link.Contains("?")) { "&" } else { "?" }) + "relatorio=1"
     $body = @{ jogo = $jogo; versao = $versao; aparelho = "Emulador PC API 31"; motivo = $motivo
                problemas = $problemas; texto = $texto.Substring(0, [Math]::Min($texto.Length, 400000)) } | ConvertTo-Json -Compress
-    try {
-        Invoke-WebRequest $url -Method Post -Body ([Text.Encoding]::UTF8.GetBytes($body)) -ContentType "application/json; charset=utf-8" -UseBasicParsing | Out-Null
-        Say "resultado enviado para a planilha"
-    } catch { Say "nao mandei para a planilha: $($_.Exception.Message)" }
+    # sem internet: guarda na fila e manda junto da proxima vez que der (nenhum resultado se perde)
+    $fila = "$env:USERPROFILE\tinker-agente-fila"
+    New-Item -ItemType Directory -Force $fila | Out-Null
+    [IO.File]::WriteAllText("$fila\$(Get-Date -Format 'yyyyMMdd-HHmmss-fff').json", $body, (New-Object Text.UTF8Encoding $false))
+    foreach ($f in (Get-ChildItem $fila -Filter *.json | Sort-Object Name)) {
+        try {
+            Invoke-WebRequest $url -Method Post -Body ([IO.File]::ReadAllBytes($f.FullName)) -ContentType "application/json; charset=utf-8" -UseBasicParsing | Out-Null
+            Remove-Item $f.FullName
+            Say "resultado enviado para a planilha"
+        } catch { Say "sem internet para a planilha: guardei e mando depois ($($_.Exception.Message))"; break }
+    }
 }
 
 # print da tela do emulador, menor e em JPEG (cabe numa linha da planilha), como texto base64
