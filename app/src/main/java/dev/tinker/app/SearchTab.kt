@@ -734,7 +734,7 @@ private fun ItemsPanel(engine: Engine, enabled: Boolean, run: (suspend () -> Str
                 } else if (item.method != null && item.fix != null) {
                     // fixar o retorno vira um patch (desfaz com um toque em Memória → Código); o nome da função volta sozinho ao reabrir
                     TextButton(onClick = { run { engine.patchReturn(item.method, item.cls, item.fix) } }, enabled = enabled) { Text("🔧 ${item.fixLabel}") }
-                } else if (item.method == null && (item.count > 1 || item.type.endsWith("^"))) TextButton(onClick = { engine.autoFindStart(item.label, emptySet()) }, enabled = enabled) { Text("🎯 Achar sozinho") }
+                } else if (item.method == null && (item.count > 1 || item.type.endsWith("^"))) TextButton(onClick = { engine.autoFindStart(if (item.label.startsWith("Item ")) item.value else item.label, emptySet()) }, enabled = enabled) { Text("🎯 Achar sozinho") }
             }
         }
     }

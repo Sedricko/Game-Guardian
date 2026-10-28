@@ -1904,8 +1904,16 @@ class Engine private constructor(private val app: Context) {
             val bmp = android.graphics.BitmapFactory.decodeByteArray(png, 0, png.size) ?: throw IOException("o print veio vazio")
             val text = com.google.android.gms.tasks.Tasks.await(ocr.process(com.google.mlkit.vision.common.InputImage.fromBitmap(bmp, 0)))
             val pair = Regex("""^(\p{L}[\p{L} ]{1,24}?)\s*[:=]?\s*(\d[\d.,]*)$""")
-            text.textBlocks.flatMap { it.lines }.mapNotNull { pair.find(it.text.trim())?.destructured?.let { (n, v) -> n.trim() to v.trimEnd('.', ',') } }
+            val named = text.textBlocks.flatMap { it.lines }.mapNotNull { pair.find(it.text.trim())?.destructured?.let { (n, v) -> n.trim() to v.trimEnd('.', ',') } }
                 .distinctBy { learnKey(it.first) }
+            // sem nome escrito (DYSMANTLE: o número fica embaixo do ícone, "3", "1+16"): os números soltos, da esquerda
+            // para a direita e de cima para baixo, viram "Item 1", "Item 2"…; em "1+16" vale o da direita (o do inventário)
+            named.ifEmpty {
+                text.textBlocks.flatMap { it.lines }.flatMap { it.elements }
+                    .mapNotNull { e -> Regex("""^(\d+\+)?(\d{1,9})$""").find(e.text.trim())?.groupValues?.get(2)?.let { it to (e.boundingBox ?: return@mapNotNull null) } }
+                    .sortedWith(compareBy({ it.second.top / 40 }, { it.second.left }))
+                    .mapIndexed { i, (v, _) -> "Item ${i + 1}" to v }
+            }
         }
     }
 
@@ -2002,11 +2010,15 @@ class Engine private constructor(private val app: Context) {
         itemProgress(0f, 0)
         val pairs = try { screenLabels() } finally { withContext(Dispatchers.Main) { Session.aiHidePanel = false; Session.openPanelReq++ } }
         itemProgress(0.1f)
-        itemLog("Na tela: ${pairs.size} \"nome: número\" (" + pairs.joinToString { "${it.first} ${it.second}" } + ")")
+        itemLog("Na tela: ${pairs.size} número(s) (" + pairs.joinToString { "${it.first} = ${it.second}" } + ")" + if (pairs.firstOrNull()?.first?.startsWith("Item ") == true) " · sem nome escrito: chamei de Item 1, 2…" else "")
         // primeiro o mapa do jogo (Unity): tem nome e tipo de tudo, até do que não aparece na tela
         val out = runCatching { scanIl2cpp() }.getOrDefault(emptyList()).toMutableList()
         withContext(Dispatchers.Main) { Session.items = out.toList() }
-        if (pairs.isEmpty() && out.isEmpty()) return "Não vi nenhum \"nome: número\" na tela. Abra a tela do jogo que mostra os recursos (inventário, loja…)."
+        if (pairs.isEmpty() && out.isEmpty()) {
+            itemProgress(1f, 0)
+            itemLog("Não vi nenhum número na tela do jogo.")
+            return "Não vi nenhum número na tela. Abra a tela do jogo que mostra os recursos (inventário, loja…)."
+        }
         val all = knowAll()
         for ((i, pair) in pairs.withIndex()) {
             val (label, shown) = pair
