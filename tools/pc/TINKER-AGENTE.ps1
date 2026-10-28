@@ -460,7 +460,7 @@ function Tap($text) {
     Start-Sleep -Milliseconds 700
 }
 # um passo do Tinker (escolher/buscar/refinar/desconhecido/comparar/escrever/congelar); devolve a contagem
-function Step($cmd) {
+function Step($cmd, $secs = 340) {
     $rm = (Sh "rm -f /data/data/$app/files/missao.txt" 2>&1) -join " "
     # o adbd do emulador reiniciou sem root (Permission denied): pede o root de novo, senao nenhuma resposta do Tinker e lida
     if ($rm -match "Permission denied") {
@@ -475,7 +475,7 @@ function Step($cmd) {
         & $adb wait-for-device; Wait-Booted | Out-Null
         throw "o Android do emulador reiniciou no meio do passo '$cmd'"
     }
-    for ($k = 0; $k -lt 680; $k++) {  # ate 340 s: o sozinho espera ate 300 s
+    for ($k = 0; $k -lt $secs * 2; $k++) {  # ate 340 s: o sozinho espera ate 300 s (num jogo grande o "itens" leva mais)
         Start-Sleep -Milliseconds 500
         $t = Sh "cat /data/data/$app/files/missao.txt" 2>$null
         if ($LASTEXITCODE -eq 0 -and $t) {
@@ -1235,11 +1235,14 @@ function Run-RealGame($dg) {
     }
     # offline de verdade durante o teste: so o JOGO fica sem internet (firewall pelo uid dele); o Tinker continua com a dele,
     # para a IA que joga. Nada do que o Tinker escreve chega a um servidor do jogo (o bloqueio sai no fim)
-    $guid = ((& $adb shell dumpsys package $dg) | Select-String "(?:userId|appId)=(\d+)" | Select-Object -First 1).Matches.Groups[1].Value
-    if ($guid) { Sh "iptables -I OUTPUT -m owner --uid-owner $guid -j REJECT; ip6tables -I OUTPUT -m owner --uid-owner $guid -j REJECT"; Say "o $nome esta sem internet durante o teste (uid $guid)" }
-    else { & $adb shell cmd connectivity airplane-mode enable; Say "modo aviao ligado no emulador durante o teste" }
+    # Android 14+: o proprio sistema corta a rede de um app (o iptables com --uid-owner nao existe no kernel do Android 16)
+    $net = (& $adb shell cmd connectivity set-package-networking-enabled false $dg 2>&1) -join " "
+    if ($net -match "Unknown|unknown|rror|xception") {
+        $guid = $null
+        & $adb shell cmd connectivity airplane-mode enable; Say "modo aviao ligado no emulador durante o teste (a IA que joga fica sem internet: entra o explorador)"
+    } else { $guid = "pkg"; Say "o $nome esta sem internet durante o teste (so ele; o Tinker tem internet)" }
     $script:rr = @()
-    function Items { Step "itens" | Out-Null; @(($script:last -split "`n") | Where-Object { $_ -like "item *" } | ForEach-Object { $f = $_ -split ' '; [pscustomobject]@{ nome = $f[1]; v = $f[2]; addr = $f[4] } }) }
+    function Items { Step "itens" 900 | Out-Null; @(($script:last -split "`n") | Where-Object { $_ -like "item *" } | ForEach-Object { $f = $_ -split ' '; [pscustomobject]@{ nome = $f[1]; v = $f[2]; addr = $f[4] } }) }
     # um teste da lista: falha de um nao para os outros; cada um vai para a planilha com OK/FALHA e o tempo
     function T($name, [scriptblock]$b) {
         $t0 = Get-Date
@@ -1330,7 +1333,7 @@ function Run-RealGame($dg) {
     $ok = @($res | Where-Object { $_ -like "OK *" }).Count
     # o registro do Tinker vai junto: mostra onde cada passo gastou o tempo e o que achou
     $res += "=== registro do Tinker ===`n" + ((Sh "tail -n 80 /data/data/$app/files/tinker.log") -join "`n")
-    if ($guid) { Sh "iptables -D OUTPUT -m owner --uid-owner $guid -j REJECT; ip6tables -D OUTPUT -m owner --uid-owner $guid -j REJECT" } else { & $adb shell cmd connectivity airplane-mode disable }
+    if ($guid) { & $adb shell cmd connectivity set-package-networking-enabled true $dg | Out-Null } else { & $adb shell cmd connectivity airplane-mode disable }
     $fails = ($res | Where-Object { $_ -like "FALHA*" -or $_ -like "parou*" }) -join "`n"
     Post-Sheet "agente PC: $nome de verdade, $ok de $(@($script:rr | Where-Object { $_ -match '^(OK|FALHA) ' }).Count) ok" $fails ($res -join "`n") $v "$nome (emulador)"
     Say "rodada pronta (resultado na planilha). Espero a proxima versao do Tinker."

@@ -1392,16 +1392,19 @@ class Engine private constructor(private val app: Context) {
         }
     }
 
-    private var missionGame = TEST_GAME
+    // guardado: o Tinker reiniciado no meio da rodada (travou, o Android fechou) volta ao jogo da missão, não ao de Teste
+    private var missionGame: String
+        get() = prefs.getString("missionGame", TEST_GAME)?.takeIf { it in MISSION_GAMES } ?: TEST_GAME
+        set(v) { prefs.edit().putString("missionGame", v).apply() }
 
     private suspend fun mission(cmd: String): String {
         val w = cmd.split(' ').filter { it.isNotEmpty() }
         val arg = w.drop(1).joinToString(" ")
-        val label = MISSION_GAMES.getValue(missionGame)
+        fun label() = MISSION_GAMES.getValue(missionGame)
         suspend fun pickTestGame(): String {
             val pid = call { d -> d.send("ps", quiet = true).lines.firstNotNullOfOrNull { l -> l.substringBefore(' ').toIntOrNull()?.takeIf { l.substringAfter(' ') == missionGame } } }
-                ?: error("o $label não está aberto")
-            return attach(GameProcess(pid, missionGame, label, null))
+                ?: error("o ${label()} não está aberto")
+            return attach(GameProcess(pid, missionGame, label(), null))
         }
         suspend fun front() = withContext(Dispatchers.Main) { app.packageManager.getLaunchIntentForPackage(missionGame)?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)?.let(app::startActivity) }
         // "jogo com.the10tons.dysmantle": as próximas missões são nesse jogo (só os da lista fechada MISSION_GAMES)
@@ -1465,7 +1468,7 @@ class Engine private constructor(private val app: Context) {
                 monitorStart()
                 try {
                     val chat = AiChat()
-                    var q = "Você está jogando $label (offline, single-player, modo avião) para o Tinker observar a memória enquanto os números mudam. " +
+                    var q = "Você está jogando ${label()} (offline, single-player, modo avião) para o Tinker observar a memória enquanto os números mudam. " +
                         "Jogue de verdade: use ver_tela, entenda o jogo e faça os recursos da tela mudarem (coletar, minerar, construir, melhorar, " +
                         "trocar com o próprio jogo). Abra também a LOJA e os outros menus para ver itens, preços e quantidades; pode comprar com " +
                         "moeda do jogo (ouro, gemas, minério). Um toque por vez, olhando o print de depois. NUNCA toque em preço em dinheiro " +
@@ -1483,7 +1486,7 @@ class Engine private constructor(private val app: Context) {
                 }
                 delay(1500)
                 val l = Session.items.filter { it.icon == "📈" }
-                Diag.add("IA jogou $label: " + log.takeLast(3).joinToString(" / ").take(600))
+                Diag.add("IA jogou ${label()}: " + log.takeLast(3).joinToString(" / ").take(600))
                 "ok ${l.size}\ncount ${l.size}\n" + l.joinToString("\n") { "mudou ${it.hit!!.addr} ${it.value} ${it.hit.region.ifEmpty { "-" }}" } +
                     "\n" + Session.itemsLog.filter { "Afunilando" in it || "Rodada" in it }.takeLast(4).joinToString("\n") { "log $it" } +
                     "\n" + log.takeLast(40).joinToString("\n") { "ia " + it.replace('\n', ' ').take(400) }
@@ -1986,12 +1989,11 @@ class Engine private constructor(private val app: Context) {
                 .distinctBy { learnKey(it.first) }
             // sem nome escrito (DYSMANTLE: o número fica embaixo do ícone, "3", "1+16"): os números soltos, da esquerda
             // para a direita e de cima para baixo, viram "Item 1", "Item 2"…; em "1+16" vale o da direita (o do inventário)
-            named.ifEmpty {
-                text.textBlocks.flatMap { it.lines }.flatMap { it.elements }
-                    .mapNotNull { e -> Regex("""^(\d+\+)?(\d{1,9})$""").find(e.text.trim())?.groupValues?.get(2)?.let { it to (e.boundingBox ?: return@mapNotNull null) } }
-                    .sortedWith(compareBy({ it.second.top / 40 }, { it.second.left }))
-                    .mapIndexed { i, (v, _) -> "Item ${i + 1}" to v }
-            }
+            // e os soltos também (o HUD do Orecraft: ícone + número; um "≡ TRIBO" lido como "E TRIB0" tirava os de verdade)
+            named + text.textBlocks.flatMap { it.lines }.flatMap { it.elements }
+                .mapNotNull { e -> Regex("""^(\d+\+)?(\d{1,9})$""").find(e.text.trim())?.groupValues?.get(2)?.let { it to (e.boundingBox ?: return@mapNotNull null) } }
+                .sortedWith(compareBy({ it.second.top / 40 }, { it.second.left }))
+                .mapIndexed { i, (v, _) -> "Item ${i + 1}" to v }
         }
     }
 
@@ -2288,6 +2290,8 @@ class Engine private constructor(private val app: Context) {
             val t = pickType(all, game, label).first
             val num = shown.replace(',', '.').let { v -> if (v.count { it == '.' } > 1 || v.substringAfter('.', "").length == 3) v.replace(".", "") else v }
             if (t != null && '^' in t) { out += GameItem(label, shown, icon, t, 0, null, "número calculado: use 🎯 Achar sozinho"); continue }
+            // 0 e 1 existem aos milhões na memória: buscar trava o Tinker num jogo grande (Orecraft: "search … 0" e reiniciou)
+            if (num.toDoubleOrNull()?.let { it < 2 } == true) { out += GameItem(label, shown, icon, t ?: "auto", 0, null, "valor $shown: mude ele no jogo e use 🎯 Achar sozinho"); continue }
             val k = t?.substringAfter('*', "1")?.toLongOrNull() ?: 1L
             val base = t?.substringBefore('*')
             val v = if (k > 1) num.toDoubleOrNull()?.let { (it * k).toLong().toString() } ?: num else num
