@@ -1134,6 +1134,61 @@ if (-not (Test-Path $tok) -and -not ((Get-Command gh -ErrorAction SilentlyContin
     Write-Host "Token do GitHub (so leitura, github_pat_...). So precisa se o repositorio for privado; Enter vazio = sem token." -ForegroundColor Yellow
     Set-Content $tok (Read-Host "Token")
 }
+# 🎬 gravar e repetir: os toques da pessoa no jogo (getevent) viram linhas "espera_ms tap x y" ou "espera_ms swipe x1 y1 x2 y2 ms",
+# em pixels da tela, e o agente repete com "input tap/swipe". Toque segurado (mais de 400 ms) vira swipe parado (segurar)
+function Record-Macro($secs, $file) {
+    $info = (& $adb shell getevent -lp) -join "`n"
+    $mx = if ($info -match "ABS_MT_POSITION_X\s*:\s*value \d+, min \d+, max (\d+)") { [double]$Matches[1] } else { 32767 }
+    $my = if ($info -match "ABS_MT_POSITION_Y\s*:\s*value \d+, min \d+, max (\d+)") { [double]$Matches[1] } else { 32767 }
+    $sz = (& $adb shell wm size) -join " "
+    if ($sz -match "Override size: (\d+)x(\d+)" -or $sz -match "(\d+)x(\d+)") { $w = [double]$Matches[1]; $h = [double]$Matches[2] } else { return 0 }
+    $tmp = "$env:TEMP\tinker-getevent.txt"
+    $p = Start-Process $adb -ArgumentList "shell getevent -lt" -RedirectStandardOutput $tmp -NoNewWindow -PassThru
+    Start-Sleep $secs
+    Stop-Process $p -Force -ErrorAction SilentlyContinue
+    & $adb shell "pkill getevent" 2>$null | Out-Null
+    $out = @(); $x = 0; $y = 0; $down = $null; $last = $null
+    foreach ($l in (Get-Content $tmp -ErrorAction SilentlyContinue)) {
+        if ($l -notmatch "^\[\s*([\d.]+)\]\s+\S+:\s+\S+\s+(\S+)\s+(\S+)") { continue }
+        $t = [double]$Matches[1]; $code = $Matches[2]; $val = $Matches[3]
+        if ($code -eq "ABS_MT_POSITION_X") { $x = [Convert]::ToInt64($val, 16) * $w / ($mx + 1) }
+        elseif ($code -eq "ABS_MT_POSITION_Y") { $y = [Convert]::ToInt64($val, 16) * $h / ($my + 1) }
+        elseif (($code -eq "BTN_TOUCH" -and $val -eq "DOWN") -or ($code -eq "ABS_MT_TRACKING_ID" -and $val -ne "ffffffff")) { if (-not $down) { $down = @{ t = $t; x = $null; y = $null } } }
+        elseif ($code -eq "SYN_REPORT" -and $down -and $null -eq $down.x) { $down.x = $x; $down.y = $y }
+        elseif (($code -eq "BTN_TOUCH" -and $val -eq "UP") -or ($code -eq "ABS_MT_TRACKING_ID" -and $val -eq "ffffffff")) {
+            if ($down -and $null -ne $down.x) {
+                $gap = if ($last) { [int](($down.t - $last) * 1000) } else { 1000 }
+                $d = [int](($t - $down.t) * 1000)
+                $moved = [math]::Abs($x - $down.x) + [math]::Abs($y - $down.y)
+                if ($moved -lt 30 -and $d -lt 400) { $out += "$gap tap $([int]$down.x) $([int]$down.y)" }
+                else { $out += "$gap swipe $([int]$down.x) $([int]$down.y) $([int]$x) $([int]$y) $([math]::Max($d, 100))" }
+                $last = $t
+            }
+            $down = $null
+        }
+    }
+    if ($out.Count) { Set-Content $file $out }
+    $out.Count
+}
+
+# repete o gravado em volta, por $secs segundos, num job (o passo do Tinker roda ao mesmo tempo)
+function Start-Replay($file, $secs) {
+    Start-Job -ArgumentList $adb, $env:ANDROID_SERIAL, @(Get-Content $file), $secs -ScriptBlock {
+        param($adb, $serial, $lines, $secs)
+        $env:ANDROID_SERIAL = $serial
+        Start-Sleep 5  # o passo do Tinker poe o jogo na frente antes
+        $end = (Get-Date).AddSeconds($secs)
+        while ((Get-Date) -lt $end) {
+            foreach ($l in $lines) {
+                if ((Get-Date) -ge $end) { break }
+                $f = $l -split ' '
+                Start-Sleep -Milliseconds ([math]::Min([int]$f[0], 5000))
+                if ($f[1] -eq "tap") { & $adb shell input tap $f[2] $f[3] } else { & $adb shell input swipe $f[2] $f[3] $f[4] $f[5] $f[6] }
+            }
+        }
+    }
+}
+
 # jogos de verdade liberados (offline, single-player, sem loja de dinheiro real): nome e video do emulador de cada um
 $realGames = @{
     # o DYSMANTLE (motor NEXUS) so desenha com Vulkan, e o Vulkan da placa no emulador nao mostra a imagem
@@ -1203,9 +1258,24 @@ function Run-RealGame($dg) {
             } catch { $res += "FALHA pedido $($i.nome) = 999 (era $($i.v)): $($_.Exception.Message)" }
             Say $res[-1]
         }
-        Write-Host "Agora JOGUE 3 minutos no emulador: pegue e gaste coisas, deixe os numeros na tela de vez em quando. Enter para comecar." -ForegroundColor Yellow
-        Read-Host | Out-Null
-        Step "monitorar 180" | Out-Null
+        # 🎬 a primeira vez a pessoa joga 60 s e o agente grava os toques; dai em diante ele mesmo repete enquanto o monitor olha
+        $macro = "$env:USERPROFILE\tinker-macro-$dg.txt"
+        if (-not (Test-Path $macro)) {
+            Write-Host "GRAVAR: jogue 60 s no emulador (minerar, construir, coletar...). Eu gravo os seus toques e depois repito sozinho. Enter para comecar." -ForegroundColor Yellow
+            Read-Host | Out-Null
+            $n = Record-Macro 60 $macro
+            Say "gravei $n toques em $macro (para gravar de novo, apague esse arquivo)"
+            if (-not $n) { Remove-Item $macro -ErrorAction SilentlyContinue }
+        }
+        if (Test-Path $macro) {
+            Say "repetindo os toques gravados por 3 min enquanto o 👁 monitor olha a memoria (nao precisa jogar)"
+            $job = Start-Replay $macro 180
+            try { Step "monitorar 180" | Out-Null } finally { Stop-Job $job; Remove-Job $job -Force }
+        } else {
+            Write-Host "Nao gravei toques: JOGUE 3 minutos no emulador agora. Enter para comecar." -ForegroundColor Yellow
+            Read-Host | Out-Null
+            Step "monitorar 180" | Out-Null
+        }
         $mon = @(($script:last -split "`n") | Where-Object { $_ -like "mudou *" })
         $logm = (($script:last -split "`n") | Where-Object { $_ -like "log *" }) -join " / "
         # os que mudaram e tem o mesmo valor de um item que a tela mostra agora: candidatos de verdade
