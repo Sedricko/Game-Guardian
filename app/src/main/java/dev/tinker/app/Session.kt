@@ -69,6 +69,8 @@ object Session {
     var items by mutableStateOf<List<GameItem>>(emptyList())
     val itemsLog = mutableStateListOf<String>()  // o que a procura de itens está fazendo, passo a passo (aparece no painel)
     var itemsBusy by mutableStateOf(false)
+    var itemsProgress by mutableFloatStateOf(0f)  // 0 a 1: quanto da procura de itens já foi
+    var itemsReady by mutableIntStateOf(0)  // itens já confirmados com endereço (prontos para editar/congelar)
     var openPanelReq by mutableIntStateOf(0)  // +1: o menu flutuante abre de novo (depois de sair da frente para ler a tela)
     var itemsPid = 0  // a vez do jogo em que a lista já foi feita sozinha (abrir o menu de novo não procura de novo)  // 📋 Itens do jogo: o que ele achou sozinho para editar/congelar
     var autoFindWinner by mutableStateOf<Hit?>(null)  // o que mudou o número da tela no teste

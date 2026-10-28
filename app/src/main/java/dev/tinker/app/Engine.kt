@@ -1913,6 +1913,13 @@ class Engine private constructor(private val app: Context) {
      * O mapa do jogo Unity (as classes com nome, como o dump.cs): campos com nome conhecido (gold = moeda, life = vida) nos
      * objetos vivos, com o endereço, e as funções úteis (TakeDamage = tira vida) com o que fixar. Jogo sem IL2CPP: lista vazia.
      */
+    private suspend fun itemProgress(p: Float, ready: Int? = null) {
+        withContext(Dispatchers.Main) {
+            Session.itemsProgress = p.coerceIn(0f, 1f)
+            if (ready != null) Session.itemsReady = ready
+        }
+    }
+
     // também no Registro (aba Registro e relatório para a planilha): dá para acompanhar de fora
     private suspend fun itemLog(t: String) {
         Diag.add("Itens: $t")
@@ -1930,7 +1937,8 @@ class Engine private constructor(private val app: Context) {
         val out = mutableListOf<GameItem>()
         val withFields = classes.filter { c -> c[4].split(',').any { fieldMeaning(it) != null } }.take(30)
         itemLog("Mapa: ${classes.size} classes do jogo; ${withFields.size} com campos conhecidos (moeda, vida…)")
-        for (c in withFields) call { d ->
+        for ((i, c) in withFields.withIndex()) call { d ->
+            itemProgress(0.2f + 0.3f * i / withFields.size, out.count { it.hit != null })
             val objs = runCatching { d.send("il2objs ${c[1]}", quiet = true).lines }.getOrDefault(emptyList())
                 .map { it.removePrefix("obj ") }.filter { it.toLongOrNull(16) != null }.take(50)
             val first = objs.firstOrNull()?.toLong(16) ?: return@call
@@ -1948,7 +1956,7 @@ class Engine private constructor(private val app: Context) {
         // funções: nas classes acima e nas de nome típico (jogador, loja, inventário, carteira, arma)
         val typical = Regex("Player|Hero|Character|Shop|Store|Inventory|Wallet|Currency|Health|Weapon|Game(Manager|Data)|Economy", RegexOption.IGNORE_CASE)
         val withMethods = (withFields + classes.filter { typical.containsMatchIn(it[1]) }).distinctBy { it[1] }.take(40)
-        for (c in withMethods) runCatching { il2Methods(c[2]) }.getOrDefault(emptyList()).forEach { m ->
+        for ((i, c) in withMethods.withIndex()) runCatching { itemProgress(0.5f + 0.2f * i / withMethods.size); il2Methods(c[2]) }.getOrDefault(emptyList()).forEach { m ->
             val (what, fix, label) = methodMeaning(m.name) ?: return@forEach
             itemLog("🔧 ${c[1]}.${m.name}() = $what")
             out += GameItem("${c[1]}.${m.name}()", "", "🔧", "fn", 0, null, "função: $what", m, c[1], fix.takeIf { label.isNotEmpty() }, label)
@@ -1973,14 +1981,18 @@ class Engine private constructor(private val app: Context) {
         itemLog("Lendo a tela do jogo…")
         withContext(Dispatchers.Main) { Session.aiHidePanel = true }
         delay(900)
+        itemProgress(0f, 0)
         val pairs = try { screenLabels() } finally { withContext(Dispatchers.Main) { Session.aiHidePanel = false; Session.openPanelReq++ } }
+        itemProgress(0.1f)
         itemLog("Na tela: ${pairs.size} \"nome: número\" (" + pairs.joinToString { "${it.first} ${it.second}" } + ")")
         // primeiro o mapa do jogo (Unity): tem nome e tipo de tudo, até do que não aparece na tela
         val out = runCatching { scanIl2cpp() }.getOrDefault(emptyList()).toMutableList()
         withContext(Dispatchers.Main) { Session.items = out.toList() }
         if (pairs.isEmpty() && out.isEmpty()) return "Não vi nenhum \"nome: número\" na tela. Abra a tela do jogo que mostra os recursos (inventário, loja…)."
         val all = knowAll()
-        for ((label, shown) in pairs) {
+        for ((i, pair) in pairs.withIndex()) {
+            val (label, shown) = pair
+            itemProgress(0.7f + 0.3f * i / pairs.size, out.count { it.hit != null })
             val key = learnKey(label)
             val icon = ITEM_ICONS.entries.firstOrNull { (_, words) -> words.any { w -> key.split(' ').any { it.startsWith(w) } } }?.key ?: "🔢"
             val t = pickType(all, game, label).first
@@ -2005,6 +2017,7 @@ class Engine private constructor(private val app: Context) {
         }
         val ready = out.count { it.hit != null }
         val fns = out.count { it.method != null }
+        itemProgress(1f, ready)
         itemLog("Pronto: $ready com endereço, $fns funções.")
         Diag.add("Itens do jogo: ${out.size} (${fns} funções), $ready com endereço: " + out.joinToString { "${it.label}=${it.value} (${it.count})" })
         return "Itens do jogo: $ready prontos para editar ou congelar" + (if (fns > 0) ", $fns funções para fixar" else "") + "."

@@ -703,7 +703,11 @@ private fun ItemsPanel(engine: Engine, enabled: Boolean, run: (suspend () -> Str
         // o que ele está fazendo agora, passo a passo (fica depois de pronto, recolhido)
         var showLog by remember { mutableStateOf(true) }
         if (s.itemsLog.isNotEmpty()) {
-            if (s.itemsBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            // barra com a porcentagem e quantos já estão confirmados (com endereço, prontos para editar/congelar)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                LinearProgressIndicator(progress = { s.itemsProgress }, modifier = Modifier.weight(1f))
+                Text("${(s.itemsProgress * 100).toInt()}% · ${s.itemsReady} confirmados", style = MaterialTheme.typography.labelMedium)
+            }
             TextButton(onClick = { showLog = !showLog }) { Text((if (showLog || s.itemsBusy) "▾ " else "▸ ") + "Registro da procura (${s.itemsLog.size})") }
             if (showLog || s.itemsBusy) Column(Modifier.fillMaxWidth().heightIn(max = 160.dp).verticalScroll(rememberScrollState(Int.MAX_VALUE))) {
                 s.itemsLog.forEach { Text(it, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace) }
