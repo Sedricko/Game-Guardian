@@ -108,6 +108,9 @@ class GameActivity : Activity() {
     private val dys = ByteBuffer.allocateDirect(48 * 2).order(ByteOrder.LITTLE_ENDIAN).apply {
         listOf(Random.nextInt(2, 9), Random.nextInt(10, 40)).forEachIndexed { i, n -> putInt(i * 48, n); putInt(i * 48 + 4, n); putInt(i * 48 + 8, 99); putInt(i * 48 + 12, 201 + i); putFloat(i * 48 + 0x28, n.toFloat()) }
     }
+    // nível 18, "como o Orecraft": o HUD do topo é só ícone + número (sem nome), um deles é 0, e a barra de baixo tem
+    // texto que não é item ("≡ TRIBO"). Os três ficam num objeto do acampamento (campos de um objeto Unity: +0x10, +0x14, +0x18)
+    private val camp = ByteBuffer.allocateDirect(64).order(ByteOrder.LITTLE_ENDIAN).apply { putInt(0x10, Random.nextInt(80, 300)); putInt(0x14, Random.nextInt(10, 40)); putInt(0x18, 0) }
     private fun dysAdd(i: Int) { val n = dys.getInt(i * 48) + 1; dys.putInt(i * 48, n); dys.putInt(i * 48 + 4, n); dys.putFloat(i * 48 + 0x28, n.toFloat()) }
     private val buildLeft get() = ((build.getLong(8) - System.currentTimeMillis()) / 1000).coerceAtLeast(0)
 
@@ -197,6 +200,8 @@ class GameActivity : Activity() {
         actions["+1 lenha"] = { dysAdd(1) }
         actions["+1 esmeralda"] = { esmBuf.putInt(12, esmBuf.getInt(12) + 1) }
         actions["+1 poder"] = { atk.putInt(0, atk.getInt(0) + 1) }
+        actions["minerar"] = { camp.putInt(0x10, camp.getInt(0x10) + 10) }
+        actions["construir"] = { if (camp.getInt(0x10) >= 50) camp.putInt(0x10, camp.getInt(0x10) - 50) }
         val grid = android.widget.GridLayout(this).apply { columnCount = 2 }
         actions.forEach { (label, act) -> grid.addView(Button(this).apply { text = label; setOnClickListener { act(); save(); show() } }) }
         setContentView(android.widget.ScrollView(this).apply {
@@ -275,10 +280,11 @@ class GameActivity : Activity() {
             BAG.indices.joinToString("") { "\n${BAG[it]}: ${bag.getInt(it * 48)}" } +
             "\nPrata: ${(0 until 6).map { prataBuf.getChar(it * 2) }.joinToString("").trimStart('0').ifEmpty { "0" }}" +
             "\nEsmeraldas: ${esmBuf.getInt(12)}\nPoder: $poder" +
-            "\n[ ✿ ]  ${dys.getInt(0)}      [ ≡ ]  1+${dys.getInt(48)}"  // sem nome: só o ícone e o número (como o DYSMANTLE)
+            "\n[ ✿ ]  ${dys.getInt(0)}      [ ≡ ]  1+${dys.getInt(48)}" +  // sem nome: só o ícone e o número (como o DYSMANTLE)
+            "\n◉ ${camp.getInt(0x10)}   ◆ ${camp.getInt(0x14)}   ▲ ${camp.getInt(0x18)}      ≡ TRIBO"  // HUD como o do Orecraft
         if (t == shown) return  // a tela só muda quando um valor muda
         shown = t
         text.text = t
-        java.io.File(filesDir, "estado.txt").writeText(t + "\nFolha: ${dys.getInt(0)}\nLenha: ${dys.getInt(48)}")
+        java.io.File(filesDir, "estado.txt").writeText(t + "\nFolha: ${dys.getInt(0)}\nLenha: ${dys.getInt(48)}\nCampouro: ${camp.getInt(0x10)}\nCampgemas: ${camp.getInt(0x14)}")
     }
 }

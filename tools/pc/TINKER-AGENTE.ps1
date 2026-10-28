@@ -792,6 +792,24 @@ function Run-Missions($v) {
         if (-not $certo) { throw $linha }
         $linha
     }
+    # nivel 18, como o Orecraft (o que quebrou no jogo de verdade): HUD so com icone + numero, um deles 0, e "≡ TRIBO" na
+    # barra. A lista de itens tem de trazer o ouro do acampamento com endereco certo (pedido 999 conferido na tela), nao
+    # pode ter a "TRIBO" como item, e nao pode buscar o 0 (milhoes na memoria: travava o Tinker no Orecraft)
+    Mission "nivel 18: como o Orecraft (HUD so com icone e numero, um 0, TRIBO na barra)" {
+        $ouro = [double](Val "Campouro")
+        Step "itens" 900 | Out-Null
+        $l = @(($script:last -split "`n") | Where-Object { $_ -like "item *" } | ForEach-Object { $f = $_ -split ' '; [pscustomobject]@{ nome = $f[1]; v = $f[2]; addr = $f[4] } })
+        if ($l | Where-Object { $_.nome -match "TRIB" }) { throw "a barra 'TRIBO' entrou como item ($($l.Count) itens)" }
+        $o = $l | Where-Object { [double]$_.v -eq $ouro } | Select-Object -First 1
+        if (-not $o) { throw "o ouro do HUD ($ouro) nao veio na lista ($($l.Count) itens)" }
+        Step "sozinho $($o.nome)=999 auto" | Out-Null
+        $msg = ($script:last -split "`n")[0]
+        Start-Sleep 2
+        $now = Val "Campouro"
+        Step "escrever $ouro" | Out-Null
+        if ($now -ne 999) { throw "pedido $($o.nome)=999: a tela mostra $now ($msg)" }
+        "ouro do HUD ($ouro) achado como $($o.nome), 999 na tela e voltou; $($l.Count) itens, sem TRIBO"
+    }
     # nivel 16, como o DYSMANTLE: o numero da lenha fica embaixo do icone, sem nome, como "1+N"; o agente acha pelo
     # numero (o da direita), prova, e depois acha a folha pelo formato (achou um, acha todos). Conferido na tela
     Mission "nivel 16: como o DYSMANTLE (numero sem nome, 1+N, e o vizinho pelo formato)" {
