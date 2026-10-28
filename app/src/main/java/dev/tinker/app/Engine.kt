@@ -1408,6 +1408,8 @@ class Engine private constructor(private val app: Context) {
             // "endereco 7a01 i32 4321": escreve num endereço só (a missão confere na tela o palpite feito sem escrever)
             "endereco" -> write(w[1], w[2], w[3])
             // "ler 7a01 i32": o valor que está no endereço agora (a missão separa "o valor voltou" de "o jogo reiniciou")
+            // as últimas linhas do Achar sozinho no registro (a missão anexa ao que falhou: mostra o teste de escrita passo a passo)
+            "diag" -> return "ok\n" + Diag.lines.filter { "Achar sozinho" in it }.takeLast(arg.toIntOrNull() ?: 12).joinToString("\n")
             "ler" -> call { d -> d.send("read ${w[1]} ${w[2]}", quiet = true).status }
             // funções da lib do jogo pelo nome, quem uma função chama, fixar o retorno e desfazer (patch)
             "funcoes" -> return nativeFunctions(arg).let { (n, l) -> "ok $n\n" + l.joinToString("\n") { "fn ${it.addr} ${it.name}" } }
@@ -1475,7 +1477,9 @@ class Engine private constructor(private val app: Context) {
             // desenho do texto e derrubou o Jogo de Teste, SIGSEGV na libgui)
             "escrever" -> Session.autoFindWinner?.takeIf { h -> list().second.any { it.addr == h.addr } }?.let { write(it.addr, it.type, arg); "1 valores alterados.\n${it.addr} ${it.type} $arg" }
                 // sem provado, só com poucos: o Crystals ficou com os 56 da busca do Vigor e escrever em todos derrubou o jogo
-                ?: (Session.count ?: 0L).let { n -> if (n in 1L..3L) writeAll(arg) else return "err $n resultados e nenhum provado: não escrevo em todos" }
+                // a contagem vem do daemon (Session.count chega depois, pela tela: lida logo após o refino ainda era a antiga);
+                // até 10 (as 6 iscas do Ouro mais o verdadeiro): o Crystals tinha 56 do Vigor
+                ?: (list().first ?: 0L).let { n -> if (n in 1L..10L) writeAll(arg) else return "err $n resultados e nenhum provado: não escrevo em todos" }
             // soma N em cada resultado (o número da tela calculado: a missão confere que a tela subiu N)
             // map (inline) e não joinToString: dentro do lambda dele não dá para chamar o daemon (suspend)
             // só no provado (ou nos da memória Java): somar nos 7 da busca pela mudança escreveu em nativos e o jogo caiu

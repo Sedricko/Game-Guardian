@@ -731,7 +731,11 @@ function Run-Missions($v) {
             $now = Val $nome
             $linha += " | conferido na tela: escrevi $want, a tela mostra $now | resultados: $escreveu"
             $script:curva += $linha
-            if ($now -ne $want) { throw "a tela nao mudou ($linha)" }
+            if ($now -ne $want) {
+                # o teste de escrita aprovou um endereco que nao muda a tela: anexa o passo a passo dele (registro do Tinker)
+                Step "diag 10" | Out-Null
+                throw "a tela nao mudou ($linha) | registro: $((($script:last -split "`n") | Select-Object -Skip 1) -join ' / ')"
+            }
             if ($t.type -ne $gab[$nome][1]) { throw "guardou o tipo errado ($linha)" }
             $linha
         }
