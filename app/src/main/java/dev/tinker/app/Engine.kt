@@ -1937,21 +1937,27 @@ class Engine private constructor(private val app: Context) {
         val out = mutableListOf<GameItem>()
         val withFields = classes.filter { c -> c[4].split(',').any { fieldMeaning(it) != null } }.take(30)
         itemLog("Mapa: ${classes.size} classes do jogo; ${withFields.size} com campos conhecidos (moeda, vida…)")
-        for ((i, c) in withFields.withIndex()) call { d ->
+        for ((i, c) in withFields.withIndex()) {
             itemProgress(0.2f + 0.3f * i / withFields.size, out.count { it.hit != null })
+            // dentro do call (o daemon) não dá para chamar suspend: junta e registra depois
+            val found = call { d ->
+            val got = mutableListOf<GameItem>()
             val objs = runCatching { d.send("il2objs ${c[1]}", quiet = true).lines }.getOrDefault(emptyList())
                 .map { it.removePrefix("obj ") }.filter { it.toLongOrNull(16) != null }.take(50)
-            val first = objs.firstOrNull()?.toLong(16) ?: return@call
-            val cls = listOf(0x10L, 0x8L).firstNotNullOfOrNull { o -> d.il2((first + o).toString(16))?.takeIf { it.start.toLong(16) == first } } ?: return@call
+            val first = objs.firstOrNull()?.toLong(16) ?: return@call got
+            val cls = listOf(0x10L, 0x8L).firstNotNullOfOrNull { o -> d.il2((first + o).toString(16))?.takeIf { it.start.toLong(16) == first } } ?: return@call got
             cls.fields.forEach { f ->
                 val t = when (f.code) { 0x08, 0x09 -> "i32"; 0x0a, 0x0b -> "i64"; 0x0c -> "f32"; 0x0d -> "f64"; else -> null } ?: return@forEach
                 val (icon, what) = fieldMeaning(f.name) ?: return@forEach
                 val addr = (first + f.offset).toString(16)
                 val v = runCatching { d.send("read $addr $t", quiet = true).status }.getOrDefault("?")
-                itemLog("$icon ${cls.name}.${f.name} = $v  (${f.name} = $what)")
-                out += GameItem("${cls.name}.${f.name}", v, icon, t, objs.size.toLong(), Hit(addr, t, "Il2", v),
+                got += GameItem("${cls.name}.${f.name}", v, icon, t, objs.size.toLong(), Hit(addr, t, "Il2", v),
                     "${f.name} = $what · do mapa do jogo" + if (objs.size > 1) " · ${objs.size} objetos (o 1º)" else "")
             }
+            got
+            }
+            found.forEach { itemLog("${it.icon} ${it.label} = ${it.value}  (${it.status.substringBefore(" · ")})") }
+            out += found
         }
         // funções: nas classes acima e nas de nome típico (jogador, loja, inventário, carteira, arma)
         val typical = Regex("Player|Hero|Character|Shop|Store|Inventory|Wallet|Currency|Health|Weapon|Game(Manager|Data)|Economy", RegexOption.IGNORE_CASE)
