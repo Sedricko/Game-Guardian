@@ -69,6 +69,12 @@ class Engine private constructor(private val app: Context) {
     fun firstOverlayAsk(): Boolean = !prefs.getBoolean("askedOverlay", false).also { prefs.edit().putBoolean("askedOverlay", true).apply() }
 
     init {
+        // a internet voltou: a fila (relatórios com o registro, aprendizado da IA e do agente offline) vai na hora para a planilha
+        runCatching {
+            app.getSystemService(android.net.ConnectivityManager::class.java).registerDefaultNetworkCallback(object : android.net.ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: android.net.Network) { scope.launch(Dispatchers.IO) { delay(3000); flushPending(); agentPush() } }
+            })
+        }
         Session.autoPause = prefs.getBoolean("autoPause", true)
         Session.findEncrypted = prefs.getBoolean("findEncrypted", true)
         Session.autoPointers = prefs.getBoolean("autoPointers", true)
