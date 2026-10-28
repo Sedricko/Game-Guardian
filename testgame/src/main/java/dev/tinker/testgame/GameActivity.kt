@@ -103,6 +103,12 @@ class GameActivity : Activity() {
     private val arma = ByteBuffer.allocateDirect(16).order(ByteOrder.LITTLE_ENDIAN).apply { putInt(8, Random.nextInt(20, 60)) }
     private val anel = ByteBuffer.allocateDirect(16).order(ByteOrder.LITTLE_ENDIAN).apply { putFloat(4, Random.nextInt(5, 30).toFloat()) }
     private val poder get() = atk.getInt(0) + arma.getInt(8) + anel.getFloat(4).toInt()
+    // nível 16, "como o DYSMANTLE": inventário sem nome escrito — o número fica embaixo do ícone, a madeira como "1+N"
+    // (1 equipada + N no inventário). Mesmo formato da mochila (quantidade, cópia em +4, máximo, código, Float em +0x28)
+    private val dys = ByteBuffer.allocateDirect(48 * 2).order(ByteOrder.LITTLE_ENDIAN).apply {
+        listOf(Random.nextInt(2, 9), Random.nextInt(10, 40)).forEachIndexed { i, n -> putInt(i * 48, n); putInt(i * 48 + 4, n); putInt(i * 48 + 8, 99); putInt(i * 48 + 12, 201 + i); putFloat(i * 48 + 0x28, n.toFloat()) }
+    }
+    private fun dysAdd(i: Int) { val n = dys.getInt(i * 48) + 1; dys.putInt(i * 48, n); dys.putInt(i * 48 + 4, n); dys.putFloat(i * 48 + 0x28, n.toFloat()) }
     private val buildLeft get() = ((build.getLong(8) - System.currentTimeMillis()) / 1000).coerceAtLeast(0)
 
     private fun fresh(): ByteBuffer = ByteBuffer.allocateDirect(160).order(ByteOrder.LITTLE_ENDIAN)
@@ -187,6 +193,8 @@ class GameActivity : Activity() {
         actions["+1 crystal"] = { unk.putInt(44, unk.getInt(44) + 10) }
         actions["+1 flecha"] = { bagAdd(0) }
         actions["+1 prata"] = { prata += 1 }
+        actions["+1 folha"] = { dysAdd(0) }
+        actions["+1 lenha"] = { dysAdd(1) }
         actions["+1 esmeralda"] = { esmBuf.putInt(12, esmBuf.getInt(12) + 1) }
         actions["+1 poder"] = { atk.putInt(0, atk.getInt(0) + 1) }
         val grid = android.widget.GridLayout(this).apply { columnCount = 2 }
@@ -266,10 +274,11 @@ class GameActivity : Activity() {
             "\nRubis: ${unk.getDouble(0).toLong()}\nSementes: ${unk.getLong(8)}\nHonra: ${unk.getInt(16)}\nBrilho: ${unk.getFloat(20).toInt()}\nCristais: ${unk.getInt(24) / 10}\nRunas: $runas\nVigor: ${unk.getInt(36) + unk.getInt(40)}\nCrystals: ${unk.getInt(44) / 10}" +
             BAG.indices.joinToString("") { "\n${BAG[it]}: ${bag.getInt(it * 48)}" } +
             "\nPrata: ${(0 until 6).map { prataBuf.getChar(it * 2) }.joinToString("").trimStart('0').ifEmpty { "0" }}" +
-            "\nEsmeraldas: ${esmBuf.getInt(12)}\nPoder: $poder"
+            "\nEsmeraldas: ${esmBuf.getInt(12)}\nPoder: $poder" +
+            "\n[ ✿ ]  ${dys.getInt(0)}      [ ≡ ]  1+${dys.getInt(48)}"  // sem nome: só o ícone e o número (como o DYSMANTLE)
         if (t == shown) return  // a tela só muda quando um valor muda
         shown = t
         text.text = t
-        java.io.File(filesDir, "estado.txt").writeText(t)
+        java.io.File(filesDir, "estado.txt").writeText(t + "\nFolha: ${dys.getInt(0)}\nLenha: ${dys.getInt(48)}")
     }
 }

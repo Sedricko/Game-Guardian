@@ -753,6 +753,31 @@ function Run-Missions($v) {
         if ($now -lt 500 -or $now -gt 505) { throw "a tela mostra $now (logo depois: $logo; no endereco: $mem; pid do jogo: $pid2) ($($t.msg))" }
         "a tela mostra $now ($($t.msg))"
     }
+    # nivel 16, como o DYSMANTLE: o numero da lenha fica embaixo do icone, sem nome, como "1+N"; o agente acha pelo
+    # numero (o da direita), prova, e depois acha a folha pelo formato (achou um, acha todos). Conferido na tela
+    Mission "nivel 16: como o DYSMANTLE (numero sem nome, 1+N, e o vizinho pelo formato)" {
+        $v = [double](Val "Lenha")
+        $job = Start-Job -ArgumentList $adb, $game -ScriptBlock {
+            param($adb, $game)
+            for ($i = 0; $i -lt 80; $i++) { Start-Sleep 4; & $adb shell am broadcast -p $game -a dev.tinker.testgame.ACAO --es acao "'+1 lenha'" | Out-Null }
+        }
+        try { Step "sozinho $v auto" | Out-Null } finally { Stop-Job $job; Remove-Job $job -Force }
+        $msg = ($script:last -split "`n")[0]
+        $want = [double](Val "Lenha") + 50
+        Step "escrever $want" | Out-Null; Start-Sleep 2
+        $now = Val "Lenha"
+        if ($now -ne $want) { throw "lenha: escrevi $want, a tela mostra $now ($msg)" }
+        Step "irmaos" | Out-Null
+        $irm = @($script:last -split "`n" | Where-Object { $_ -like "irmao *" } | ForEach-Object { $f = $_ -split ' '; [pscustomobject]@{ addr = $f[1]; v = [double]$f[2] } })
+        $folha = [double](Val "Folha")
+        $c = $irm | Where-Object { $_.v -eq $folha } | Select-Object -First 1
+        if (-not $c) { throw "lenha certa ($want); a folha ($folha) nao estava entre os $($irm.Count) parecidos ($msg)" }
+        Step "endereco $($c.addr) i32 $($folha + 5)" | Out-Null; Start-Sleep 2
+        $f2 = Val "Folha"
+        Step "endereco $($c.addr) i32 $folha" | Out-Null
+        if ($f2 -ne $folha + 5) { throw "lenha certa; folha: escrevi $($folha + 5), a tela mostra $f2" }
+        "lenha achada pelo numero sem nome ($want na tela) e a folha pelo formato ($($folha + 5) na tela)"
+    }
     # dificuldade x3 (niveis 13 a 15): jeitos de guardar que jogos de verdade usam e o agente ainda nao resolve
     # nivel 13: a Prata fica na memoria como texto ("000123" em UTF-16), nao como numero
     Mission "nivel 13: numero guardado como texto (Prata)" {
