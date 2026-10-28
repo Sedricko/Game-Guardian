@@ -1412,7 +1412,12 @@ class Engine private constructor(private val app: Context) {
             // as últimas linhas do Achar sozinho no registro (a missão anexa ao que falhou: mostra o teste de escrita passo a passo)
             "diag" -> return "ok\n" + Diag.lines.filter { "Achar sozinho" in it }.takeLast(arg.toIntOrNull() ?: 12).joinToString("\n")
             // "itens": a lista que o 📋 Itens do jogo monta sozinho (a missão confere cada um escrevendo e lendo a tela)
-            "itens" -> return scanItems().let { msg -> "ok $msg\ncount ${Session.items.count { it.hit != null }}\n" +
+            // o jogo na frente antes de ler a tela (sem isso o print era do próprio Tinker e a lista vinha vazia)
+            "itens" -> return run {
+                withContext(Dispatchers.Main) { app.packageManager.getLaunchIntentForPackage(TEST_GAME)?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)?.let(app::startActivity) }
+                delay(2500)
+                scanItems()
+            }.let { msg -> "ok $msg\ncount ${Session.items.count { it.hit != null }}\n" +
                 Session.items.joinToString("\n") { "item ${it.label.replace(' ', '_')} ${it.value} ${it.count} ${it.hit?.addr ?: "-"} ${it.hit?.type ?: "-"} ${it.hit?.region ?: "-"}" } }
             // "irmaos": achou um (o 🎯 provou), acha os outros pelo formato; a missão confere escrevendo e lendo a tela
             "irmaos" -> return Session.autoFindWinner?.let { w -> findSiblings(w, "o achado").let { l -> "ok ${l.size}\ncount ${l.size}\n" + l.joinToString("\n") { "irmao ${it.hit!!.addr} ${it.value}" } } }
