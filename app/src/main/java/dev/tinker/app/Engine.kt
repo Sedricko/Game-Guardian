@@ -1461,8 +1461,10 @@ class Engine private constructor(private val app: Context) {
                     val chat = AiChat()
                     var q = "Você está jogando $label (offline, single-player, modo avião) para o Tinker observar a memória enquanto os números mudam. " +
                         "Jogue de verdade: use ver_tela, entenda o jogo e faça os recursos da tela mudarem (coletar, minerar, construir, melhorar, " +
-                        "trocar com o próprio jogo). Um toque por vez, olhando o print de depois. NUNCA toque na LOJA, em compras, preços em " +
-                        "dinheiro ou anúncios. Termine cada vez com uma linha: o que você aprendeu do jogo (o que cada número é e o que o faz mudar)."
+                        "trocar com o próprio jogo). Abra também a LOJA e os outros menus para ver itens, preços e quantidades; pode comprar com " +
+                        "moeda do jogo (ouro, gemas, minério). Um toque por vez, olhando o print de depois. NUNCA toque em preço em dinheiro " +
+                        "real (R$, US$, €), assinatura ou anúncio. Termine cada vez com uma linha: o que você aprendeu do jogo (o que cada " +
+                        "número é, o que o faz mudar e o que a loja vende por quanto)."
                     while (System.currentTimeMillis() < end - 5000) {
                         val a = withTimeoutOrNull(end - System.currentTimeMillis()) { Assistant.ask(chat, { "" }, q, play) { log += it } } ?: break
                         log += "IA: $a"
