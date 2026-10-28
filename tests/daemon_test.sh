@@ -172,7 +172,8 @@ grep -qE "^$maddr i32 (Ch|A) 1$" <<<"$ph" && grep -qE "^$m4 i32 (Ch|A) 12445$" <
 # 👁 Monitor: o contador (muda toda hora) vira ruído no photonoise2; a moeda que sobe 5 aparece com antes e depois;
 # o salto grande vira lixo; na rodada seguinte, sem mudança, nada; e o photowin aceita centenas de faixas
 wl=$(for k in $(seq 300); do printf '%x-%x,' $((0x10000000 + k * 0x10000)) $((0x10000000 + k * 0x10000 + 0x1000)); done)
-st=$( { printf '%s\n' "attach $pid" "photowin ${wl%,}" "photowin off" "write $maddr i32 12345" "photo" "photonoise2" "write $maddr i32 12350" "write $m4 i32 99999999" "photostep"; sleep 0.1
+st=$( { printf '%s\n' "attach $pid" "photowin ${wl%,}" "photowin off" "write $maddr i32 12345" "photo"; sleep 2  # como o app: 2 s depois da foto, e o photonoise2 olha de novo 2 s depois
+        printf '%s\n' "photonoise2" "write $maddr i32 12350" "write $m4 i32 99999999" "photostep"; sleep 0.1
         printf '%s\n' "photostep" "write $maddr i32 12345" "write $m4 i32 0" "photodrop"; } | "$out/tinkerd")
 echo "$st" | head -20
 grep -qx "ok 300" <<<"$st" && grep -qE "^$maddr 12345 12350 (Ch|A)$" <<<"$st" && ! grep -qE "^($m4|$taddr) " <<<"$st" \
