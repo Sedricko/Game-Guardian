@@ -1051,7 +1051,7 @@ function Install-Tinker($rel) {
     & $adb shell appops set $app SYSTEM_ALERT_WINDOW allow | Out-Null
     & $adb shell pm grant $app android.permission.POST_NOTIFICATIONS 2>$null | Out-Null
     # root para o Tinker sem precisar tocar em Permitir (politica do Magisk para o uid do app)
-    $uid = ((& $adb shell dumpsys package $app) | Select-String "userId=(\d+)" | Select-Object -First 1).Matches.Groups[1].Value
+    $uid = ((& $adb shell dumpsys package $app) | Select-String "(?:userId|appId)=(\d+)" | Select-Object -First 1).Matches.Groups[1].Value
     if ($uid) { Sh "magisk --sqlite 'REPLACE INTO policies (uid,policy,until,logging,notification) VALUES($uid,2,0,1,1)'" 2>$null | Out-Null }
 }
 
@@ -1228,7 +1228,7 @@ function Run-RealGame($dg) {
     }
     # offline de verdade durante o teste: so o JOGO fica sem internet (firewall pelo uid dele); o Tinker continua com a dele,
     # para a IA que joga. Nada do que o Tinker escreve chega a um servidor do jogo (o bloqueio sai no fim)
-    $guid = ((& $adb shell dumpsys package $dg) | Select-String "userId=(\d+)" | Select-Object -First 1).Matches.Groups[1].Value
+    $guid = ((& $adb shell dumpsys package $dg) | Select-String "(?:userId|appId)=(\d+)" | Select-Object -First 1).Matches.Groups[1].Value
     if ($guid) { Sh "iptables -I OUTPUT -m owner --uid-owner $guid -j REJECT; ip6tables -I OUTPUT -m owner --uid-owner $guid -j REJECT"; Say "o $nome esta sem internet durante o teste (uid $guid)" }
     else { & $adb shell cmd connectivity airplane-mode enable; Say "modo aviao ligado no emulador durante o teste" }
     $res = @()
