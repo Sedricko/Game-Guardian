@@ -2050,10 +2050,15 @@ class Engine private constructor(private val app: Context) {
         monitorJob = scope.launch {
             withContext(Dispatchers.Main) { Session.monitorOn = true; Session.itemsLog.clear() }
             val hist = LinkedHashMap<String, MutableList<Long>>()
+            val region = HashMap<String, String>()  // a região de cada um: ao salvar, o jogo passa a ser monitorado só ali
             try {
                 itemLog("👁 Foto da memória (regiões de valores)…")
+                // onde este jogo guarda o que já foi achado (salvos e o que o agente aprendeu): começa só ali, que é menor e
+                // mais rápido; sem nada aprendido ainda, as regiões de valores
+                val focus = focusRegions().ifEmpty { setOf("Jh", "J", "Ca", "Cb", "A") }
+                itemLog("👁 Regiões: ${focus.joinToString()}" + if (focusRegions().isEmpty()) " (ainda não sei onde este jogo guarda)" else " (onde este jogo guarda o que já achei)")
                 val mb = call { d ->
-                    d.send("ranges Jh,J,Ca,Cb,A", quiet = true)
+                    d.send("ranges ${focus.joinToString(",")}", quiet = true)
                     try { d.send("photo").status } finally { d.send("ranges all", quiet = true) }
                 }
                 itemLog("👁 Foto: $mb MB. Parado 4 s para tirar o que muda sozinho…")
@@ -2069,10 +2074,10 @@ class Engine private constructor(private val app: Context) {
                         d.send("list 3000", quiet = true).lines.mapNotNull { l ->
                             val f = l.split(' ')
                             val v = f.getOrNull(3)?.toLongOrNull() ?: return@mapNotNull null
-                            f[0] to v
+                            Triple(f[0], v, f.getOrElse(2) { "" })
                         }
                     }
-                    for ((a, v) in got) if (v in 1..10_000_000) hist.getOrPut(a) { mutableListOf() }.let { h -> if (h.lastOrNull() != v) h += v }
+                    for ((a, v, r) in got) { region[a] = r; if (v in 1..10_000_000) hist.getOrPut(a) { mutableListOf() }.let { h -> if (h.lastOrNull() != v) h += v } }
                     // muda em quase toda rodada: é da estrutura do jogo (relógio lento, posição, animação), não um evento
                     val structural = hist.count { (_, h) -> round >= 3 && h.size - 1 >= round * 8 / 10 }
                     // recurso: mudou pelo menos 2 vezes, em degraus pequenos e em momentos soltos (porque algo aconteceu)
@@ -2080,7 +2085,7 @@ class Engine private constructor(private val app: Context) {
                         h.zipWithNext().all { (x, y) -> kotlin.math.abs(y - x) in 1..10_000 } }
                         .entries.sortedByDescending { it.value.size }.take(40)
                     val items = cands.mapIndexed { i, (a, h) ->
-                        GameItem("Mudou ${i + 1}", h.last().toString(), "📈", "i32", h.size.toLong(), Hit(a, "i32", "", h.last().toString()),
+                        GameItem("Mudou ${i + 1}", h.last().toString(), "📈", "i32", h.size.toLong(), Hit(a, "i32", region[a].orEmpty(), h.last().toString()),
                             "mudou ${h.size - 1}× desde a foto: " + h.takeLast(6).joinToString(" → "))
                     }
                     withContext(Dispatchers.Main) { Session.items = Session.items.filter { it.icon != "📈" } + items; Session.itemsReady = Session.items.count { it.hit != null } }
