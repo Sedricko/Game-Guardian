@@ -1476,7 +1476,8 @@ class Engine private constructor(private val app: Context) {
                         "moeda do jogo (ouro, gemas, minério). Um toque por vez, olhando o print de depois. NUNCA toque em preço em dinheiro " +
                         "real (R$, US$, €), assinatura ou anúncio. Termine cada vez com uma linha: o que você aprendeu do jogo (o que cada " +
                         "número é, o que o faz mudar e o que a loja vende por quanto). Use a ferramenta anotar para cada coisa nova que aprender " +
-                        "(o que cada botão faz, como ganhar cada recurso, o que vale a pena comprar): as próximas rodadas começam sabendo." +
+                        "(o que cada botão faz e ONDE fica cada botão e ícone, ex.: \"LOJA: canto de baixo à esquerda, x 60 y 1050 do print\"; " +
+                        "como ganhar cada recurso; o que vale a pena comprar): as próximas rodadas começam sabendo e vão direto." +
                         (if (known.isBlank()) "" else "\n\nO que você já aprendeu deste jogo em rodadas anteriores (use para jogar melhor e não repetir):\n$known")
                     while (System.currentTimeMillis() < end - 5000) {
                         val a = withTimeoutOrNull(end - System.currentTimeMillis()) { Assistant.ask(chat, { "" }, q, play) { log += it } } ?: break
