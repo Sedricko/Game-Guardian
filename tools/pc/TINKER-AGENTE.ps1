@@ -1138,7 +1138,8 @@ if (-not (Test-Path $tok) -and -not ((Get-Command gh -ErrorAction SilentlyContin
 function Run-Dysmantle {
     $dg = "com.the10tons.dysmantle"
     # o emulador com Play Store (Dysmantle_Play): o DYSMANTLE confere a compra pela Play Store; video pela placa do PC
-    Start-Emulator "*Dysmantle_Play*" "host" "Normal"
+    # sem Vulkan: o do emulador nao mostra a imagem do DYSMANTLE (logcat NEXUS "failed to present a swapchain image"); com OpenGL vai
+    Start-Emulator "*Dysmantle_Play*" "host -feature -Vulkan" "Normal"
     & $adb wait-for-device
     if (-not (Wait-Booted)) { Say "o emulador nao ligou"; return }
     $avd = ((& $adb emu avd name) | Select-Object -First 1)
