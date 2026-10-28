@@ -1517,7 +1517,7 @@ class Engine private constructor(private val app: Context) {
                     val bmp = android.graphics.BitmapFactory.decodeByteArray(png, 0, png.size) ?: return@withContext null
                     val text = com.google.android.gms.tasks.Tasks.await(ocr.process(com.google.mlkit.vision.common.InputImage.fromBitmap(bmp, 0)))
                     val re = Regex(arg, RegexOption.IGNORE_CASE)
-                    text.textBlocks.flatMap { it.lines }.firstOrNull { re.containsMatchIn(it.text) }?.let { it.text to it.boundingBox }
+                    text.textBlocks.flatMap { it.lines }.firstOrNull { re.containsMatchIn(it.text) && !money.containsMatchIn(it.text) }?.let { it.text to it.boundingBox }
                 }
                 val r = box?.second ?: return "ok 0\ncount 0\nnão vi $arg na tela"
                 call { d -> d.send("input tap ${r.centerX()} ${r.centerY()}") }
@@ -1999,6 +1999,19 @@ class Engine private constructor(private val app: Context) {
 
     private val ocr by lazy { com.google.mlkit.vision.text.TextRecognition.getClient(com.google.mlkit.vision.text.latin.TextRecognizerOptions.DEFAULT_OPTIONS) }
 
+    // preço em dinheiro de verdade ("R$ 53,99", "US$ 4.99", "€1,99"; o OCR às vezes lê "R 53,99"): nunca é item nem botão para tocar
+    private val money = Regex("""[$€£¥]|^(R|RS|US|USD|BRL|EUR)\b|\b(R|RS|US)\s?\d+[.,]\d{2}\b""", RegexOption.IGNORE_CASE)
+
+    /** Onde há preço em dinheiro de verdade na tela agora (pixels da tela de verdade). */
+    private suspend fun moneyBoxes(): List<android.graphics.Rect> {
+        val png = screenPng()
+        return withContext(Dispatchers.Default) {
+            val bmp = android.graphics.BitmapFactory.decodeByteArray(png, 0, png.size) ?: return@withContext emptyList()
+            val text = com.google.android.gms.tasks.Tasks.await(ocr.process(com.google.mlkit.vision.common.InputImage.fromBitmap(bmp, 0)))
+            text.textBlocks.flatMap { it.lines }.filter { money.containsMatchIn(it.text.trim()) }.mapNotNull { it.boundingBox }
+        }
+    }
+
     /** Números na tela com o lugar de cada um (em pixels da tela de verdade). */
     private suspend fun screenNumbers(): List<Pair<Long, android.graphics.Rect>> {
         val png = screenPng()
@@ -2018,8 +2031,7 @@ class Engine private constructor(private val app: Context) {
             val bmp = android.graphics.BitmapFactory.decodeByteArray(png, 0, png.size) ?: throw IOException("o print veio vazio")
             val text = com.google.android.gms.tasks.Tasks.await(ocr.process(com.google.mlkit.vision.common.InputImage.fromBitmap(bmp, 0)))
             val pair = Regex("""^(\p{L}[\p{L} ]{1,24}?)\s*[:=]?\s*(\d[\d.,]*)$""")
-            // preço em dinheiro de verdade ("R$ 53,99", lido "R 53,99") não é item do jogo: fica de fora
-            val money = Regex("""[$€£¥]|^(R|RS|US|USD|BRL|EUR)\b""", RegexOption.IGNORE_CASE)
+            // preço em dinheiro de verdade não é item do jogo: fica de fora
             val named = text.textBlocks.flatMap { it.lines }.filterNot { money.containsMatchIn(it.text.trim()) }
                 .mapNotNull { pair.find(it.text.trim())?.destructured?.let { (n, v) -> n.trim() to v.trimEnd('.', ',') } }
                 .distinctBy { learnKey(it.first) }
@@ -3093,6 +3105,9 @@ class Engine private constructor(private val app: Context) {
             "mudar. Depois do toque vem um print novo. NUNCA toque em compras com dinheiro real, preços em R$/US$, assinaturas ou na Play Store.",
             mapOf("x" to "x no último print", "y" to "y no último print", "motivo" to "o que esse toque faz (ex.: botão Melhorar, custa 150 ouro)"), listOf("x", "y", "motivo")) { a ->
             val (x, y) = screenPoint(a.optString("x"), a.optString("y")) ?: return@AiTool "Coordenada fora do último print. Use ver_tela antes e coordenadas dele."
+            // a regra não fica só no texto para a IA: toque perto de um preço em dinheiro de verdade é recusado aqui
+            if (moneyBoxes().any { r -> android.graphics.Rect(r).apply { inset(-60, -60) }.contains(x, y) })
+                return@AiTool "Recusado: aí tem um preço em dinheiro de verdade. Nunca toque em compras com dinheiro real; feche essa tela (voltar)."
             lastAction = System.currentTimeMillis() to a.optString("motivo")  // o 👁 monitor liga esta ação ao que mudou na memória
             aiInput("tap $x $y")
         },

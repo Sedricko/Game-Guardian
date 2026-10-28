@@ -1190,13 +1190,15 @@ function Start-Explore($dg, $secs) {
         $end = (Get-Date).AddSeconds($secs); $n = 0
         while ((Get-Date) -lt $end) {
             $n++
+            # toque aleatorio so com o jogo na frente: a tela de pagamento da Play Store (ou qualquer outra) nunca recebe toque
+            if (-not ((& $adb shell "dumpsys activity activities | grep -i topResumed") -match $dg)) {
+                & $adb shell input keyevent 4; Start-Sleep 1
+                & $adb shell monkey -p $dg -c android.intent.category.LAUNCHER 1 | Out-Null; Start-Sleep 4; continue
+            }
             # da faixa do meio para baixo: o cenario e a barra de acoes (Construir, Coletar...); o topo so mostra os numeros
             & $adb shell input tap (Get-Random -Minimum ([int]($w * 0.08)) -Maximum ([int]($w * 0.92))) (Get-Random -Minimum ([int]($h * 0.18)) -Maximum ([int]($h * 0.95)))
             Start-Sleep -Milliseconds (Get-Random -Minimum 900 -Maximum 2500)
             if ($n % 6 -eq 0) { & $adb shell input keyevent 4; Start-Sleep 1 }  # fecha a janela que abriu
-            if ($n % 5 -eq 0 -and -not ((& $adb shell "dumpsys activity activities | grep -i topResumed") -match $dg)) {
-                & $adb shell monkey -p $dg -c android.intent.category.LAUNCHER 1 | Out-Null; Start-Sleep 4
-            }
         }
     }
 }
