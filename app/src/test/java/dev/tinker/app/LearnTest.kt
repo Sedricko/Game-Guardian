@@ -64,4 +64,18 @@ class LearnTest {
         val k = record(emptyList(), "jogo.a", "gold", "save", ok = true, ms = 0, at = "", tips = "arquivo shared_prefs/x.xml, campo gold")
         assertEquals("i32", pickType(all + k, "jogo.a", "gold").first)
     }
+
+    // o mapa do jogo em português: gold = moeda, life = vida; e as funções com o que fixar
+    @Test fun mapaDoJogoTraduzOsNomes() {
+        assertEquals("moeda (dinheiro do jogo)", fieldMeaning("gold")?.second)
+        assertEquals("moeda (dinheiro do jogo)", fieldMeaning("m_money")?.second)
+        assertEquals("vida", fieldMeaning("life")?.second)
+        assertEquals("vida", fieldMeaning("<Health>k__BackingField")?.second)
+        assertEquals(null, fieldMeaning("transform"))
+        assertEquals("tira vida", methodMeaning("TakeDamage")?.first)
+        assertEquals("true", methodMeaning("CanAfford")?.second)
+        assertEquals("0", methodMeaning("GetPrice")?.second)
+        assertEquals("", methodMeaning("AddGold")?.third)
+        assertEquals(null, methodMeaning("Update"))
+    }
 }

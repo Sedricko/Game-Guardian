@@ -126,6 +126,37 @@ internal val ITEM_ICONS = linkedMapOf(
     "🧪" to listOf("poca", "potion", "municao", "ammo", "item"),
 )
 
+/** Nome de campo do jogo (inglês, como o programador escreveu) → ícone e o que é: gold = moeda, life = vida. */
+private val FIELD_MEANING = listOf(
+    Triple(Regex("gold|coin|money|cash|silver|currency|wallet", RegexOption.IGNORE_CASE), "💰", "moeda (dinheiro do jogo)"),
+    Triple(Regex("gem|diamond|crystal|ruby|premium|crown", RegexOption.IGNORE_CASE), "💎", "moeda premium"),
+    Triple(Regex("health|^hp$|hitpoint|life", RegexOption.IGNORE_CASE), "❤️", "vida"),
+    Triple(Regex("energy|stamina|mana", RegexOption.IGNORE_CASE), "⚡", "energia"),
+    Triple(Regex("^xp$|exp(erience)?$", RegexOption.IGNORE_CASE), "⭐", "experiência"),
+    Triple(Regex("^(level|lvl)$", RegexOption.IGNORE_CASE), "⭐", "nível"),
+    Triple(Regex("ammo|bullet|clip", RegexOption.IGNORE_CASE), "🔫", "munição"),
+    Triple(Regex("wood|stone|iron|scrap|food|metal|resource|material", RegexOption.IGNORE_CASE), "🪵", "recurso"),
+    Triple(Regex("damage|attack|power|strength", RegexOption.IGNORE_CASE), "⚔️", "dano / ataque"),
+    Triple(Regex("speed", RegexOption.IGNORE_CASE), "🏃", "velocidade"),
+    Triple(Regex("score|point", RegexOption.IGNORE_CASE), "⭐", "pontos"),
+    Triple(Regex("key|ticket|token", RegexOption.IGNORE_CASE), "🎟️", "chave / ticket"),
+)
+internal fun fieldMeaning(name: String): Pair<String, String>? =
+    FIELD_MEANING.firstOrNull { it.first.containsMatchIn(name.removePrefix("m_").removePrefix("_").removeSuffix("k__BackingField").trim('<', '>')) }?.let { it.second to it.third }
+
+/** Função do jogo pelo nome → o que ela faz, o valor para fixar ("" = não faz nada) e o texto do botão; null = não interessa. */
+internal fun methodMeaning(name: String): Triple<String, String, String>? = when {
+    Regex("^(Take|Receive|Apply)?(Damage|Hurt|Hit)$|TakeDamage|ApplyDamage|ReceiveDamage", RegexOption.IGNORE_CASE).containsMatchIn(name) -> Triple("tira vida", "", "não tirar vida")
+    Regex("CanAfford|HasEnough|CanBuy|CanPurchase|IsAffordable|CanSpend", RegexOption.IGNORE_CASE).containsMatchIn(name) -> Triple("verifica se pode comprar", "true", "sempre pode comprar")
+    Regex("^Get(Price|Cost)|Price$|Cost$", RegexOption.IGNORE_CASE).containsMatchIn(name) -> Triple("preço / custo", "0", "preço 0")
+    Regex("^(Spend|Consume|Remove|Subtract|Use)(Gold|Coins?|Money|Gems?|Ammo|Energy|Stamina)", RegexOption.IGNORE_CASE).containsMatchIn(name) -> Triple("gasta", "", "não gastar")
+    Regex("^(Die|Kill|OnDeath|Death)$", RegexOption.IGNORE_CASE).containsMatchIn(name) -> Triple("morte", "", "não morrer")
+    Regex("Cooldown|GetWait|GetDuration|BuildTime", RegexOption.IGNORE_CASE).containsMatchIn(name) -> Triple("tempo de espera", "0", "sem espera")
+    Regex("^(Is|Has)(Unlocked|Owned|Purchased|Premium|Vip|Bought)", RegexOption.IGNORE_CASE).containsMatchIn(name) -> Triple("diz se tem / está liberado", "true", "sempre liberado")
+    Regex("^(Add|Gain|Earn|Give)(Gold|Coins?|Money|Gems?|Xp|Exp)", RegexOption.IGNORE_CASE).containsMatchIn(name) -> Triple("ganha / soma", "", "")
+    else -> null
+}  // sem texto de botão (ganha / soma): só informa
+
 internal fun sameNames(k: String): Set<String> = SAME.firstOrNull { k in it } ?: setOf(k)
 
 internal fun pickType(all: Collection<Know>, game: String, label: String): Pair<String?, String> {

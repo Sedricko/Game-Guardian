@@ -1910,6 +1910,41 @@ class Engine private constructor(private val app: Context) {
     }
 
     /**
+     * O mapa do jogo Unity (as classes com nome, como o dump.cs): campos com nome conhecido (gold = moeda, life = vida) nos
+     * objetos vivos, com o endereço, e as funções úteis (TakeDamage = tira vida) com o que fixar. Jogo sem IL2CPP: lista vazia.
+     */
+    private suspend fun scanIl2cpp(): List<GameItem> {
+        val classes = runCatching { call { d -> d.send("il2classes", quiet = true).lines } }.getOrDefault(emptyList())
+            .filter { it.startsWith("class ") }.map { it.split(' ', limit = 5) }.filter { it.size == 5 && LIBS.none { l -> it[1].startsWith(l) } }
+        if (classes.isEmpty()) return emptyList()
+        val out = mutableListOf<GameItem>()
+        val withFields = classes.filter { c -> c[4].split(',').any { fieldMeaning(it) != null } }.take(30)
+        for (c in withFields) call { d ->
+            val objs = runCatching { d.send("il2objs ${c[1]}", quiet = true).lines }.getOrDefault(emptyList())
+                .map { it.removePrefix("obj ") }.filter { it.toLongOrNull(16) != null }.take(50)
+            val first = objs.firstOrNull()?.toLong(16) ?: return@call
+            val cls = listOf(0x10L, 0x8L).firstNotNullOfOrNull { o -> d.il2((first + o).toString(16))?.takeIf { it.start.toLong(16) == first } } ?: return@call
+            cls.fields.forEach { f ->
+                val t = when (f.code) { 0x08, 0x09 -> "i32"; 0x0a, 0x0b -> "i64"; 0x0c -> "f32"; 0x0d -> "f64"; else -> null } ?: return@forEach
+                val (icon, what) = fieldMeaning(f.name) ?: return@forEach
+                val addr = (first + f.offset).toString(16)
+                val v = runCatching { d.send("read $addr $t", quiet = true).status }.getOrDefault("?")
+                out += GameItem("${cls.name}.${f.name}", v, icon, t, objs.size.toLong(), Hit(addr, t, "Il2", v),
+                    "${f.name} = $what · do mapa do jogo" + if (objs.size > 1) " · ${objs.size} objetos (o 1º)" else "")
+            }
+        }
+        // funções: nas classes acima e nas de nome típico (jogador, loja, inventário, carteira, arma)
+        val typical = Regex("Player|Hero|Character|Shop|Store|Inventory|Wallet|Currency|Health|Weapon|Game(Manager|Data)|Economy", RegexOption.IGNORE_CASE)
+        val withMethods = (withFields + classes.filter { typical.containsMatchIn(it[1]) }).distinctBy { it[1] }.take(40)
+        for (c in withMethods) runCatching { il2Methods(c[2]) }.getOrDefault(emptyList()).forEach { m ->
+            val (what, fix, label) = methodMeaning(m.name) ?: return@forEach
+            out += GameItem("${c[1]}.${m.name}()", "", "🔧", "fn", 0, null, "função: $what", m, c[1], fix.takeIf { label.isNotEmpty() }, label)
+        }
+        Diag.add("Mapa do jogo: ${out.count { it.method == null }} campos e ${out.count { it.method != null }} funções com nome conhecido")
+        return out
+    }
+
+    /**
      * 📋 Itens do jogo: sem conhecer o jogo, lê na tela cada "nome: número", escolhe o tipo pelo que o agente sabe (ou Auto),
      * busca uma vez cada um e monta a lista para salvar, editar e congelar. Com 1 resultado fica "provável"; com mais,
      * pede para usar 🎯 Achar sozinho (o valor precisa mudar). Usa a busca atual (os resultados de antes são trocados).
@@ -1920,9 +1955,11 @@ class Engine private constructor(private val app: Context) {
         withContext(Dispatchers.Main) { Session.aiHidePanel = true }
         delay(900)
         val pairs = try { screenLabels() } finally { withContext(Dispatchers.Main) { Session.aiHidePanel = false } }
-        if (pairs.isEmpty()) return "Não vi nenhum \"nome: número\" na tela. Abra a tela do jogo que mostra os recursos (inventário, loja…)."
+        // primeiro o mapa do jogo (Unity): tem nome e tipo de tudo, até do que não aparece na tela
+        val out = runCatching { scanIl2cpp() }.getOrDefault(emptyList()).toMutableList()
+        withContext(Dispatchers.Main) { Session.items = out.toList() }
+        if (pairs.isEmpty() && out.isEmpty()) return "Não vi nenhum \"nome: número\" na tela. Abra a tela do jogo que mostra os recursos (inventário, loja…)."
         val all = knowAll()
-        val out = mutableListOf<GameItem>()
         for ((label, shown) in pairs) {
             val key = learnKey(label)
             val icon = ITEM_ICONS.entries.firstOrNull { (_, words) -> words.any { w -> key.split(' ').any { it.startsWith(w) } } }?.key ?: "🔢"
@@ -1946,8 +1983,9 @@ class Engine private constructor(private val app: Context) {
             withContext(Dispatchers.Main) { Session.items = out.toList() }
         }
         val ready = out.count { it.hit != null }
-        Diag.add("Itens do jogo: ${out.size} na tela, $ready com endereço: " + out.joinToString { "${it.label}=${it.value} (${it.count})" })
-        return "Itens do jogo: ${out.size} na tela, $ready prontos para editar ou congelar."
+        val fns = out.count { it.method != null }
+        Diag.add("Itens do jogo: ${out.size} (${fns} funções), $ready com endereço: " + out.joinToString { "${it.label}=${it.value} (${it.count})" })
+        return "Itens do jogo: $ready prontos para editar ou congelar" + (if (fns > 0) ", $fns funções para fixar" else "") + "."
     }
 
     private suspend fun labeledNumber(label: String): Pair<Long, android.graphics.Rect>? {

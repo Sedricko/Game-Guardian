@@ -149,7 +149,11 @@ data class CodeRow(val addr: String, val where: String, val word: Int?, val text
 data class GameProcess(val pid: Int, val pkg: String, val label: String, val icon: ImageBitmap?)
 // base: na busca perto, o endereço de partida em volta do qual este foi achado
 /** Um item que o "📋 Itens do jogo" achou sozinho na tela: nome, valor, ícone e o endereço (hit) quando sobrou 1. */
-data class GameItem(val label: String, val value: String, val icon: String, val type: String, val count: Long, val hit: Hit?, val status: String)
+data class GameItem(
+    val label: String, val value: String, val icon: String, val type: String, val count: Long, val hit: Hit?, val status: String,
+    // função do mapa do jogo (Unity): o método, a classe e o que fixar ("" = não faz nada, "true", "0"); "o que é" já vai no status
+    val method: Il2Method? = null, val cls: String = "", val fix: String? = null, val fixLabel: String = "",
+)
 
 data class Hit(val addr: String, val type: String, val region: String, val value: String, val base: String = "", val asDword: String = "")
 data class Region(val code: String, val count: Long, val bytes: Long, val enabled: Boolean)
