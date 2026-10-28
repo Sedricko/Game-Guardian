@@ -1271,6 +1271,8 @@ function Run-RealGame($dg) {
         try { $r = & $b; $script:rr += "OK $name`: $r ($([int]((Get-Date) - $t0).TotalSeconds) s)" }
         catch { $script:rr += "FALHA $name`: $($_.Exception.Message) ($([int]((Get-Date) - $t0).TotalSeconds) s)" }
         Say $script:rr[-1]
+        # ao vivo: cada teste vai para a planilha assim que termina (o resumo da rodada vai no fim)
+        Post-Sheet "agente PC: $nome ao vivo" "" $script:rr[-1] $v "$nome (emulador)"
     }
     try {
         Step "jogo $dg" | Out-Null
