@@ -487,8 +487,12 @@ static void cmd_regions(void) {
     puts("ok");
 }
 
+// regiões padrão do jogo ("rangesdefault"): num Unity grande no emulador J/Jh/O somam 15 GB e cada busca levava minutos;
+// os valores do jogo ficam em Ca/Cb/A. "ranges all" volta a este padrão
+static unsigned ranges_default = ~(1u << R_V);
+
 static int set_ranges(const char *list) {
-    if (!strcmp(list, "all")) { ranges = ~(1u << R_V); return 1; }
+    if (!strcmp(list, "all")) { ranges = ranges_default; return 1; }
     unsigned m = 0;
     char buf[128];
     snprintf(buf, sizeof buf, "%s", list);
@@ -2519,7 +2523,7 @@ static void cmd_il2objs(const char *full) {
     memcpy(p->b + 1, name, nl);
     p->first = 1;
     region_all = 1;
-    p->cs.want = ~(1u << R_V);
+    p->cs.want = ranges_default;
     int r = each_region(add_chunks, &p->cs);
     region_all = 0;
     if (r) { puts("err não leu o mapa de memória"); free(p->cs.c); free(p); return; }
@@ -3063,6 +3067,10 @@ int main(void) {
         if (!alive()) { puts("err o jogo fechou"); continue; }
         if (!strcmp(cmd, "regions")) cmd_regions();
         else if (!strcmp(cmd, "ranges")) puts(set_ranges(a1) ? "ok" : "err região inválida");
+        else if (!strcmp(cmd, "rangesdefault")) {
+            if (!strcmp(a1, "all")) { ranges_default = ~(1u << R_V); ranges = ranges_default; puts("ok"); }
+            else if (set_ranges(a1)) { ranges_default = ranges; puts("ok"); } else puts("err região inválida");
+        }
         else if (!strcmp(cmd, "photowin")) { line[strcspn(line, "\r\n")] = 0; cmd_photowin(*a1 ? strstr(line, a1) : NULL); }
         else if (!strcmp(cmd, "search")) cmd_search(a1, a2);
         else if (!strcmp(cmd, "group")) cmd_group(a1, a2, a3);

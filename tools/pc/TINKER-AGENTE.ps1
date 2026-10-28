@@ -1242,13 +1242,15 @@ function Run-RealGame($dg) {
     $have = ((& $adb shell dumpsys package $app) | Select-String "versionName=(\S+)" | Select-Object -First 1).Matches.Groups[1].Value
     if ($have -ne $v) { Install-Tinker $rel }
     Set-NoOverlay
+    Set-PanelLink  # as chaves da IA (painel da planilha): sem elas a IA que joga dizia "coloque uma chave do Groq"
     & $adb shell monkey -p $dg -c android.intent.category.LAUNCHER 1 | Out-Null
     # sem ninguem: espera o jogo carregar e o Tinker le a tela e toca sozinho nos botoes da entrada (INICIAR, CONTINUAR...)
     Say "abrindo o $nome; passo a tela de entrada sozinho"
     Start-Sleep 25
     Step "jogo $dg" | Out-Null
     for ($k = 0; $k -lt 5; $k++) {
-        $n = Step "tocar INICIAR|CONTINUAR|JOGAR|TOQUE PARA|PULAR|FECHAR|^OK$|TAP TO|START|PLAY"
+        # so botoes de entrada ("TOQUE PARA MOSTRAR" e a dica do tutorial: quem segue o tutorial e a IA que joga)
+        try { $n = Step "tocar INICIAR|CONTINUAR|JOGAR|TOQUE PARA (COME|CONTIN|JOGAR)|PULAR|FECHAR|^OK$|TAP TO|START|PLAY" 120 } catch { Say "  $($_.Exception.Message)"; break }
         if (-not $n) { break }
         Say "  $((($script:last -split "`n")[0]) -replace '^ok ', '')"
         Start-Sleep 8

@@ -441,6 +441,8 @@ class Engine private constructor(private val app: Context) {
         Session.aiUndo.clear()
         AiConversations.clear()
         Session.engine = detectEngine(p.pkg)?.also { Diag.add("Motor do jogo: $it") }
+        // Unity: os valores ficam em Ca/Cb/A; o resto (Java, outros) passava de 15 GB no Orecraft e cada busca levava minutos
+        d.send(if (Session.engine?.startsWith("Unity") == true) "rangesdefault Ca,Cb,A" else "rangesdefault all", quiet = true)
         // a restauração roda em segundo plano (a cada 3 s): aqui ela segurava a escolha do jogo por até 45 s
         Session.restoreInfo = if (Session.saved.any(::stale)) "Procurando os salvos da última vez…" else ""
         "Pronto. Digite um valor que você vê no jogo e toque em Nova busca."
@@ -1471,6 +1473,9 @@ class Engine private constructor(private val app: Context) {
                 try {
                     val chat = AiChat()
                     var q = "Você está jogando ${label()} (offline, single-player, modo avião) para o Tinker observar a memória enquanto os números mudam. " +
+                        "Se o jogo estiver num TUTORIAL (seta ou mão apontando, balão com objetivo como \"Construa o Grande Salão\", " +
+                        "\"toque para mostrar\"), siga-o até o fim primeiro: toque no balão para ler o objetivo e depois onde a seta aponta; " +
+                        "sem o tutorial completo o jogo não libera o resto. " +
                         "Jogue de verdade: use ver_tela, entenda o jogo e faça os recursos da tela mudarem (coletar, minerar, construir, melhorar, " +
                         "trocar com o próprio jogo). Abra também a LOJA e os outros menus para ver itens, preços e quantidades; pode comprar com " +
                         "moeda do jogo (ouro, gemas, minério). Um toque por vez, olhando o print de depois. NUNCA toque em preço em dinheiro " +
@@ -2158,7 +2163,7 @@ class Engine private constructor(private val app: Context) {
             val region = HashMap<String, String>()
             val t0 = System.currentTimeMillis()
             try {
-                val focus = focusRegions().ifEmpty { setOf("Jh", "J", "Ca", "Cb", "A") }
+                val focus = focusRegions().ifEmpty { if (Session.engine?.startsWith("Unity") == true) setOf("Ca", "Cb", "A") else setOf("Jh", "J", "Ca", "Cb", "A") }
                 itemLog("👁 Regiões: ${focus.joinToString()}" + if (focusRegions().isEmpty()) " (ainda não sei onde este jogo guarda)" else " (onde este jogo guarda o que já achei)")
                 suspend fun shoot(wins: List<Pair<Long, Long>>): String {
                     val mb = call { d ->
