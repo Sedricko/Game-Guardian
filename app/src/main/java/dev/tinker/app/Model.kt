@@ -3,9 +3,9 @@ package dev.tinker.app
 import androidx.compose.ui.graphics.ImageBitmap
 
 const val TEST_GAME = "dev.tinker.testgame"  // Jogo de Teste (módulo testgame)
-// onde o agente do PC pode fazer missões: o Jogo de Teste e jogos offline que a pessoa liberou (DYSMANTLE, single-player sem
-// servidor). Nunca um jogo online: lista fechada aqui no app, não vem da planilha
-val MISSION_GAMES = mapOf(TEST_GAME to "Jogo de Teste", "com.the10tons.dysmantle" to "DYSMANTLE")
+// onde o agente do PC pode fazer missões: o Jogo de Teste e jogos offline que a pessoa liberou (single-player, sem loja de
+// dinheiro real; o agente liga o modo avião no teste). Nunca um jogo online: lista fechada aqui no app, não vem da planilha
+val MISSION_GAMES = mapOf(TEST_GAME to "Jogo de Teste", "com.the10tons.dysmantle" to "DYSMANTLE", "com.evrika.miner.camp" to "Orecraft")
 val TYPES = listOf("auto" to "Auto", "i32" to "Dword", "f32" to "Float", "i64" to "Qword", "f64" to "Double", "i16" to "Word", "i8" to "Byte")
 // xi32/xf32: valor cifrado com a chave do lado (Anti-Cheat Toolkit do Unity); o daemon decifra ao ler e cifra ao escrever
 // i32x2/i64x2: inteiro guardado em dobro (Dart/Flutter e JavaScript: 100 fica 200)

@@ -1,8 +1,10 @@
 ﻿# Agente do Tinker no PC: liga o emulador, se atualiza sozinho, instala cada versao nova do Tinker no emulador,
 # roda o autoteste (so o jogo de teste, nenhum jogo de verdade) e manda o resultado para a planilha (aba Relatorios).
 # Fala so com o emulador (emulator-5554): o celular no cabo nao e tocado. Deixe esta janela aberta; Ctrl+C para sair.
-# -Dysmantle (TINKER-DYSMANTLE.bat): uma rodada no DYSMANTLE de verdade no emulador (offline; liberado pela pessoa)
-param([switch]$Dysmantle)
+# -Jogo <pacote> (TINKER-DYSMANTLE.bat, TINKER-ORECRAFT.bat): uma rodada num jogo de verdade no emulador, so nos offline
+# que a pessoa liberou (lista fechada no app: MISSION_GAMES); -Dysmantle e o mesmo que -Jogo com.the10tons.dysmantle
+param([switch]$Dysmantle, [string]$Jogo)
+if ($Dysmantle) { $Jogo = "com.the10tons.dysmantle" }
 $ErrorActionPreference = "Continue"
 $ProgressPreference = "SilentlyContinue"
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
@@ -56,7 +58,7 @@ function Update-Self {
             if ($errs) { Say "versao nova do agente com erro (linha $($errs[0].Extent.StartLineNumber): $($errs[0].Message)); continuo com a atual"; return }
             [IO.File]::WriteAllText($self, ((Norm $new) -replace "`n", "`r`n"), (New-Object Text.UTF8Encoding $true))
             Say "agente atualizado, reiniciando..."
-            if ($Dysmantle) { & powershell -NoProfile -ExecutionPolicy Bypass -File $self -Dysmantle } else { & powershell -NoProfile -ExecutionPolicy Bypass -File $self }
+            if ($Jogo) { & powershell -NoProfile -ExecutionPolicy Bypass -File $self -Jogo $Jogo } else { & powershell -NoProfile -ExecutionPolicy Bypass -File $self }
             exit
         }
     } catch { Say "nao consegui ver se o agente tem versao nova: $($_.Exception.Message)" }
@@ -1132,25 +1134,32 @@ if (-not (Test-Path $tok) -and -not ((Get-Command gh -ErrorAction SilentlyContin
     Write-Host "Token do GitHub (so leitura, github_pat_...). So precisa se o repositorio for privado; Enter vazio = sem token." -ForegroundColor Yellow
     Set-Content $tok (Read-Host "Token")
 }
-# DYSMANTLE de verdade (offline, single-player): o que nao depende de jogar sozinho. A pessoa deixa o inventario aberto;
+# jogos de verdade liberados (offline, single-player, sem loja de dinheiro real): nome e video do emulador de cada um
+$realGames = @{
+    # o DYSMANTLE (motor NEXUS) so desenha com Vulkan, e o Vulkan da placa no emulador nao mostra a imagem
+    # ("failed to present a swapchain image"): Vulkan por software e tela menor
+    "com.the10tons.dysmantle" = @{ nome = "DYSMANTLE"; gpu = "swiftshader_indirect"; small = $true }
+    "com.evrika.miner.camp" = @{ nome = "Orecraft"; gpu = "host"; small = $false }
+}
+# jogo de verdade (offline, single-player): o que nao depende de jogar sozinho. A pessoa deixa os numeros na tela;
 # o Tinker monta a lista de itens, poe 999 em dois deles (conferido lendo a tela de novo) e volta o valor de antes; depois
 # a pessoa joga 3 min e o 👁 monitor procura o que mudou. O app so aceita os jogos da lista fechada dele (MISSION_GAMES)
-function Run-Dysmantle {
-    $dg = "com.the10tons.dysmantle"
+function Run-RealGame($dg) {
+    $g = $realGames[$dg]
+    if (-not $g) { Say "jogo $dg nao liberado (so os offline da lista)"; return }
+    $nome = $g.nome
     # o emulador com Play Store (Dysmantle_Play): o DYSMANTLE confere a compra pela Play Store; video pela placa do PC
     # o Dysmantle_Play ja ligado (pode estar em emulator-5556 se o outro ocupou a 5554): usa esse
     foreach ($d in ((& $adb devices) | Select-String "^(emulator-\d+)\s+device" | ForEach-Object { $_.Matches.Groups[1].Value })) {
         if (((& $adb -s $d emu avd name) | Select-Object -First 1) -like "*Dysmantle_Play*") { $env:ANDROID_SERIAL = $d }
     }
-    # o DYSMANTLE (motor NEXUS) so desenha com Vulkan, e o Vulkan da placa no emulador nao mostra a imagem
-    # ("failed to present a swapchain image"): Vulkan por software
-    if ($env:ANDROID_SERIAL -eq "emulator-5554") { Start-Emulator "*Dysmantle_Play*" "swiftshader_indirect" "Normal" }
+    if ($env:ANDROID_SERIAL -eq "emulator-5554") { Start-Emulator "*Dysmantle_Play*" $g.gpu "Normal" }
     & $adb wait-for-device
-    & $adb shell wm size 720x1560; & $adb shell wm density 320  # menos pixels: o video por software aguenta
+    if ($g.small) { & $adb shell wm size 720x1560; & $adb shell wm density 320 } else { & $adb shell wm size reset; & $adb shell wm density reset }
     if (-not (Wait-Booted)) { Say "o emulador nao ligou"; return }
     $avd = ((& $adb emu avd name) | Select-Object -First 1)
-    if ($avd -notlike "*Dysmantle_Play*") { Say "o emulador ligado e o $avd: feche ele e rode de novo (o DYSMANTLE fica no Dysmantle_Play)"; return }
-    if (-not ((& $adb shell pm list packages $dg) -match $dg)) { Say "o DYSMANTLE nao esta instalado no Dysmantle_Play: instale pela Play Store dele e rode de novo"; return }
+    if ($avd -notlike "*Dysmantle_Play*") { Say "o emulador ligado e o $avd: feche ele e rode de novo (os jogos de verdade ficam no Dysmantle_Play)"; return }
+    if (-not ((& $adb shell pm list packages $dg) -match $dg)) { Say "o $nome nao esta instalado no Dysmantle_Play: instale pela Play Store dele e rode de novo"; return }
     $script:su = $true  # imagem com Play Store: o adbd nao vira root, o root e o do Magisk
     Write-Host "Se aparecer no emulador um pedido de Superusuario para 'Shell', toque em PERMITIR (Grant)." -ForegroundColor Yellow
     if (-not ((& $adb shell "su -c id" 2>&1) -match "uid=0")) {
@@ -1159,7 +1168,7 @@ function Run-Dysmantle {
             Say "o Magisk esta la mas o su nao deu root: toque em Permitir no pedido de Superusuario e rode de novo"; return
         }
         Install-Magisk "system-images\android-36\google_apis_playstore\x86_64\ramdisk.img"
-        Say "o emulador reinicia com o root: rode o TINKER-DYSMANTLE de novo quando ele ligar"; return
+        Say "o emulador reinicia com o root: rode o .bat de novo quando ele ligar"; return
     }
     $rel = Get-Release
     $v = $rel.tag_name.TrimStart("v")
@@ -1167,8 +1176,11 @@ function Run-Dysmantle {
     if ($have -ne $v) { Install-Tinker $rel }
     Set-NoOverlay
     & $adb shell monkey -p $dg -c android.intent.category.LAUNCHER 1 | Out-Null
-    Write-Host "No emulador: carregue o seu jogo do DYSMANTLE e abra o INVENTARIO (com os numeros na tela). Depois aperte Enter aqui." -ForegroundColor Yellow
+    Write-Host "No emulador: carregue o seu jogo do $nome e deixe os NUMEROS na tela (inventario, recursos). Depois aperte Enter aqui." -ForegroundColor Yellow
     Read-Host | Out-Null
+    # offline de verdade durante o teste: nada do que o Tinker escreve chega a um servidor (desliga no fim)
+    & $adb shell cmd connectivity airplane-mode enable
+    Say "modo aviao ligado no emulador durante o teste"
     $res = @()
     function Items { Step "itens" | Out-Null; @(($script:last -split "`n") | Where-Object { $_ -like "item *" } | ForEach-Object { $f = $_ -split ' '; [pscustomobject]@{ nome = $f[1]; v = $f[2]; addr = $f[4] } }) }
     try {
@@ -1191,7 +1203,7 @@ function Run-Dysmantle {
             } catch { $res += "FALHA pedido $($i.nome) = 999 (era $($i.v)): $($_.Exception.Message)" }
             Say $res[-1]
         }
-        Write-Host "Agora JOGUE 3 minutos no emulador: pegue e gaste coisas (madeira, folhas...), abra o inventario de vez em quando. Enter para comecar." -ForegroundColor Yellow
+        Write-Host "Agora JOGUE 3 minutos no emulador: pegue e gaste coisas, deixe os numeros na tela de vez em quando. Enter para comecar." -ForegroundColor Yellow
         Read-Host | Out-Null
         Step "monitorar 180" | Out-Null
         $mon = @(($script:last -split "`n") | Where-Object { $_ -like "mudou *" })
@@ -1202,12 +1214,13 @@ function Run-Dysmantle {
         $res += "monitor: $($mon.Count) mudaram por evento; $($bate.Count) com o valor de um item da tela: " + ($bate -join ", ") + " | $logm"
         Say $res[-1]
     } catch { $res += "parou: $($_.Exception.Message)"; Say $res[-1] }
+    & $adb shell cmd connectivity airplane-mode disable
     $fails = ($res | Where-Object { $_ -like "FALHA*" -or $_ -like "parou*" }) -join "`n"
-    Post-Sheet "agente PC: DYSMANTLE de verdade" $fails ($res -join "`n") $v "DYSMANTLE (emulador)"
+    Post-Sheet "agente PC: $nome de verdade" $fails ($res -join "`n") $v "$nome (emulador)"
     Say "pronto. Pode fechar esta janela."
 }
 
-if ($Dysmantle) { Update-Self; Run-Dysmantle; exit }
+if ($Jogo) { Update-Self; Run-RealGame $Jogo; exit }
 Say "agente ligado. Deixe esta janela aberta; Ctrl+C para sair."
 while ($true) {
     Update-Self
