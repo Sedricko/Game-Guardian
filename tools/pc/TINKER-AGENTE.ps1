@@ -1,6 +1,8 @@
 ﻿# Agente do Tinker no PC: liga o emulador, se atualiza sozinho, instala cada versao nova do Tinker no emulador,
 # roda o autoteste (so o jogo de teste, nenhum jogo de verdade) e manda o resultado para a planilha (aba Relatorios).
 # Fala so com o emulador (emulator-5554): o celular no cabo nao e tocado. Deixe esta janela aberta; Ctrl+C para sair.
+# -Dysmantle (TINKER-DYSMANTLE.bat): uma rodada no DYSMANTLE de verdade no emulador (offline; liberado pela pessoa)
+param([switch]$Dysmantle)
 $ErrorActionPreference = "Continue"
 $ProgressPreference = "SilentlyContinue"
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
@@ -52,7 +54,7 @@ function Update-Self {
             if ($errs) { Say "versao nova do agente com erro (linha $($errs[0].Extent.StartLineNumber): $($errs[0].Message)); continuo com a atual"; return }
             [IO.File]::WriteAllText($self, ((Norm $new) -replace "`n", "`r`n"), (New-Object Text.UTF8Encoding $true))
             Say "agente atualizado, reiniciando..."
-            & powershell -NoProfile -ExecutionPolicy Bypass -File $self
+            if ($Dysmantle) { & powershell -NoProfile -ExecutionPolicy Bypass -File $self -Dysmantle } else { & powershell -NoProfile -ExecutionPolicy Bypass -File $self }
             exit
         }
     } catch { Say "nao consegui ver se o agente tem versao nova: $($_.Exception.Message)" }
@@ -96,11 +98,11 @@ function Install-Magisk {
     Start-Sleep 15
 }
 
-function Post-Sheet($motivo, $problemas, $texto, $versao) {
+function Post-Sheet($motivo, $problemas, $texto, $versao, $jogo = "jogo de teste (emulador)") {
     $link = (Get-Content $cfg -ErrorAction SilentlyContinue | Select-Object -First 1)
     if (-not $link) { Say "sem link da planilha: resultado so no log ($log)"; return }
     $url = $link.Trim() + $(if ($link.Contains("?")) { "&" } else { "?" }) + "relatorio=1"
-    $body = @{ jogo = "jogo de teste (emulador)"; versao = $versao; aparelho = "Emulador PC API 31"; motivo = $motivo
+    $body = @{ jogo = $jogo; versao = $versao; aparelho = "Emulador PC API 31"; motivo = $motivo
                problemas = $problemas; texto = $texto.Substring(0, [Math]::Min($texto.Length, 400000)) } | ConvertTo-Json -Compress
     try {
         Invoke-WebRequest $url -Method Post -Body ([Text.Encoding]::UTF8.GetBytes($body)) -ContentType "application/json; charset=utf-8" -UseBasicParsing | Out-Null
@@ -1119,6 +1121,59 @@ if (-not (Test-Path $tok) -and -not ((Get-Command gh -ErrorAction SilentlyContin
     Write-Host "Token do GitHub (so leitura, github_pat_...). So precisa se o repositorio for privado; Enter vazio = sem token." -ForegroundColor Yellow
     Set-Content $tok (Read-Host "Token")
 }
+# DYSMANTLE de verdade (offline, single-player): o que nao depende de jogar sozinho. A pessoa deixa o inventario aberto;
+# o Tinker monta a lista de itens, poe 999 em dois deles (conferido lendo a tela de novo) e volta o valor de antes; depois
+# a pessoa joga 3 min e o 👁 monitor procura o que mudou. O app so aceita os jogos da lista fechada dele (MISSION_GAMES)
+function Run-Dysmantle {
+    $dg = "com.the10tons.dysmantle"
+    Start-Emulator; & $adb root | Out-Null; Start-Sleep 3; & $adb wait-for-device
+    if (-not (Wait-Booted)) { Say "o emulador nao ligou"; return }
+    if (-not ((& $adb shell pm list packages $dg) -match $dg)) { Say "o DYSMANTLE nao esta instalado no emulador: instale pela Play Store do emulador e rode de novo"; return }
+    if (-not ((& $adb shell pm list packages $app) -match $app)) { Say "o Tinker nao esta no emulador: rode o TINKER-AGENTE uma vez antes"; return }
+    $v = ((& $adb shell dumpsys package $app) | Select-String "versionName=(\S+)" | Select-Object -First 1).Matches.Groups[1].Value
+    Set-NoOverlay
+    & $adb shell monkey -p $dg -c android.intent.category.LAUNCHER 1 | Out-Null
+    Write-Host "No emulador: carregue o seu jogo do DYSMANTLE e abra o INVENTARIO (com os numeros na tela). Depois aperte Enter aqui." -ForegroundColor Yellow
+    Read-Host | Out-Null
+    $res = @()
+    function Items { Step "itens" | Out-Null; @(($script:last -split "`n") | Where-Object { $_ -like "item *" } | ForEach-Object { $f = $_ -split ' '; [pscustomobject]@{ nome = $f[1]; v = $f[2]; addr = $f[4] } }) }
+    try {
+        Step "jogo $dg" | Out-Null
+        $it = Items
+        $res += "itens: $($it.Count) na lista: " + (($it | Select-Object -First 30 | ForEach-Object { "$($_.nome)=$($_.v)" }) -join ", ")
+        Say $res[-1]
+        # pedido "Item N = 999" em dois itens: o Tinker prova sozinho (escreve e le a tela); o agente confere de novo lendo a
+        # lista da tela e depois volta o valor de antes (o save da pessoa fica como estava)
+        foreach ($i in ($it | Where-Object { [double]$_.v -ge 2 -and [double]$_.v -lt 999 } | Select-Object -First 2)) {
+            $t0 = Get-Date
+            try {
+                Step "sozinho $($i.nome)=999 auto" | Out-Null
+                $msg = ($script:last -split "`n")[0]
+                $tela = (Items | Where-Object nome -eq $i.nome | Select-Object -First 1).v
+                Step "escrever $($i.v)" | Out-Null
+                $volta = (Items | Where-Object nome -eq $i.nome | Select-Object -First 1).v
+                $ok = if ($tela -eq "999") { "OK" } else { "FALHA" }
+                $res += "$ok pedido $($i.nome) = 999 (era $($i.v)): a tela mostrou $tela; voltei para $($i.v), a tela mostra $volta ($msg) ($([int]((Get-Date) - $t0).TotalSeconds) s)"
+            } catch { $res += "FALHA pedido $($i.nome) = 999 (era $($i.v)): $($_.Exception.Message)" }
+            Say $res[-1]
+        }
+        Write-Host "Agora JOGUE 3 minutos no emulador: pegue e gaste coisas (madeira, folhas...), abra o inventario de vez em quando. Enter para comecar." -ForegroundColor Yellow
+        Read-Host | Out-Null
+        Step "monitorar 180" | Out-Null
+        $mon = @(($script:last -split "`n") | Where-Object { $_ -like "mudou *" })
+        $logm = (($script:last -split "`n") | Where-Object { $_ -like "log *" }) -join " / "
+        # os que mudaram e tem o mesmo valor de um item que a tela mostra agora: candidatos de verdade
+        $agora = Items
+        $bate = @($mon | Where-Object { $m = ($_ -split ' ')[2]; $agora | Where-Object v -eq $m })
+        $res += "monitor: $($mon.Count) mudaram por evento; $($bate.Count) com o valor de um item da tela: " + ($bate -join ", ") + " | $logm"
+        Say $res[-1]
+    } catch { $res += "parou: $($_.Exception.Message)"; Say $res[-1] }
+    $fails = ($res | Where-Object { $_ -like "FALHA*" -or $_ -like "parou*" }) -join "`n"
+    Post-Sheet "agente PC: DYSMANTLE de verdade" $fails ($res -join "`n") $v "DYSMANTLE (emulador)"
+    Say "pronto. Pode fechar esta janela."
+}
+
+if ($Dysmantle) { Update-Self; Run-Dysmantle; exit }
 Say "agente ligado. Deixe esta janela aberta; Ctrl+C para sair."
 while ($true) {
     Update-Self

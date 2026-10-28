@@ -1375,7 +1375,8 @@ class Engine private constructor(private val app: Context) {
 
     /**
      * Missões do agente do PC: o mesmo caminho da tela (escolher, buscar, refinar, desconhecido, comparar, escrever,
-     * congelar), um passo por vez, resultado em files/missao.txt. Só no Jogo de Teste, nunca num jogo de verdade.
+     * congelar), um passo por vez, resultado em files/missao.txt. Só nos jogos de MISSION_GAMES (o Jogo de Teste e os
+     * offline liberados), nunca em outro.
      */
     fun missionStep(cmd: String) {
         scope.launch(Dispatchers.IO) {
@@ -1384,13 +1385,23 @@ class Engine private constructor(private val app: Context) {
         }
     }
 
+    private var missionGame = TEST_GAME
+
     private suspend fun mission(cmd: String): String {
         val w = cmd.split(' ').filter { it.isNotEmpty() }
         val arg = w.drop(1).joinToString(" ")
+        val label = MISSION_GAMES.getValue(missionGame)
         suspend fun pickTestGame(): String {
-            val pid = call { d -> d.send("ps", quiet = true).lines.firstNotNullOfOrNull { l -> l.substringBefore(' ').toIntOrNull()?.takeIf { l.substringAfter(' ') == TEST_GAME } } }
-                ?: error("o Jogo de Teste não está aberto")
-            return attach(GameProcess(pid, TEST_GAME, "Jogo de Teste", null))
+            val pid = call { d -> d.send("ps", quiet = true).lines.firstNotNullOfOrNull { l -> l.substringBefore(' ').toIntOrNull()?.takeIf { l.substringAfter(' ') == missionGame } } }
+                ?: error("o $label não está aberto")
+            return attach(GameProcess(pid, missionGame, label, null))
+        }
+        suspend fun front() = withContext(Dispatchers.Main) { app.packageManager.getLaunchIntentForPackage(missionGame)?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)?.let(app::startActivity) }
+        // "jogo com.the10tons.dysmantle": as próximas missões são nesse jogo (só os da lista fechada MISSION_GAMES)
+        if (w.firstOrNull() == "jogo") {
+            require(arg in MISSION_GAMES) { "missão só no Jogo de Teste e nos jogos offline liberados" }
+            missionGame = arg
+            return "ok " + pickTestGame()
         }
         if (w.firstOrNull() == "escolher") return "ok " + pickTestGame()
         // só troca a aba na tela (para o agente tirar print de cada uma)
@@ -1401,9 +1412,9 @@ class Engine private constructor(private val app: Context) {
         if (w.firstOrNull() == "aprendido") return knowledge().filter { it.game == savedPkg && it.name == learnKey(arg) }.let { l ->
             "ok ${pickType(knowAll(), savedPkg.orEmpty(), arg).first ?: "auto"} ${l.sumOf { it.wins }} ${l.sumOf { it.fails }}\ncount ${l.sumOf { it.wins }}" }
         if (w.firstOrNull() == "aba") return "ok ${TABS.getOrNull(w[1].toInt())}\ncount 0".also { withContext(Dispatchers.Main) { Session.tab = w[1].toInt().coerceIn(0, TABS.lastIndex) } }
-        // o Tinker reabriu no meio da rodada (o Android fechou ele): volta a seguir o Jogo de Teste, nunca outro jogo
+        // o Tinker reabriu no meio da rodada (o Android fechou ele): volta a seguir o jogo da missão, nunca outro jogo
         if (Session.process == null) runCatching { pickTestGame() }
-        require(Session.process?.pkg == TEST_GAME) { "missão só no Jogo de Teste" }
+        require(Session.process?.pkg == missionGame) { "missão só no Jogo de Teste e nos jogos offline liberados" }
         val msg = when (w.firstOrNull()) {
             "buscar" -> search(if (w[1] == "auto") emptySet() else setOf(w[1]), w.drop(2).joinToString(" ")).also { soloRan = false }
             "refinar" -> refine(arg).also { soloRan = false }
@@ -1415,7 +1426,7 @@ class Engine private constructor(private val app: Context) {
             // "itens": a lista que o 📋 Itens do jogo monta sozinho (a missão confere cada um escrevendo e lendo a tela)
             // o jogo na frente antes de ler a tela (sem isso o print era do próprio Tinker e a lista vinha vazia)
             "itens" -> return run {
-                withContext(Dispatchers.Main) { app.packageManager.getLaunchIntentForPackage(TEST_GAME)?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)?.let(app::startActivity) }
+                front()
                 delay(2500)
                 scanItems()
             }.let { msg -> "ok $msg\ncount ${Session.items.count { it.hit != null }}\n" +
@@ -1425,6 +1436,7 @@ class Engine private constructor(private val app: Context) {
                 ?: "err nenhum endereço provado (rode o sozinho antes)"
             // "monitorar 60": o 👁 monitor por N segundos (a missão toca no jogo enquanto isso) e devolve o que mudou por evento
             "monitorar" -> return run {
+                front()  // o am start do agente pôs o Tinker na frente: a pessoa joga no jogo
                 monitorStart()
                 delay((arg.toLongOrNull() ?: 60) * 1000)
                 monitorStop()
@@ -1445,13 +1457,13 @@ class Engine private constructor(private val app: Context) {
             // 🎯 Achar sozinho no Jogo de Teste: põe o jogo na frente, lê a tela e refina sozinho (até 2 minutos)
             "sozinho" -> {
                 soloRan = true
-                withContext(Dispatchers.Main) { app.packageManager.getLaunchIntentForPackage(TEST_GAME)?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)?.let(app::startActivity) }
+                front()
                 // "auto" = nenhum tipo marcado (como o Auto da tela): o agente offline escolhe o tipo
                 // no Jogo de Teste o teste de 2 s vale sempre: é o que separa o valor verdadeiro das cópias do número da tela
                 val canTest = Session.aiCanTest
                 // "sozinho Ouro auto leitura": sem escrever nada (como quem não liga o teste); a missão confere o palpite pela vizinhança
                 withContext(Dispatchers.Main) { Session.aiCanTest = w.getOrNull(3) != "leitura" }
-                autoFindStart(w[1], w.getOrElse(2) { "i32" }.let { if (it == "auto") emptySet() else setOf(it) }, waitMs = 2500)
+                autoFindStart(w[1].replace('_', ' '), w.getOrElse(2) { "i32" }.let { if (it == "auto") emptySet() else setOf(it) }, waitMs = 2500)
                 val end = System.currentTimeMillis() + 300_000  // disfarçado e calculado levam mais: testa ×1, ×10, cifrado, pela mudança… até um segurar
                 while (autoJob?.isActive == true && System.currentTimeMillis() < end) delay(500)
                 delay(300)  // a última frase chega pela thread da tela
