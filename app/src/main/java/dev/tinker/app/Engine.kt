@@ -1423,6 +1423,16 @@ class Engine private constructor(private val app: Context) {
             // "irmaos": achou um (o 🎯 provou), acha os outros pelo formato; a missão confere escrevendo e lendo a tela
             "irmaos" -> return Session.autoFindWinner?.let { w -> findSiblings(w, "o achado").let { l -> "ok ${l.size}\ncount ${l.size}\n" + l.joinToString("\n") { "irmao ${it.hit!!.addr} ${it.value}" } } }
                 ?: "err nenhum endereço provado (rode o sozinho antes)"
+            // "monitorar 60": o 👁 monitor por N segundos (a missão toca no jogo enquanto isso) e devolve o que mudou por evento
+            "monitorar" -> return run {
+                monitorStart()
+                delay((arg.toLongOrNull() ?: 60) * 1000)
+                monitorStop()
+                delay(1500)
+                val l = Session.items.filter { it.icon == "📈" }
+                "ok ${l.size}\ncount ${l.size}\n" + l.joinToString("\n") { "mudou ${it.hit!!.addr} ${it.value} ${it.hit.region.ifEmpty { "-" }}" } +
+                    "\n" + Session.itemsLog.filter { "Afunilando" in it || "Rodada" in it }.takeLast(4).joinToString("\n") { "log $it" }
+            }
             "ler" -> call { d -> d.send("read ${w[1]} ${w[2]}", quiet = true).status }
             // funções da lib do jogo pelo nome, quem uma função chama, fixar o retorno e desfazer (patch)
             "funcoes" -> return nativeFunctions(arg).let { (n, l) -> "ok $n\n" + l.joinToString("\n") { "fn ${it.addr} ${it.name}" } }
@@ -2057,15 +2067,29 @@ class Engine private constructor(private val app: Context) {
                 // mais rápido; sem nada aprendido ainda, as regiões de valores
                 val focus = focusRegions().ifEmpty { setOf("Jh", "J", "Ca", "Cb", "A") }
                 itemLog("👁 Regiões: ${focus.joinToString()}" + if (focusRegions().isEmpty()) " (ainda não sei onde este jogo guarda)" else " (onde este jogo guarda o que já achei)")
-                val mb = call { d ->
-                    d.send("ranges ${focus.joinToString(",")}", quiet = true)
-                    try { d.send("photo").status } finally { d.send("ranges all", quiet = true) }
+                // foto (de novo) só nas faixas dadas: o funil — regiões → blocos de 1 MB → páginas → o objeto
+                suspend fun shoot(wins: List<Pair<Long, Long>>): String {
+                    val mb = call { d ->
+                        d.send("photowin " + (wins.joinToString(",") { "${it.first.toString(16)}-${it.second.toString(16)}" }.ifEmpty { "off" }), quiet = true)
+                        d.send("ranges ${focus.joinToString(",")}", quiet = true)
+                        try { d.send("photo").status } finally { d.send("ranges all", quiet = true) }
+                    }
+                    delay(4000)
+                    val noise = call { d -> d.send("photonoise").status }
+                    return "$mb MB, $noise mudam sozinhos (ficam fora)"
                 }
-                itemLog("👁 Foto: $mb MB. Parado 4 s para tirar o que muda sozinho…")
-                delay(4000)
-                val noise = call { d -> d.send("photonoise").status }
-                itemLog("👁 $noise valores mudam sozinhos (ficam fora). Pode jogar: comparo a cada 8 s.")
+                // faixas em volta dos que mudaram por evento, juntando as que se encostam (até 64)
+                fun windows(addrs: Collection<String>, half: Long): List<Pair<Long, Long>> =
+                    addrs.mapNotNull { it.toLongOrNull(16) }.sorted().map { (it - half).coerceAtLeast(0) to it + half }
+                        .fold(mutableListOf<Pair<Long, Long>>()) { acc, w -> if (acc.isNotEmpty() && w.first <= acc.last().second) acc[acc.lastIndex] = acc.last().first to maxOf(acc.last().second, w.second) else acc += w; acc }
+                        .take(64)
+                val key = "funil-" + (savedPkg ?: "")
+                // a última área fina deste jogo: começa já nela (a próxima vez é mais rápida)
+                var wins = prefs.getString(key, "").orEmpty().split(',').mapNotNull { w -> w.split('-').takeIf { it.size == 2 }?.let { (a, b) -> (a.toLongOrNull(16) ?: return@let null) to (b.toLongOrNull(16) ?: return@let null) } }
+                itemLog("👁 Foto: " + shoot(wins) + if (wins.isNotEmpty()) " · comecei na área que achei da última vez (${wins.size} faixas)" else "")
+                itemLog("👁 Pode jogar: comparo a cada 8 s e vou afunilando.")
                 var round = 0
+                var level = if (wins.isEmpty()) 0 else 2  // 0 regiões, 1 blocos de 1 MB, 2 páginas, 3 objeto
                 while (true) {
                     delay(8000)
                     round++
@@ -2090,6 +2114,15 @@ class Engine private constructor(private val app: Context) {
                     }
                     withContext(Dispatchers.Main) { Session.items = Session.items.filter { it.icon != "📈" } + items; Session.itemsReady = Session.items.count { it.hit != null } }
                     itemLog("👁 Rodada $round: ${got.size} mudaram desde a foto · $structural mudam sempre (estrutura do jogo) · ${items.size} mudaram por evento, em degraus (prováveis recursos)")
+                    // afunila a cada 3 rodadas com eventos: só olha em volta do que mudou por evento (e guarda para a próxima vez)
+                    if (cands.isNotEmpty() && round % 3 == 0 && level < 3) {
+                        level++
+                        val half = when (level) { 1 -> 512L * 1024; 2 -> 4096L; else -> 512L }
+                        wins = windows(cands.map { it.key }, half)
+                        prefs.edit().putString(key, wins.joinToString(",") { "${it.first.toString(16)}-${it.second.toString(16)}" }).apply()
+                        val kb = wins.sumOf { it.second - it.first } / 1024
+                        itemLog("👁 Afunilando (${listOf("regiões", "blocos de 1 MB", "páginas", "objetos")[level]}): ${wins.size} faixas, $kb KB. " + shoot(wins))
+                    }
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
@@ -2097,7 +2130,7 @@ class Engine private constructor(private val app: Context) {
                 itemLog("👁 Parou: ${e.message}")
             } finally {
                 withContext(kotlinx.coroutines.NonCancellable + Dispatchers.Main) { Session.monitorOn = false }
-                runCatching { withContext(kotlinx.coroutines.NonCancellable) { call { d -> d.send("photodrop", quiet = true) } } }
+                runCatching { withContext(kotlinx.coroutines.NonCancellable) { call { d -> d.send("photodrop", quiet = true); d.send("photowin off", quiet = true) } } }
             }
         }
     }

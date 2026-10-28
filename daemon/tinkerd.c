@@ -904,9 +904,34 @@ static void read_thread_sps(void) {
     closedir(d);
 }
 
+// faixas de endereço da foto ("photowin a-b,c-d"): o monitor vai afunilando — região, bloco, página — até o objeto
+static uint64_t win_lo[64], win_hi[64];
+static int nwin;
+
 static void add_photo_chunks(uint64_t s, uint64_t e, int region, void *ctx) {
     for (int k = 0; k < nstack_sp; k++) if (stack_sp[k] >= s && stack_sp[k] < e) return;
-    add_chunks(s, e, region, ctx);
+    if (!nwin) { add_chunks(s, e, region, ctx); return; }
+    for (int k = 0; k < nwin; k++) {
+        uint64_t a = s > win_lo[k] ? s : win_lo[k], b = e < win_hi[k] ? e : win_hi[k];
+        if (a < b) add_chunks(a, b, region, ctx);
+    }
+}
+
+// "photowin off" ou "photowin 7a000000-7a100000,7b000000-7b010000" (hex, até 64 faixas, alinhadas a 4 bytes)
+static void cmd_photowin(const char *arg) {
+    nwin = 0;
+    if (!arg || !strcmp(arg, "off")) { puts("ok 0"); return; }
+    char buf[4096];
+    snprintf(buf, sizeof buf, "%s", arg);
+    char *save = NULL;
+    for (char *tok = strtok_r(buf, ",", &save); tok && nwin < 64; tok = strtok_r(NULL, ",", &save)) {
+        char *dash = strchr(tok, '-');
+        if (!dash) { nwin = 0; puts("err faixa inválida (use início-fim em hex)"); return; }
+        uint64_t lo = strtoull(tok, NULL, 16) & ~3ULL, hi = strtoull(dash + 1, NULL, 16) & ~3ULL;
+        if (hi <= lo) { nwin = 0; puts("err faixa vazia"); return; }
+        win_lo[nwin] = lo; win_hi[nwin] = hi; nwin++;
+    }
+    printf("ok %d\n", nwin);
 }
 
 static void cmd_photo(void) {
@@ -2969,6 +2994,7 @@ int main(void) {
         if (!alive()) { puts("err o jogo fechou"); continue; }
         if (!strcmp(cmd, "regions")) cmd_regions();
         else if (!strcmp(cmd, "ranges")) puts(set_ranges(a1) ? "ok" : "err região inválida");
+        else if (!strcmp(cmd, "photowin")) cmd_photowin(a1);
         else if (!strcmp(cmd, "search")) cmd_search(a1, a2);
         else if (!strcmp(cmd, "group")) cmd_group(a1, a2, a3);
         else if (!strcmp(cmd, "refine")) cmd_compare("eq", a1);

@@ -753,6 +753,29 @@ function Run-Missions($v) {
         if ($now -lt 500 -or $now -gt 505) { throw "a tela mostra $now (logo depois: $logo; no endereco: $mem; pid do jogo: $pid2) ($($t.msg))" }
         "a tela mostra $now ($($t.msg))"
     }
+    # nivel 17: 👁 monitor de memoria, sem tela e sem nome: o agente toca "+1 lenha" a cada 6 s; o monitor tem de achar o
+    # endereco da lenha entre os que mudaram por evento (afunilando). Conferido: escreve +5 em cada candidato e le a tela
+    Mission "nivel 17: monitor de memoria acha a lenha sem tela (afunilando)" {
+        $job = Start-Job -ArgumentList $adb, $game -ScriptBlock {
+            param($adb, $game)
+            for ($i = 0; $i -lt 30; $i++) { Start-Sleep 6; & $adb shell am broadcast -p $game -a dev.tinker.testgame.ACAO --es acao "'+1 lenha'" | Out-Null }
+        }
+        try { Step "monitorar 120" | Out-Null } finally { Stop-Job $job; Remove-Job $job -Force }
+        $linhas = $script:last -split "`n"
+        $cands = @($linhas | Where-Object { $_ -like "mudou *" } | ForEach-Object { $f = $_ -split ' '; [pscustomobject]@{ addr = $f[1]; v = [double]$f[2]; reg = $f[3] } })
+        $log = ($linhas | Where-Object { $_ -like "log *" }) -join ' / '
+        $lenha = [double](Val "Lenha")
+        $certo = $null
+        foreach ($c in ($cands | Where-Object { $_.v -eq $lenha } | Select-Object -First 5)) {
+            Step "endereco $($c.addr) i32 $($lenha + 5)" | Out-Null; Start-Sleep 2
+            $depois = Val "Lenha"
+            Step "endereco $($c.addr) i32 $lenha" | Out-Null
+            if ($depois -eq $lenha + 5) { $certo = $c.addr; break }
+        }
+        $linha = "$($cands.Count) mudaram por evento; lenha ($lenha) " + $(if ($certo) { "achada em 0x$certo e conferida na tela" } else { "nao estava entre eles" }) + " | $log"
+        if (-not $certo) { throw $linha }
+        $linha
+    }
     # nivel 16, como o DYSMANTLE: o numero da lenha fica embaixo do icone, sem nome, como "1+N"; o agente acha pelo
     # numero (o da direita), prova, e depois acha a folha pelo formato (achou um, acha todos). Conferido na tela
     Mission "nivel 16: como o DYSMANTLE (numero sem nome, 1+N, e o vizinho pelo formato)" {
