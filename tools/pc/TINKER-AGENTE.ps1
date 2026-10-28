@@ -18,6 +18,8 @@ $done = "$env:USERPROFILE\tinker-agente-testado.txt" # ultima versao testada
 $log = "$env:USERPROFILE\tinker-agente-log.txt"
 $tok = "$env:USERPROFILE\tinker-agente-github.txt"  # token so de leitura do GitHub (repositorio privado): fica so neste PC
 $app = "dev.tinker.app"
+# comando com root: no emulador de sempre o adb ja e root; no de Play Store (adbd sem root) vai pelo su do Magisk
+function Sh($c) { if ($script:su) { & $adb shell "su -c '$($c -replace "'", "'\''")'" } else { & $adb shell $c } }
 function Say($t) { $l = "$(Get-Date -Format 'HH:mm:ss') $t"; Write-Host $l; Add-Content $log $l }
 function Hdr($extra) {
     $h = @{ "User-Agent" = "Tinker"; "Cache-Control" = "no-cache" }
@@ -60,14 +62,14 @@ function Update-Self {
     } catch { Say "nao consegui ver se o agente tem versao nova: $($_.Exception.Message)" }
 }
 
-function Start-Emulator {
+function Start-Emulator($like = "*Pixel_6_Pro*", $gpu = "swiftshader_indirect", $style = "Minimized") {
     if ((& $adb devices) -match "emulator-5554\s+device") { return }
-    $avd = (& $emu -list-avds) | Where-Object { $_ -like "*Pixel_6_Pro*" } | Select-Object -First 1
-    if (-not $avd) { throw "nao achei o emulador Pixel 6 Pro no Android Studio" }
+    $avd = (& $emu -list-avds) | Where-Object { $_ -like $like } | Select-Object -First 1
+    if (-not $avd) { throw "nao achei o emulador $like no Android Studio" }
     Say "ligando o emulador $avd..."
     # placa de video por software: com a do PC e a janela minimizada a tela do emulador parava 10-30 s por quadro
     # (logcat "dequeueBuffer failed"), o Tinker lia a tela velha e a curva da 2.79.2 deu 0 de 16
-    Start-Process $emu -ArgumentList "-avd $avd -no-snapshot-load -gpu swiftshader_indirect" -WindowStyle Minimized
+    Start-Process $emu -ArgumentList "-avd $avd -no-snapshot-load -gpu $gpu" -WindowStyle $style
     & $adb wait-for-device
     do { Start-Sleep 5 } until ((& $adb shell getprop sys.boot_completed) -match "1")
     Say "emulador ligado"
@@ -83,7 +85,7 @@ function Wait-Booted {
     return $false
 }
 
-function Install-Magisk {
+function Install-Magisk($ramdisk = "system-images\android-31\google_apis\x86_64\ramdisk.img") {
     Say "o emulador ainda nao tem Magisk (root para apps): instalando com o rootAVD"
     $dir = "C:\rootAVD"
     if (-not (Test-Path "$dir\rootAVD-master")) {
@@ -93,7 +95,7 @@ function Install-Magisk {
     $bat = Get-ChildItem "$dir\rootAVD-master" -Filter "rootAVD.bat" | Select-Object -First 1
     Push-Location $bat.DirectoryName
     Write-Host "Se perguntar a versao do Magisk, digite 2 e Enter. O emulador desliga sozinho no fim." -ForegroundColor Yellow
-    & $bat.FullName "system-images\android-31\google_apis\x86_64\ramdisk.img"
+    & $bat.FullName $ramdisk
     Pop-Location
     Start-Sleep 15
 }
@@ -423,14 +425,14 @@ function Set-PanelLink {
     $link = (Get-Content $cfg -ErrorAction SilentlyContinue | Select-Object -First 1)
     if (-not $link) { return }
     $f = "/data/data/$app/shared_prefs/tinker.xml"
-    $xml = (& $adb shell cat $f 2>$null) -join "`n"
+    $xml = (Sh "cat $f" 2>$null) -join "`n"
     if (-not $xml.Contains("</map>") -or $xml.Contains($link.Trim())) { return }
     $xml = $xml -replace '\s*<string name="keySource"\s*/>', '' -replace '\s*<string name="keySource">[^<]*</string>', ''
     $xml = $xml.Replace("</map>", "    <string name=`"keySource`">$([Security.SecurityElement]::Escape($link.Trim()))</string>`n</map>")
     $tmp = "$env:TEMP\tinker-prefs.xml"
     [IO.File]::WriteAllText($tmp, $xml, (New-Object Text.UTF8Encoding $false))
     & $adb push $tmp /data/local/tmp/tinker-prefs.xml | Out-Null
-    & $adb shell "cat /data/local/tmp/tinker-prefs.xml > $f; rm /data/local/tmp/tinker-prefs.xml"
+    Sh "cat /data/local/tmp/tinker-prefs.xml > $f; rm /data/local/tmp/tinker-prefs.xml"
     Say "link da planilha colocado no Tinker do emulador"
 }
 
@@ -450,12 +452,12 @@ function Tap($text) {
 }
 # um passo do Tinker (escolher/buscar/refinar/desconhecido/comparar/escrever/congelar); devolve a contagem
 function Step($cmd) {
-    $rm = (& $adb shell rm -f /data/data/$app/files/missao.txt 2>&1) -join " "
+    $rm = (Sh "rm -f /data/data/$app/files/missao.txt" 2>&1) -join " "
     # o adbd do emulador reiniciou sem root (Permission denied): pede o root de novo, senao nenhuma resposta do Tinker e lida
     if ($rm -match "Permission denied") {
         Say "o adb perdeu o root no emulador: pedindo de novo"
         & $adb root | Out-Null; Start-Sleep 3; & $adb wait-for-device
-        & $adb shell rm -f /data/data/$app/files/missao.txt
+        Sh "rm -f /data/data/$app/files/missao.txt"
     }
     $o = (& $adb shell am start -f 0x10008000 -n "$app/.MainActivity" --es missao "'$cmd'" 2>&1) -join " "
     # o Android do emulador reiniciou (o sistema ainda nao acha os apps): espera ligar e deixa a missao tentar de novo
@@ -466,7 +468,7 @@ function Step($cmd) {
     }
     for ($k = 0; $k -lt 680; $k++) {  # ate 340 s: o sozinho espera ate 300 s
         Start-Sleep -Milliseconds 500
-        $t = & $adb shell cat /data/data/$app/files/missao.txt 2>$null
+        $t = Sh "cat /data/data/$app/files/missao.txt" 2>$null
         if ($LASTEXITCODE -eq 0 -and $t) {
             $t = $t -join "`n"
             $script:last = $t
@@ -517,14 +519,14 @@ function Wait-Responsive {
 function Set-NoOverlay {
     & $adb shell am force-stop $app
     $f = "/data/data/$app/shared_prefs/tinker.xml"
-    $xml = (& $adb shell cat $f 2>$null) -join "`n"
+    $xml = (Sh "cat $f" 2>$null) -join "`n"
     if (-not $xml.Contains("</map>")) { return }
     $xml = $xml -replace '\s*<boolean name="autoOverlay" value="[a-z]+"\s*/>', ''
     $xml = $xml.Replace("</map>", "    <boolean name=`"autoOverlay`" value=`"false`" />`n</map>")
     $tmp = "$env:TEMP\tinker-prefs.xml"
     [IO.File]::WriteAllText($tmp, $xml, (New-Object Text.UTF8Encoding $false))
     & $adb push $tmp /data/local/tmp/tinker-prefs.xml | Out-Null
-    & $adb shell "cat /data/local/tmp/tinker-prefs.xml > $f; rm /data/local/tmp/tinker-prefs.xml"
+    Sh "cat /data/local/tmp/tinker-prefs.xml > $f; rm /data/local/tmp/tinker-prefs.xml"
 }
 
 function Run-Missions($v) {
@@ -1040,7 +1042,18 @@ function Run-Missions($v) {
     Post-Sheet "agente PC: missoes $ok de $($script:mres.Count) ok" $fails ("$health`n" + ($script:mres -join "`n")) $v
 }
 
-function Test-Version {
+function Install-Tinker($rel) {
+    Get-Apk ($rel.assets | Where-Object name -like "Tinker-*.apk" | Select-Object -First 1) "$env:TEMP\Tinker.apk"
+    $inst = (& $adb install -r "$env:TEMP\Tinker.apk") -join " "
+    Say "instalado: $inst"
+    & $adb shell appops set $app SYSTEM_ALERT_WINDOW allow | Out-Null
+    & $adb shell pm grant $app android.permission.POST_NOTIFICATIONS 2>$null | Out-Null
+    # root para o Tinker sem precisar tocar em Permitir (politica do Magisk para o uid do app)
+    $uid = ((& $adb shell dumpsys package $app) | Select-String "userId=(\d+)" | Select-Object -First 1).Matches.Groups[1].Value
+    if ($uid) { Sh "magisk --sqlite 'REPLACE INTO policies (uid,policy,until,logging,notification) VALUES($uid,2,0,1,1)'" 2>$null | Out-Null }
+}
+
+function Get-Release {
     try { $rel = Invoke-RestMethod "https://api.github.com/repos/Sedricko/Game-Guardian/releases/latest" -Headers (Hdr) }
     catch {
         # api.github.com fora (visto: DNS do PC nao resolvia so ele): a pagina do release em github.com diz a versao
@@ -1053,25 +1066,23 @@ function Test-Version {
             [pscustomobject]@{ name = "Tinker-$($t.TrimStart('v')).apk"; browser_download_url = "$d/Tinker-$($t.TrimStart('v')).apk"; url = $null },
             [pscustomobject]@{ name = "JogoTeste.apk"; browser_download_url = "$d/JogoTeste.apk"; url = $null }) }
     }
+    $rel
+}
+
+function Test-Version {
+    $rel = Get-Release
     $v = $rel.tag_name.TrimStart("v")
     if ((Get-Content $done -ErrorAction SilentlyContinue) -eq $v) {
         if ((Get-Date).Minute % 10 -lt 2) { Say "sem versao nova (ultima testada: $v)" }  # sinal de vida a cada ~10 min
         return
     }
     Say "=== Tinker $v ==="
-    Get-Apk ($rel.assets | Where-Object name -like "Tinker-*.apk" | Select-Object -First 1) "$env:TEMP\Tinker.apk"
     # jogo de teste com tela (vem no mesmo release): fica instalado para os testes de tela
     $jt = $rel.assets | Where-Object name -eq "JogoTeste.apk" | Select-Object -First 1
     if ($jt) { Get-Apk $jt "$env:TEMP\JogoTeste.apk"; Say ("jogo de teste: " + ((& $adb install -r "$env:TEMP\JogoTeste.apk") -join " ")) }
-    $inst = (& $adb install -r "$env:TEMP\Tinker.apk") -join " "
-    Say "instalado: $inst"
-    & $adb shell appops set $app SYSTEM_ALERT_WINDOW allow | Out-Null
-    & $adb shell pm grant $app android.permission.POST_NOTIFICATIONS 2>$null | Out-Null
-    # root para o Tinker sem precisar tocar em Permitir (politica do Magisk para o uid do app)
-    $uid = ((& $adb shell dumpsys package $app) | Select-String "userId=(\d+)" | Select-Object -First 1).Matches.Groups[1].Value
-    if ($uid) { & $adb shell "magisk --sqlite 'REPLACE INTO policies (uid,policy,until,logging,notification) VALUES($uid,2,0,1,1)'" 2>$null | Out-Null }
+    Install-Tinker $rel
     & $adb logcat -b crash -c
-    & $adb shell rm -f /data/data/$app/files/autoteste.txt
+    Sh "rm -f /data/data/$app/files/autoteste.txt"
     & $adb shell am force-stop $app
     Set-PanelLink
     & $adb shell am start -n "$app/.MainActivity" --ez autoteste true | Out-Null
@@ -1079,7 +1090,7 @@ function Test-Version {
     $out = $null
     for ($k = 0; $k -lt 48 -and -not $out; $k++) {
         Start-Sleep 5
-        $t = & $adb shell cat /data/data/$app/files/autoteste.txt 2>$null
+        $t = Sh "cat /data/data/$app/files/autoteste.txt" 2>$null
         if ($LASTEXITCODE -eq 0 -and $t) { $out = $t -join "`n" }
     }
     $crash = (& $adb logcat -d -b crash) -join "`n"
@@ -1126,11 +1137,27 @@ if (-not (Test-Path $tok) -and -not ((Get-Command gh -ErrorAction SilentlyContin
 # a pessoa joga 3 min e o 👁 monitor procura o que mudou. O app so aceita os jogos da lista fechada dele (MISSION_GAMES)
 function Run-Dysmantle {
     $dg = "com.the10tons.dysmantle"
-    Start-Emulator; & $adb root | Out-Null; Start-Sleep 3; & $adb wait-for-device
+    # o emulador com Play Store (Dysmantle_Play): o DYSMANTLE confere a compra pela Play Store; video pela placa do PC
+    Start-Emulator "*Dysmantle_Play*" "host" "Normal"
+    & $adb wait-for-device
     if (-not (Wait-Booted)) { Say "o emulador nao ligou"; return }
-    if (-not ((& $adb shell pm list packages $dg) -match $dg)) { Say "o DYSMANTLE nao esta instalado no emulador: instale pela Play Store do emulador e rode de novo"; return }
-    if (-not ((& $adb shell pm list packages $app) -match $app)) { Say "o Tinker nao esta no emulador: rode o TINKER-AGENTE uma vez antes"; return }
-    $v = ((& $adb shell dumpsys package $app) | Select-String "versionName=(\S+)" | Select-Object -First 1).Matches.Groups[1].Value
+    $avd = ((& $adb emu avd name) | Select-Object -First 1)
+    if ($avd -notlike "*Dysmantle_Play*") { Say "o emulador ligado e o $avd: feche ele e rode de novo (o DYSMANTLE fica no Dysmantle_Play)"; return }
+    if (-not ((& $adb shell pm list packages $dg) -match $dg)) { Say "o DYSMANTLE nao esta instalado no Dysmantle_Play: instale pela Play Store dele e rode de novo"; return }
+    $script:su = $true  # imagem com Play Store: o adbd nao vira root, o root e o do Magisk
+    Write-Host "Se aparecer no emulador um pedido de Superusuario para 'Shell', toque em PERMITIR (Grant)." -ForegroundColor Yellow
+    if (-not ((& $adb shell "su -c id" 2>&1) -match "uid=0")) {
+        # o app do Magisk sozinho nao da root: o rootAVD instala o Magisk na inicializacao do emulador
+        if ((& $adb shell "ls /system/bin/su /sbin/su /debug_ramdisk/su 2>/dev/null") -or ((& $adb shell pm list packages com.topjohnwu.magisk) -match "magisk" -and (& $adb shell "magisk -v" 2>$null))) {
+            Say "o Magisk esta la mas o su nao deu root: toque em Permitir no pedido de Superusuario e rode de novo"; return
+        }
+        Install-Magisk "system-images\android-36\google_apis_playstore\x86_64\ramdisk.img"
+        Say "o emulador reinicia com o root: rode o TINKER-DYSMANTLE de novo quando ele ligar"; return
+    }
+    $rel = Get-Release
+    $v = $rel.tag_name.TrimStart("v")
+    $have = ((& $adb shell dumpsys package $app) | Select-String "versionName=(\S+)" | Select-Object -First 1).Matches.Groups[1].Value
+    if ($have -ne $v) { Install-Tinker $rel }
     Set-NoOverlay
     & $adb shell monkey -p $dg -c android.intent.category.LAUNCHER 1 | Out-Null
     Write-Host "No emulador: carregue o seu jogo do DYSMANTLE e abra o INVENTARIO (com os numeros na tela). Depois aperte Enter aqui." -ForegroundColor Yellow
