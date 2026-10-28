@@ -1273,6 +1273,8 @@ function Run-RealGame($dg) {
         $res += "monitor: $($mon.Count) mudaram por evento; $($bate.Count) com o valor de um item da tela: " + ($bate -join ", ") + " | $logm"
         Say $res[-1]
     } catch { $res += "parou: $($_.Exception.Message)"; Say $res[-1] }
+    # o registro do Tinker vai junto: mostra onde cada passo gastou o tempo e o que achou
+    $res += "=== registro do Tinker ===`n" + ((Sh "tail -n 80 /data/data/$app/files/tinker.log") -join "`n")
     if ($guid) { Sh "iptables -D OUTPUT -m owner --uid-owner $guid -j REJECT; ip6tables -D OUTPUT -m owner --uid-owner $guid -j REJECT" } else { & $adb shell cmd connectivity airplane-mode disable }
     $fails = ($res | Where-Object { $_ -like "FALHA*" -or $_ -like "parou*" }) -join "`n"
     Post-Sheet "agente PC: $nome de verdade" $fails ($res -join "`n") $v "$nome (emulador)"

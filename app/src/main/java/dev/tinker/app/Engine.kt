@@ -2017,7 +2017,10 @@ class Engine private constructor(private val app: Context) {
         val out = mutableListOf<GameItem>()
         val withFields = classes.filter { c -> c[4].split(',').any { fieldMeaning(it) != null } }.take(30)
         itemLog("Mapa: ${classes.size} classes do jogo; ${withFields.size} com campos conhecidos (moeda, vida…)")
+        // cada classe varre a memória toda atrás dos objetos: num Unity grande (e no emulador, traduzido) 30 passavam de 6 min
+        val deadline = System.currentTimeMillis() + 90_000
         for ((i, c) in withFields.withIndex()) {
+            if (System.currentTimeMillis() > deadline) { itemLog("Mapa: parei por tempo em $i de ${withFields.size} classes (o resto pela tela)"); break }
             itemProgress(0.2f + 0.3f * i / withFields.size, out.count { it.hit != null })
             // dentro do call (o daemon) não dá para chamar suspend: junta e registra depois
             val found = call { d ->
