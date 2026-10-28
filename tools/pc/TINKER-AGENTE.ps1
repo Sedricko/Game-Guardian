@@ -1278,10 +1278,22 @@ function Run-RealGame($dg) {
     if ($guid) { Sh "iptables -D OUTPUT -m owner --uid-owner $guid -j REJECT; ip6tables -D OUTPUT -m owner --uid-owner $guid -j REJECT" } else { & $adb shell cmd connectivity airplane-mode disable }
     $fails = ($res | Where-Object { $_ -like "FALHA*" -or $_ -like "parou*" }) -join "`n"
     Post-Sheet "agente PC: $nome de verdade" $fails ($res -join "`n") $v "$nome (emulador)"
-    Say "pronto. Pode fechar esta janela."
+    Say "rodada pronta (resultado na planilha). Espero a proxima versao do Tinker."
 }
 
-if ($Jogo) { Update-Self; Run-RealGame $Jogo; exit }
+# jogo de verdade: fica ligado como o agente de sempre; a cada versao nova do Tinker roda uma rodada sozinho no jogo
+if ($Jogo) {
+    $doneJ = "$env:USERPROFILE\tinker-agente-testado-$Jogo.txt"
+    Say "agente do $($realGames[$Jogo].nome) ligado: a cada versao nova do Tinker faco uma rodada sozinho. Deixe esta janela aberta; Ctrl+C para sair."
+    while ($true) {
+        Update-Self
+        try {
+            $v = (Get-Release).tag_name.TrimStart("v")
+            if ((Get-Content $doneJ -ErrorAction SilentlyContinue) -ne $v) { Run-RealGame $Jogo; Set-Content $doneJ $v }
+        } catch { Say "erro: $($_.Exception.Message)" }
+        Start-Sleep 60
+    }
+}
 Say "agente ligado. Deixe esta janela aberta; Ctrl+C para sair."
 while ($true) {
     Update-Self
