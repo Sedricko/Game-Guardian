@@ -223,6 +223,9 @@ class GameActivity : Activity() {
 
     override fun onDestroy() {
         unregisterReceiver(receiver)
+        // a vez antiga do jogo (recriada ao girar a tela) continuava viva: escrevia o estado.txt a cada segundo com os
+        // valores velhos e a conferência lia esses ("escrevi X, a tela mostra X - 50" com o endereço certo)
+        ui.removeCallbacksAndMessages(null)
         super.onDestroy()
     }
 

@@ -39,6 +39,7 @@ class Engine private constructor(private val app: Context) {
     private val savedFile get() = File(app.filesDir, savedPkg?.let { "saved-$it.json" } ?: "saved.json")
     private val historyFile get() = File(app.filesDir, "history.txt")
     private val lastGameFile get() = File(app.filesDir, "last-game.txt")
+    private var soloRan = false  // missão: o último passo de busca foi o achar sozinho (escrever só no provado dele)
     private var inFile = false  // busca desconhecida ainda no arquivo do daemon
     private var steps = 0  // etapas da busca atual, para o registro
     private val stepLog = mutableListOf<String>()  // as mesmas etapas, para mandar a busca à planilha
@@ -1404,8 +1405,8 @@ class Engine private constructor(private val app: Context) {
         if (Session.process == null) runCatching { pickTestGame() }
         require(Session.process?.pkg == TEST_GAME) { "missão só no Jogo de Teste" }
         val msg = when (w.firstOrNull()) {
-            "buscar" -> search(if (w[1] == "auto") emptySet() else setOf(w[1]), w.drop(2).joinToString(" "))
-            "refinar" -> refine(arg)
+            "buscar" -> search(if (w[1] == "auto") emptySet() else setOf(w[1]), w.drop(2).joinToString(" ")).also { soloRan = false }
+            "refinar" -> refine(arg).also { soloRan = false }
             // "endereco 7a01 i32 4321": escreve num endereço só (a missão confere na tela o palpite feito sem escrever)
             "endereco" -> write(w[1], w[2], w[3])
             // "ler 7a01 i32": o valor que está no endereço agora (a missão separa "o valor voltou" de "o jogo reiniciou")
@@ -1433,6 +1434,7 @@ class Engine private constructor(private val app: Context) {
                 else setGameSpeed(speedAddrs, arg)
             // 🎯 Achar sozinho no Jogo de Teste: põe o jogo na frente, lê a tela e refina sozinho (até 2 minutos)
             "sozinho" -> {
+                soloRan = true
                 withContext(Dispatchers.Main) { app.packageManager.getLaunchIntentForPackage(TEST_GAME)?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)?.let(app::startActivity) }
                 // "auto" = nenhum tipo marcado (como o Auto da tela): o agente offline escolhe o tipo
                 // no Jogo de Teste o teste de 2 s vale sempre: é o que separa o valor verdadeiro das cópias do número da tela
@@ -1488,6 +1490,8 @@ class Engine private constructor(private val app: Context) {
             // o achar sozinho já provou qual muda a tela: escreve só nele (escrever em todos pôs 640 numa cópia nativa do
             // desenho do texto e derrubou o Jogo de Teste, SIGSEGV na libgui)
             "escrever" -> Session.autoFindWinner?.takeIf { h -> list().second.any { it.addr == h.addr } }?.let { write(it.addr, it.type, arg); "1 valores alterados.\n${it.addr} ${it.type} $arg" }
+                // o achar sozinho rodou e não provou nada: o que está na lista é de antes (a Honra escreveu no endereço do Rubis)
+                ?: if (soloRan) return "err o achar sozinho não provou nenhum endereço: não escrevo nos resultados de antes" else null
                 // sem provado, só com poucos: o Crystals ficou com os 56 da busca do Vigor e escrever em todos derrubou o jogo
                 // a contagem vem do daemon (Session.count chega depois, pela tela: lida logo após o refino ainda era a antiga);
                 // até 10 (as 6 iscas do Ouro mais o verdadeiro): o Crystals tinha 56 do Vigor
