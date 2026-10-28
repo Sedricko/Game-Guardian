@@ -1158,7 +1158,7 @@ function Run-RealGame($dg) {
     if ($g.small) { & $adb shell wm size 720x1560; & $adb shell wm density 320 } else { & $adb shell wm size reset; & $adb shell wm density reset }
     if (-not (Wait-Booted)) { Say "o emulador nao ligou"; return }
     $avd = ((& $adb emu avd name) | Select-Object -First 1)
-    if ($avd -notlike "*Dysmantle_Play*") { Say "o emulador ligado e o $avd: feche ele e rode de novo (os jogos de verdade ficam no Dysmantle_Play)"; return }
+    if ($avd -notlike "*Dysmantle_Play*") { Say "o emulador ligado e o $($avd): feche ele e rode de novo (os jogos de verdade ficam no Dysmantle_Play)"; return }
     if (-not ((& $adb shell pm list packages $dg) -match $dg)) { Say "o $nome nao esta instalado no Dysmantle_Play: instale pela Play Store dele e rode de novo"; return }
     $script:su = $true  # imagem com Play Store: o adbd nao vira root, o root e o do Magisk
     Write-Host "Se aparecer no emulador um pedido de Superusuario para 'Shell', toque em PERMITIR (Grant)." -ForegroundColor Yellow
