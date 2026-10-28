@@ -1460,7 +1460,9 @@ class Engine private constructor(private val app: Context) {
             "jogar" -> return run {
                 val end = System.currentTimeMillis() + (arg.toLongOrNull() ?: 180) * 1000
                 val ctl = Session.aiControl
-                val play = aiTools().filter { it.name in setOf("ver_tela", "tocar", "arrastar", "voltar") }
+                // "anotar": o que aprende do jogo fica nas notas dele (e vai no backup para a planilha); a próxima rodada começa sabendo
+                val play = aiTools().filter { it.name in setOf("ver_tela", "tocar", "arrastar", "voltar", "anotar") }
+                val known = notesFile?.takeIf { it.exists() }?.readText()?.takeLast(3000).orEmpty()
                 val log = mutableListOf<String>()
                 front()
                 delay(3000)
@@ -1473,10 +1475,13 @@ class Engine private constructor(private val app: Context) {
                         "trocar com o próprio jogo). Abra também a LOJA e os outros menus para ver itens, preços e quantidades; pode comprar com " +
                         "moeda do jogo (ouro, gemas, minério). Um toque por vez, olhando o print de depois. NUNCA toque em preço em dinheiro " +
                         "real (R$, US$, €), assinatura ou anúncio. Termine cada vez com uma linha: o que você aprendeu do jogo (o que cada " +
-                        "número é, o que o faz mudar e o que a loja vende por quanto)."
+                        "número é, o que o faz mudar e o que a loja vende por quanto). Use a ferramenta anotar para cada coisa nova que aprender " +
+                        "(o que cada botão faz, como ganhar cada recurso, o que vale a pena comprar): as próximas rodadas começam sabendo." +
+                        (if (known.isBlank()) "" else "\n\nO que você já aprendeu deste jogo em rodadas anteriores (use para jogar melhor e não repetir):\n$known")
                     while (System.currentTimeMillis() < end - 5000) {
                         val a = withTimeoutOrNull(end - System.currentTimeMillis()) { Assistant.ask(chat, { "" }, q, play) { log += it } } ?: break
                         log += "IA: $a"
+                        notesFile?.let { f -> a.lines().lastOrNull { it.isNotBlank() }?.let { appendNote(f, "Jogando: $it", 8000) } }
                         if (Assistant.lastLimitFail || AI_ERRORS.any { e -> a.startsWith(e) }) break
                         q = "Continue jogando: faça outra coisa que mude os números da tela."
                     }
