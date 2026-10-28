@@ -753,6 +753,33 @@ function Run-Missions($v) {
         if ($now -lt 500 -or $now -gt 505) { throw "a tela mostra $now (logo depois: $logo; no endereco: $mem; pid do jogo: $pid2) ($($t.msg))" }
         "a tela mostra $now ($($t.msg))"
     }
+    # dificuldade x3 (niveis 13 a 15): jeitos de guardar que jogos de verdade usam e o agente ainda nao resolve
+    # nivel 13: a Prata fica na memoria como texto ("000123" em UTF-16), nao como numero
+    Mission "nivel 13: numero guardado como texto (Prata)" {
+        $t = Train "Prata" "+1 prata"
+        $want = [double](Val "Prata") + 50
+        Step "escrever $want" | Out-Null; Start-Sleep 2
+        $now = Val "Prata"
+        if ($now -ne $want) { throw "escrevi $want, a tela mostra $now ($($t.msg))" }
+        "escrevi $want, a tela mostra $now ($($t.msg))"
+    }
+    # nivel 14: as Esmeraldas mudam de lugar a cada 8 s (o antigo e apagado); o pedido tem de valer depois da mudanca
+    Mission "nivel 14: valor que muda de lugar (Esmeraldas = 500)" {
+        $t = Train "Esmeraldas=500" "+1 esmeralda"
+        Start-Sleep 10  # passa por uma mudanca de lugar
+        $now = Val "Esmeraldas"
+        if ($now -lt 500 -or $now -gt 505) { throw "a tela mostra $now ($($t.msg))" }
+        "a tela mostra $now depois de mudar de lugar ($($t.msg))"
+    }
+    # nivel 15: o Poder da tela e ataque + arma + anel (3 lugares, o anel em Float); somar 50 no provado tem de subir a tela 50
+    Mission "nivel 15: soma de 3 partes (Poder)" {
+        $t = Train "Poder" "+1 poder"
+        $antes = [double](Val "Poder")
+        Step "somar 50" | Out-Null; Start-Sleep 2
+        $now = Val "Poder"
+        if ($now -ne $antes + 50) { throw "antes $antes, depois de somar 50 a tela mostra $now ($($t.msg))" }
+        "antes $antes, depois $now ($($t.msg))"
+    }
     # nivel 12: achou um, acha todos. A mochila tem 4 espacos com o mesmo formato (quantidade, copia em +4, maximo, codigo);
     # o agente acha as Flechas pela tela e os outros 3 so pela memoria. Cada um e conferido escrevendo +5 e lendo a tela
     Mission "nivel 12: achou um, acha todos (mochila, sem olhar a tela)" {

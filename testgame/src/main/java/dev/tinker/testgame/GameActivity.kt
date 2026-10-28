@@ -91,6 +91,18 @@ class GameActivity : Activity() {
         BAG.indices.forEach { i -> val n = Random.nextInt(5, 40); putInt(i * 48, n); putInt(i * 48 + 4, n); putInt(i * 48 + 8, 99); putInt(i * 48 + 12, 101 + i); putFloat(i * 48 + 0x28, n.toFloat()) }
     }
     private fun bagAdd(i: Int) { val n = bag.getInt(i * 48) + 1; bag.putInt(i * 48, n); bag.putInt(i * 48 + 4, n); bag.putFloat(i * 48 + 0x28, n.toFloat()) }
+    // nível 13, Prata: guardada como texto (os dígitos em UTF-16, como numa String do jogo), não como número
+    private val prataBuf = ByteBuffer.allocateDirect(64).order(ByteOrder.LITTLE_ENDIAN)
+    private var prata: Int = Random.nextInt(100, 900)
+        set(v) { field = v; v.toString().padStart(6, '0').forEachIndexed { i, c -> prataBuf.putChar(i * 2, c) } }
+    // nível 14, Esmeraldas: o jogo copia o valor para outro lugar a cada 8 s e apaga o antigo (memória que se reorganiza)
+    private var esmBuf = ByteBuffer.allocateDirect(32).order(ByteOrder.LITTLE_ENDIAN).apply { putInt(12, Random.nextInt(20, 90)) }
+    private fun moveEsm() { val n = ByteBuffer.allocateDirect(32).order(ByteOrder.LITTLE_ENDIAN); n.putInt(12, esmBuf.getInt(12)); esmBuf.putInt(12, 0); esmBuf = n }
+    // nível 15, Poder: a tela mostra ataque + arma + anel, cada um num lugar (o anel em Float): o Vigor com 3 partes
+    private val atk = ByteBuffer.allocateDirect(16).order(ByteOrder.LITTLE_ENDIAN).apply { putInt(0, Random.nextInt(10, 40)) }
+    private val arma = ByteBuffer.allocateDirect(16).order(ByteOrder.LITTLE_ENDIAN).apply { putInt(8, Random.nextInt(20, 60)) }
+    private val anel = ByteBuffer.allocateDirect(16).order(ByteOrder.LITTLE_ENDIAN).apply { putFloat(4, Random.nextInt(5, 30).toFloat()) }
+    private val poder get() = atk.getInt(0) + arma.getInt(8) + anel.getFloat(4).toInt()
     private val buildLeft get() = ((build.getLong(8) - System.currentTimeMillis()) / 1000).coerceAtLeast(0)
 
     private fun fresh(): ByteBuffer = ByteBuffer.allocateDirect(160).order(ByteOrder.LITTLE_ENDIAN)
@@ -172,6 +184,9 @@ class GameActivity : Activity() {
         actions["+1 vigor"] = { unk.putInt(36, unk.getInt(36) + 1) }
         actions["+1 crystal"] = { unk.putInt(44, unk.getInt(44) + 10) }
         actions["+1 flecha"] = { bagAdd(0) }
+        actions["+1 prata"] = { prata += 1 }
+        actions["+1 esmeralda"] = { esmBuf.putInt(12, esmBuf.getInt(12) + 1) }
+        actions["+1 poder"] = { atk.putInt(0, atk.getInt(0) + 1) }
         val grid = android.widget.GridLayout(this).apply { columnCount = 2 }
         actions.forEach { (label, act) -> grid.addView(Button(this).apply { text = label; setOnClickListener { act(); save(); show() } }) }
         setContentView(android.widget.ScrollView(this).apply {
@@ -187,7 +202,9 @@ class GameActivity : Activity() {
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED) else registerReceiver(receiver, filter)
         save()  // o save JSON externo já existe desde a primeira abertura (o editor de save do Tinker acha ele)
         show()
+        prata = prata  // escreve o texto na memória
         ui.post(object : Runnable { override fun run() { show(); ui.postDelayed(this, 500) } })
+        ui.post(object : Runnable { override fun run() { moveEsm(); ui.postDelayed(this, 8000) } })
         ui.post(object : Runnable { override fun run() { energy += 1; ui.postDelayed(this, 1000) } })
         time = 0f
         kills = 0
@@ -242,7 +259,9 @@ class GameActivity : Activity() {
     private fun show() {
         val t = "Fase $fase · versão ${if (base == 0) 1 else 2}\nOuro: $gold\nGemas: $gems\nVida: ${"%.1f".format(hp)}\nEnergia: $energy\nPontos: $points\nDiamantes: $diamonds\nMadeira: $wood\nPoções: $potions\nTempo: ${"%.1f".format(java.util.Locale.ROOT, time)}\nAbates: $kills\nVelocidade: ${"%.1f".format(java.util.Locale.ROOT, speed)}\nObra: $buildLeft\nEspada: ${shop.getInt(4)}\nNivel: $level\nMoedas: $coins" +
             "\nRubis: ${unk.getDouble(0).toLong()}\nSementes: ${unk.getLong(8)}\nHonra: ${unk.getInt(16)}\nBrilho: ${unk.getFloat(20).toInt()}\nCristais: ${unk.getInt(24) / 10}\nRunas: $runas\nVigor: ${unk.getInt(36) + unk.getInt(40)}\nCrystals: ${unk.getInt(44) / 10}" +
-            BAG.indices.joinToString("") { "\n${BAG[it]}: ${bag.getInt(it * 48)}" }
+            BAG.indices.joinToString("") { "\n${BAG[it]}: ${bag.getInt(it * 48)}" } +
+            "\nPrata: ${(0 until 6).map { prataBuf.getChar(it * 2) }.joinToString("").trimStart('0').ifEmpty { "0" }}" +
+            "\nEsmeraldas: ${esmBuf.getInt(12)}\nPoder: $poder"
         if (t == shown) return  // a tela só muda quando um valor muda
         shown = t
         text.text = t
