@@ -690,15 +690,16 @@ private fun ItemsPanel(engine: Engine, enabled: Boolean, run: (suspend () -> Str
     // (ele sai da frente para ler a tela) — a pessoa abria e ele fechava sozinho 6 s depois, sem parar
     LaunchedEffect(s.process?.pid) {
         val p = s.process ?: return@LaunchedEffect
-        if (s.itemsPid == p.pid) return@LaunchedEffect
+        if (s.itemsPid == p.pid || p.pkg == TEST_GAME) return@LaunchedEffect
+        delay(6000)  // o menu fechado no meio cancela a espera: na próxima vez que abrir, conta de novo
         s.itemsPid = p.pid
         s.items = emptyList()
-        if (p.pkg != TEST_GAME) { delay(6000); run { engine.scanItems() } }
+        engine.scanItemsLater()
     }
     Panel {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("📋 Itens do jogo", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-            TextButton(onClick = { run { engine.scanItems() } }, enabled = enabled) { Text(if (s.items.isEmpty()) "Procurar" else "↻ De novo") }
+            TextButton(onClick = { engine.scanItemsLater() }, enabled = enabled && !s.itemsBusy) { Text(if (s.items.isEmpty()) "Procurar" else "↻ De novo") }
         }
         // o que ele está fazendo agora, passo a passo (fica depois de pronto, recolhido)
         var showLog by remember { mutableStateOf(true) }

@@ -1976,6 +1976,18 @@ class Engine private constructor(private val app: Context) {
      * busca uma vez cada um e monta a lista para salvar, editar e congelar. Com 1 resultado fica "provável"; com mais,
      * pede para usar 🎯 Achar sozinho (o valor precisa mudar). Usa a busca atual (os resultados de antes são trocados).
      */
+    /**
+     * Pela tela: roda no escopo do app, não no da tela — o menu sai da frente para ler o jogo e, no escopo dele, a
+     * procura era cancelada junto ("rememberCoroutineScope left the composition"). O resultado vai para o status.
+     */
+    fun scanItemsLater() {
+        if (Session.itemsBusy) return
+        scope.launch {
+            val msg = runCatching { scanItems() }.getOrElse { "Itens do jogo: ${it.message}" }
+            withContext(Dispatchers.Main) { Session.status = msg }
+        }
+    }
+
     suspend fun scanItems(): String {
         val game = savedPkg ?: return "Escolha o jogo primeiro."
         withContext(Dispatchers.Main) { Session.itemsLog.clear(); Session.itemsBusy = true }
