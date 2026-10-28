@@ -319,6 +319,8 @@ class ValuesTest {
         assertEquals(1234L, screenNumber("1,234"))
         assertEquals(23L, screenNumber("x23"))
         assertEquals(null, screenNumber("Ouro"))
+        assertEquals(16L, screenNumber("1+16"))   // DYSMANTLE: o do inventário é o da direita
+        assertEquals(16L, screenNumber("1 + 16"))
         assertEquals("30~37", followRange(23, 30))   // subiu 7: até o refino pode ter subido mais 7
         assertEquals("19~20", followRange(21, 20))
         assertEquals("5~6", followRange(5, 5))

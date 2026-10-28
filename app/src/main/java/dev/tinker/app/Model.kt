@@ -308,8 +308,11 @@ internal fun retryPlans(types: String, value: String): List<Triple<String, Strin
 
 /** Valor do teste da IA: diferente do atual e plausível (inteiro +1; decimal +1.5), para a tela mostrar a mudança. */
 /** Número de um texto lido na tela: "1.234" e "1,234" (milhar) viram 1234; "x23" vira 23; sem dígito, null. */
-internal fun screenNumber(text: String): Long? =
-    Regex("""\d[\d.,]*""").find(text)?.value?.filter(Char::isDigit)?.take(15)?.toLongOrNull()
+internal fun screenNumber(text: String): Long? {
+    // "1+16" (DYSMANTLE: o equipado + o do inventário) virava 116 e nunca batia com 16: vale o da direita
+    val t = Regex("""\d+\s*\+\s*(\d+)""").find(text)?.groupValues?.get(1) ?: text
+    return Regex("""\d[\d.,]*""").find(t)?.value?.filter(Char::isDigit)?.take(15)?.toLongOrNull()
+}
 
 /** Refino depois que o número da tela foi de last para cur: faixa do mesmo tamanho para frente, porque até o refino ele anda mais. */
 internal fun followRange(last: Long, cur: Long): String {
