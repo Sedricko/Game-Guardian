@@ -63,7 +63,9 @@ function Start-Emulator {
     $avd = (& $emu -list-avds) | Where-Object { $_ -like "*Pixel_6_Pro*" } | Select-Object -First 1
     if (-not $avd) { throw "nao achei o emulador Pixel 6 Pro no Android Studio" }
     Say "ligando o emulador $avd..."
-    Start-Process $emu -ArgumentList "-avd $avd -no-snapshot-load" -WindowStyle Minimized
+    # placa de video por software: com a do PC e a janela minimizada a tela do emulador parava 10-30 s por quadro
+    # (logcat "dequeueBuffer failed"), o Tinker lia a tela velha e a curva da 2.79.2 deu 0 de 16
+    Start-Process $emu -ArgumentList "-avd $avd -no-snapshot-load -gpu swiftshader_indirect" -WindowStyle Minimized
     & $adb wait-for-device
     do { Start-Sleep 5 } until ((& $adb shell getprop sys.boot_completed) -match "1")
     Say "emulador ligado"
