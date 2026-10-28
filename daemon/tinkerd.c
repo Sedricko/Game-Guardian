@@ -347,6 +347,46 @@ static int ptr_at(const unsigned char *b, size_t len, size_t at, const chunks_t 
     return v >= 0x10000 && in_chunks(cs, v);
 }
 
+// Pedaço que o jogo nunca usou (nenhuma página de verdade no pagemap; a página zero que a própria leitura mapeia não conta).
+// No emulador com tradução arm64 o Orecraft (Unity) reserva ~15 GB anônimos quase vazios: cada busca lia tudo (6 min) e a
+// foto passava do limite. Só a memória anônima (Jh, J, Ch, Ca, A, S): a de arquivo não lida ainda guarda o conteúdo do arquivo.
+// Sem pagemap lê tudo como antes.
+// shortcut: a página zero gigante (THP "always") conta como usada; ler o pfn dela também se um aparelho precisar.
+static int pm_fd = -1;
+static pid_t pm_pid;
+static uint64_t zero_pfn;
+static int chunk_unused(uint64_t a, uint32_t len, int region) {
+    if (region != 0 && region != 1 && region != 2 && region != 3 && region != 6 && region != 7) return 0;
+    long pg = sysconf(_SC_PAGESIZE);
+    if (pm_pid != target) {
+        if (pm_fd >= 0) close(pm_fd);
+        char path[64];
+        snprintf(path, sizeof path, "/proc/%d/pagemap", target);
+        pm_fd = open(path, O_RDONLY);
+        pm_pid = target;
+        if (!zero_pfn) {  // o pfn da página zero: uma página nossa só lida, nunca escrita (0 = sem root, o kernel esconde o pfn)
+            volatile char *z = mmap(NULL, pg, PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+            int self = open("/proc/self/pagemap", O_RDONLY);
+            uint64_t e = 0;
+            if (z != MAP_FAILED && self >= 0) {
+                (void)z[0];
+                if (pread(self, &e, 8, (uint64_t)(uintptr_t)z / pg * 8) == 8 && (e >> 63)) zero_pfn = e & ((1ULL << 55) - 1);
+            }
+            if (self >= 0) close(self);
+            if (z != MAP_FAILED) munmap((void *)z, pg);
+        }
+    }
+    if (pm_fd < 0) return 0;
+    uint64_t e[CHUNK / 4096];
+    size_t n = (len + pg - 1) / pg;
+    if (n > sizeof e / 8 || pread(pm_fd, e, n * 8, a / pg * 8) != (ssize_t)(n * 8)) return 0;
+    for (size_t i = 0; i < n; i++) {
+        if (e[i] >> 62 & 1) return 0;  // na troca (zram): tem dado
+        if (e[i] >> 63 && (!zero_pfn || (e[i] & ((1ULL << 55) - 1)) != zero_pfn)) return 0;
+    }
+    return 1;
+}
+
 static void add_chunks(uint64_t s, uint64_t e, int region, void *ctx) {
     chunks_t *cs = ctx;
     if (!(cs->want & (1u << region))) return;
@@ -357,6 +397,7 @@ static void add_chunks(uint64_t s, uint64_t e, int region, void *ctx) {
             if (!cs->c) { puts("err sem memória"); exit(1); }
         }
         uint32_t len = e - a < CHUNK ? (uint32_t)(e - a) : CHUNK;
+        if (chunk_unused(a, len, region)) continue;
         cs->c[cs->n++] = (chunk_t){a, cs->total, len, (uint8_t)region};
         cs->total += len;
     }

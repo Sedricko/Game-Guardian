@@ -133,6 +133,9 @@ int main(void) {
     pp[0] = a;
     // memória nova, ainda não escrita: o teste escreve nela e "onde o jogo escreve" tem que contar na região A
     char *fresh = mmap(NULL, 1 << 20, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    // reserva grande nunca usada (como a do Unity no emulador): a busca e a foto pulam
+    char *reserva = mmap(NULL, 512 << 20, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    reserva[0] = 1;
     printf("%d %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx %lx\n", getpid(), (unsigned long)&i[7], (unsigned long)&f[3], (unsigned long)v, (unsigned long)x,
            (unsigned long)obj, (unsigned long)y, (unsigned long)z, (unsigned long)q, (unsigned long)w, (unsigned long)&ticks, (unsigned long)never_called, (unsigned long)mail, (unsigned long)tick_once,
            (unsigned long)lt, (unsigned long)nodes, (unsigned long)pp, (unsigned long)fresh);

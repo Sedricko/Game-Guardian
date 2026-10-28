@@ -2018,7 +2018,10 @@ class Engine private constructor(private val app: Context) {
             val bmp = android.graphics.BitmapFactory.decodeByteArray(png, 0, png.size) ?: throw IOException("o print veio vazio")
             val text = com.google.android.gms.tasks.Tasks.await(ocr.process(com.google.mlkit.vision.common.InputImage.fromBitmap(bmp, 0)))
             val pair = Regex("""^(\p{L}[\p{L} ]{1,24}?)\s*[:=]?\s*(\d[\d.,]*)$""")
-            val named = text.textBlocks.flatMap { it.lines }.mapNotNull { pair.find(it.text.trim())?.destructured?.let { (n, v) -> n.trim() to v.trimEnd('.', ',') } }
+            // preço em dinheiro de verdade ("R$ 53,99", lido "R 53,99") não é item do jogo: fica de fora
+            val money = Regex("""[$€£¥]|^(R|RS|US|USD|BRL|EUR)\b""", RegexOption.IGNORE_CASE)
+            val named = text.textBlocks.flatMap { it.lines }.filterNot { money.containsMatchIn(it.text.trim()) }
+                .mapNotNull { pair.find(it.text.trim())?.destructured?.let { (n, v) -> n.trim() to v.trimEnd('.', ',') } }
                 .distinctBy { learnKey(it.first) }
             // sem nome escrito (DYSMANTLE: o número fica embaixo do ícone, "3", "1+16"): os números soltos, da esquerda
             // para a direita e de cima para baixo, viram "Item 1", "Item 2"…; em "1+16" vale o da direita (o do inventário)

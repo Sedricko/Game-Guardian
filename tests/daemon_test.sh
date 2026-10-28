@@ -169,6 +169,10 @@ grep -qE "^$maddr i32 (Ch|A) 1$" <<<"$ph" && grep -qE "^$m4 i32 (Ch|A) 12445$" <
     && grep -qx "ok 0" <<<"$ph" && grep -qx "ok 12345" <<<"$ph" && grep -qx "err tire a foto antes" <<<"$ph" \
     && grep -qxE "ok [1-9][0-9]? 0" <<<"$ph" && grep -qx "ok 12445" <<<"$ph" || { echo "FALHOU: foto do jogo"; exit 1; }
 
+# reserva de 512 MB nunca usada (como a do Unity no emulador): a busca lê e a foto seguinte ainda pula (era 15 GB no Orecraft)
+rv=$(printf '%s\n' "attach $pid" "ranges A" "search i32 7" "photo" "photodrop" | "$out/tinkerd")
+grep -qxE "ok [0-9]{1,2}" <<<"$(sed -n 5p <<<"$rv")" || { echo "FALHOU: memória reservada vazia entrou na foto: $rv"; exit 1; }
+
 # 👁 Monitor: o contador (muda toda hora) vira ruído no photonoise2; a moeda que sobe 5 aparece com antes e depois;
 # o salto grande vira lixo; na rodada seguinte, sem mudança, nada; e o photowin aceita centenas de faixas
 wl=$(for k in $(seq 300); do printf '%x-%x,' $((0x10000000 + k * 0x10000)) $((0x10000000 + k * 0x10000 + 0x1000)); done)
