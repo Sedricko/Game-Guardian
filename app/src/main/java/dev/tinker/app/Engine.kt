@@ -441,7 +441,8 @@ class Engine private constructor(private val app: Context) {
     /** Roda work com o jogo pausado (se a opção estiver ligada) e sempre continua o jogo depois. */
     private fun <T> Daemon.frozenGame(few: Boolean = false, work: () -> T): T {
         // poucos candidatos (refino rápido, em milissegundos): não pausa; pausar e continuar o jogo dava um tranco à toa
-        val auto = Session.autoPause && !Session.paused && !few
+        // no 🎯 Achar sozinho e na procura de itens a pessoa está jogando: pausar a cada refino travava o jogo sem parar
+        val auto = Session.autoPause && !Session.paused && !few && Session.autoFind == null && !Session.itemsBusy
         if (auto) send("pause", quiet = true)
         try {
             return work()
