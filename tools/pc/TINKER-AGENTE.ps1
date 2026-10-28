@@ -753,14 +753,15 @@ function Run-Missions($v) {
         if ($now -lt 500 -or $now -gt 505) { throw "a tela mostra $now (logo depois: $logo; no endereco: $mem; pid do jogo: $pid2) ($($t.msg))" }
         "a tela mostra $now ($($t.msg))"
     }
-    # nivel 17: 👁 monitor de memoria, sem tela e sem nome: o agente toca "+1 lenha" a cada 6 s; o monitor tem de achar o
+    # nivel 17: 👁 monitor de memoria, sem nome: o agente toca "+1 lenha" em momentos soltos (3 a 14 s, como quem joga;
+    # num ritmo fixo a lenha pareceria um relogio e seria descartada como estrutura); o monitor tem de achar o
     # endereco da lenha entre os que mudaram por evento (afunilando). Conferido: escreve +5 em cada candidato e le a tela
     Mission "nivel 17: monitor de memoria acha a lenha sem tela (afunilando)" {
         $job = Start-Job -ArgumentList $adb, $game -ScriptBlock {
             param($adb, $game)
-            for ($i = 0; $i -lt 30; $i++) { Start-Sleep 6; & $adb shell am broadcast -p $game -a dev.tinker.testgame.ACAO --es acao "'+1 lenha'" | Out-Null }
+            for ($i = 0; $i -lt 40; $i++) { Start-Sleep (Get-Random -Minimum 3 -Maximum 15); & $adb shell am broadcast -p $game -a dev.tinker.testgame.ACAO --es acao "'+1 lenha'" | Out-Null }
         }
-        try { Step "monitorar 120" | Out-Null } finally { Stop-Job $job; Remove-Job $job -Force }
+        try { Step "monitorar 180" | Out-Null } finally { Stop-Job $job; Remove-Job $job -Force }
         $linhas = $script:last -split "`n"
         $cands = @($linhas | Where-Object { $_ -like "mudou *" } | ForEach-Object { $f = $_ -split ' '; [pscustomobject]@{ addr = $f[1]; v = [double]$f[2]; reg = $f[3] } })
         $log = ($linhas | Where-Object { $_ -like "log *" }) -join ' / '

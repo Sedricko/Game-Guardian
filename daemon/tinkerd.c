@@ -905,7 +905,7 @@ static void read_thread_sps(void) {
 }
 
 // faixas de endereço da foto ("photowin a-b,c-d"): o monitor vai afunilando — região, bloco, página — até o objeto
-static uint64_t win_lo[64], win_hi[64];
+static uint64_t win_lo[512], win_hi[512];
 static int nwin;
 
 static void add_photo_chunks(uint64_t s, uint64_t e, int region, void *ctx) {
@@ -917,14 +917,14 @@ static void add_photo_chunks(uint64_t s, uint64_t e, int region, void *ctx) {
     }
 }
 
-// "photowin off" ou "photowin 7a000000-7a100000,7b000000-7b010000" (hex, até 64 faixas, alinhadas a 4 bytes)
+// "photowin off" ou "photowin 7a000000-7a100000,7b000000-7b010000" (hex, até 512 faixas, alinhadas a 4 bytes)
 static void cmd_photowin(const char *arg) {
     nwin = 0;
     if (!arg || !strcmp(arg, "off")) { puts("ok 0"); return; }
-    char buf[4096];
+    static char buf[16384];
     snprintf(buf, sizeof buf, "%s", arg);
     char *save = NULL;
-    for (char *tok = strtok_r(buf, ",", &save); tok && nwin < 64; tok = strtok_r(NULL, ",", &save)) {
+    for (char *tok = strtok_r(buf, ",", &save); tok && nwin < 512; tok = strtok_r(NULL, ",", &save)) {
         char *dash = strchr(tok, '-');
         if (!dash) { nwin = 0; puts("err faixa inválida (use início-fim em hex)"); return; }
         uint64_t lo = strtoull(tok, NULL, 16) & ~3ULL, hi = strtoull(dash + 1, NULL, 16) & ~3ULL;
@@ -1014,6 +1014,74 @@ static void cmd_photodiff(void) {
     collect(out, photo.n);
     if (nres > list_max) nres = list_max;
     printf("ok %zu\n", nres);
+}
+
+// 👁 monitor: a foto passa a guardar o valor de agora (cada rodada compara com a anterior). "photonoise2": o que
+// muda de novo 2 s depois é ruído (animação); um recurso quase nunca muda duas vezes em 2 s
+static void rebase_chunk(size_t ci, unsigned char *buf, void *ctx) {
+    uint8_t *seen = ctx;
+    const chunk_t *c = &photo.c[ci];
+    unsigned char *cur = buf, *old = buf + CHUNK;
+    uint8_t *m = pnoise + c->off / 32, *s = seen + c->off / 32;
+    if (read_mem(c->addr, cur, c->len) || pread(photofd, old, c->len, (off_t)c->off) != (ssize_t)c->len) return;
+    int dirty = 0;
+    for (size_t k = 0; k < c->len / 4; k++) {
+        if (!memcmp(cur + k * 4, old + k * 4, 4)) continue;
+        if (s[k >> 3] & (1 << (k & 7))) m[k >> 3] |= 1 << (k & 7);
+        else s[k >> 3] |= 1 << (k & 7);
+        dirty = 1;
+    }
+    if (dirty && pwrite(photofd, cur, c->len, (off_t)c->off) != (ssize_t)c->len) memset(m, 0xff, c->len / 32);
+}
+
+static void cmd_photonoise2(void) {
+    if (photofd < 0) { puts("err tire a foto antes"); return; }
+    uint8_t *seen = calloc(photo.total / 32 + 1, 1);
+    if (!seen) { puts("err sem memória"); return; }
+    parallel(photo.n, rebase_chunk, seen);
+    usleep(2000000);
+    parallel(photo.n, rebase_chunk, seen);
+    free(seen);
+    size_t n = 0;
+    for (size_t i = 0; i < photo.total / 32; i++) n += __builtin_popcount(pnoise[i]);
+    printf("ok %zu\n", n);
+}
+
+// "photostep N": o que mudou desde a rodada anterior, em degrau (1..10000) e com valor de recurso (1..10 milhões):
+// "endereço antes depois região". Salto grande (lixo do GC, float, ponteiro) vira ruído e não volta mais
+static void step_chunk(size_t ci, unsigned char *buf, void *ctx) {
+    hits_t *out = ctx;
+    const chunk_t *c = &photo.c[ci];
+    unsigned char *cur = buf, *old = buf + CHUNK;
+    uint8_t *m = pnoise + c->off / 32;
+    if (read_mem(c->addr, cur, c->len) || pread(photofd, old, c->len, (off_t)c->off) != (ssize_t)c->len) return;
+    int dirty = 0;
+    for (size_t k = 0; k < c->len / 4; k++) {
+        if ((m[k >> 3] & (1 << (k & 7))) || !memcmp(cur + k * 4, old + k * 4, 4)) continue;
+        dirty = 1;
+        int32_t o, v;
+        memcpy(&o, old + k * 4, 4);
+        memcpy(&v, cur + k * 4, 4);
+        int64_t d = (int64_t)v - o;
+        if (v < 1 || v > 10000000 || d < -10000 || d > 10000 || ptr_like(cur, k * 4, c->len)) { m[k >> 3] |= 1 << (k & 7); continue; }
+        hpush(&out[ci], (hit_t){c->addr + k * 4, (uint32_t)o | (uint64_t)(uint32_t)v << 32, (uint16_t)T_I32, c->region});
+    }
+    if (dirty && pwrite(photofd, cur, c->len, (off_t)c->off) != (ssize_t)c->len) memset(m, 0xff, c->len / 32);
+}
+
+static void cmd_photostep(size_t n) {
+    if (photofd < 0) { puts("err tire a foto antes"); return; }
+    hits_t *out = calloc(photo.n ? photo.n : 1, sizeof *out);
+    if (!out) { puts("err sem memória"); exit(1); }
+    parallel(photo.n, step_chunk, out);
+    drop_snap();
+    nres = nprev = 0;
+    collect(out, photo.n);
+    size_t total = nres;
+    for (size_t i = 0; i < nres && i < n; i++)
+        printf("%" PRIx64 " %" PRId32 " %" PRId32 " %s\n", res[i].addr, (int32_t)(uint32_t)res[i].old, (int32_t)(uint32_t)(res[i].old >> 32), REGIONS[res[i].region]);
+    nres = 0;  // antes|depois juntos no campo old: não servem para refinar
+    printf("ok %zu\n", total);
 }
 
 // valor que o Dword tinha na foto
@@ -2927,7 +2995,8 @@ int main(void) {
     signal(SIGTERM, on_exit_signal);
     signal(SIGHUP, on_exit_signal);
     signal(SIGINT, on_exit_signal);
-    char line[1024], cmd[32], a1[400], a2[128], a3[128], a4[128];
+    static char line[24576];  // grande: "photowin" leva até 512 faixas (lidas da linha, não do a1)
+    char cmd[32], a1[400], a2[128], a3[128], a4[128];
     pthread_t ft;
     if (!pthread_create(&ft, NULL, freeze_thread, NULL)) pthread_detach(ft);
     puts("ok tinkerd 4");
@@ -2994,7 +3063,7 @@ int main(void) {
         if (!alive()) { puts("err o jogo fechou"); continue; }
         if (!strcmp(cmd, "regions")) cmd_regions();
         else if (!strcmp(cmd, "ranges")) puts(set_ranges(a1) ? "ok" : "err região inválida");
-        else if (!strcmp(cmd, "photowin")) cmd_photowin(a1);
+        else if (!strcmp(cmd, "photowin")) { line[strcspn(line, "\r\n")] = 0; cmd_photowin(*a1 ? strstr(line, a1) : NULL); }
         else if (!strcmp(cmd, "search")) cmd_search(a1, a2);
         else if (!strcmp(cmd, "group")) cmd_group(a1, a2, a3);
         else if (!strcmp(cmd, "refine")) cmd_compare("eq", a1);
@@ -3016,6 +3085,8 @@ int main(void) {
         else if (!strcmp(cmd, "photo")) cmd_photo();
         else if (!strcmp(cmd, "photonoise")) cmd_photonoise();
         else if (!strcmp(cmd, "photodiff")) cmd_photodiff();
+        else if (!strcmp(cmd, "photonoise2")) cmd_photonoise2();
+        else if (!strcmp(cmd, "photostep")) cmd_photostep(*a1 ? strtoul(a1, NULL, 10) : 20000);
         else if (!strcmp(cmd, "photorestore")) cmd_photorestore(strcmp(a1, "except") ? a1 : strstr(line, "except"));
         else if (!strcmp(cmd, "photodrop")) { drop_photo(); puts("ok"); }
         else if (!strcmp(cmd, "activity")) cmd_activity(a1);

@@ -169,6 +169,15 @@ grep -qE "^$maddr i32 (Ch|A) 1$" <<<"$ph" && grep -qE "^$m4 i32 (Ch|A) 12445$" <
     && grep -qx "ok 0" <<<"$ph" && grep -qx "ok 12345" <<<"$ph" && grep -qx "err tire a foto antes" <<<"$ph" \
     && grep -qxE "ok [1-9][0-9]? 0" <<<"$ph" && grep -qx "ok 12445" <<<"$ph" || { echo "FALHOU: foto do jogo"; exit 1; }
 
+# 👁 Monitor: o contador (muda toda hora) vira ruído no photonoise2; a moeda que sobe 5 aparece com antes e depois;
+# o salto grande vira lixo; na rodada seguinte, sem mudança, nada; e o photowin aceita centenas de faixas
+wl=$(for k in $(seq 300); do printf '%x-%x,' $((0x10000000 + k * 0x10000)) $((0x10000000 + k * 0x10000 + 0x1000)); done)
+st=$( { printf '%s\n' "attach $pid" "photowin ${wl%,}" "photowin off" "write $maddr i32 12345" "photo" "photonoise2" "write $maddr i32 12350" "write $m4 i32 99999999" "photostep"; sleep 0.1
+        printf '%s\n' "photostep" "write $maddr i32 12345" "write $m4 i32 0" "photodrop"; } | "$out/tinkerd")
+echo "$st" | head -20
+grep -qx "ok 300" <<<"$st" && grep -qE "^$maddr 12345 12350 (Ch|A)$" <<<"$st" && ! grep -qE "^($m4|$taddr) " <<<"$st" \
+    && [ "$(grep -cE "^$maddr " <<<"$st")" = 1 ] || { echo "FALHOU: monitor (photonoise2/photostep)"; exit 1; }
+
 # Backup do save: guarda a pasta do jogo, muda o save, volta o backup e o save antigo reaparece
 mkdir -p "$out/data/com.teste.jogo/files" "$out/data/com.teste.jogo/cache"; echo v1 > "$out/data/com.teste.jogo/files/save.dat"; echo lixo > "$out/data/com.teste.jogo/cache/x"
 bk=$(printf '%s\n' "backup com.teste.jogo" "backup ../etc" | TINKER_DATA_DIR="$out/data" TINKER_SAVES_DIR="$out/saves" "$out/tinkerd")

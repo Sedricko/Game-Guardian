@@ -2051,77 +2051,113 @@ class Engine private constructor(private val app: Context) {
     private var monitorJob: kotlinx.coroutines.Job? = null
 
     /**
-     * 👁 Monitor de memória, como o Cheat Engine mas sozinho: foto da memória (só nas regiões de valores), 4 s parado
-     * para marcar o que muda sozinho (relógio, animação), e a cada 8 s compara com a foto. O que muda em degraus
-     * (recurso: +1, +5, -10 em momentos soltos) entra na lista com o histórico; não precisa da tela nem do nome.
+     * 👁 Monitor de memória, como o Cheat Engine mas sozinho. Cada rodada (8 s) compara com a anterior (daemon photostep):
+     * - ruído (animação): mudou de novo em 2 s; lixo (GC, float, ponteiro): salto grande — os dois saem de vez;
+     * - estrutura (relógio, contador): os valores ficam numa reta no tempo;
+     * - evento (recurso): muda quando o jogador age, em tamanhos diferentes; vale mais se o número aparece na tela.
+     * Funil: regiões → blocos de 1 MB → páginas de 4 KB → objeto (512 B); só desce quando os mais fortes se destacam.
+     * Conferido sem celular em tools/sim/monitor_sim.py (mesmas regras).
      */
     fun monitorStart() {
         if (monitorJob?.isActive == true) return
         monitorJob = scope.launch {
             withContext(Dispatchers.Main) { Session.monitorOn = true; Session.itemsLog.clear() }
-            val hist = LinkedHashMap<String, MutableList<Long>>()
-            val region = HashMap<String, String>()  // a região de cada um: ao salvar, o jogo passa a ser monitorado só ali
+            val hist = LinkedHashMap<String, MutableList<Long>>()  // valores, a começar pelo de antes da 1ª mudança
+            val obs = HashMap<String, MutableList<Pair<Long, Long>>>()  // (segundo, valor) de cada mudança vista
+            val onScreen = HashMap<String, Int>()  // quantas vezes o valor novo apareceu escrito na tela
+            val shownAt = HashMap<String, Long>()
+            val region = HashMap<String, String>()
+            val t0 = System.currentTimeMillis()
             try {
-                itemLog("👁 Foto da memória (regiões de valores)…")
-                // onde este jogo guarda o que já foi achado (salvos e o que o agente aprendeu): começa só ali, que é menor e
-                // mais rápido; sem nada aprendido ainda, as regiões de valores
                 val focus = focusRegions().ifEmpty { setOf("Jh", "J", "Ca", "Cb", "A") }
                 itemLog("👁 Regiões: ${focus.joinToString()}" + if (focusRegions().isEmpty()) " (ainda não sei onde este jogo guarda)" else " (onde este jogo guarda o que já achei)")
-                // foto (de novo) só nas faixas dadas: o funil — regiões → blocos de 1 MB → páginas → o objeto
                 suspend fun shoot(wins: List<Pair<Long, Long>>): String {
                     val mb = call { d ->
                         d.send("photowin " + (wins.joinToString(",") { "${it.first.toString(16)}-${it.second.toString(16)}" }.ifEmpty { "off" }), quiet = true)
                         d.send("ranges ${focus.joinToString(",")}", quiet = true)
                         try { d.send("photo").status } finally { d.send("ranges all", quiet = true) }
                     }
-                    delay(4000)
-                    val noise = call { d -> d.send("photonoise").status }
+                    delay(2000)
+                    val noise = call { d -> d.send("photonoise2").status }  // o daemon olha de novo 2 s depois
                     return "$mb MB, $noise mudam sozinhos (ficam fora)"
                 }
-                // faixas em volta dos que mudaram por evento, juntando as que se encostam (até 64)
                 fun windows(addrs: Collection<String>, half: Long): List<Pair<Long, Long>> =
                     addrs.mapNotNull { it.toLongOrNull(16) }.sorted().map { (it - half).coerceAtLeast(0) to it + half }
                         .fold(mutableListOf<Pair<Long, Long>>()) { acc, w -> if (acc.isNotEmpty() && w.first <= acc.last().second) acc[acc.lastIndex] = acc.last().first to maxOf(acc.last().second, w.second) else acc += w; acc }
-                        .take(64)
+                        .take(512)
+                // relógio/contador: sobe (ou desce) sempre no mesmo ritmo, então os valores ficam numa reta no tempo
+                fun structural(a: String): Boolean {
+                    val o = obs[a] ?: return false
+                    if (o.size < 6) return false  // +1 em momentos soltos também parece reta com poucas mudanças
+                    val d = o.zipWithNext { x, y -> y.second - x.second }
+                    if (d.any { it <= 0 } && d.any { it >= 0 }) return false
+                    val (ta, va) = o.first(); val (tb, vb) = o.last()
+                    if (tb == ta) return false
+                    val k = (vb - va).toDouble() / (tb - ta)
+                    return o.all { (t, v) -> kotlin.math.abs(v - (va + k * (t - ta))) <= 1.0 }
+                }
+                fun score(a: String) = hist[a]!!.size + 5 * (onScreen[a] ?: 0)
+                // a área fina guardada só vale no mesmo processo: o jogo reiniciado põe tudo em outro endereço
                 val key = "funil-" + (savedPkg ?: "")
-                // a última área fina deste jogo: começa já nela (a próxima vez é mais rápida)
-                var wins = prefs.getString(key, "").orEmpty().split(',').mapNotNull { w -> w.split('-').takeIf { it.size == 2 }?.let { (a, b) -> (a.toLongOrNull(16) ?: return@let null) to (b.toLongOrNull(16) ?: return@let null) } }
-                itemLog("👁 Foto: " + shoot(wins) + if (wins.isNotEmpty()) " · comecei na área que achei da última vez (${wins.size} faixas)" else "")
+                val pid = Session.process?.pid?.toString().orEmpty()
+                var wins = prefs.getString(key, "").orEmpty().takeIf { it.substringBefore('|') == pid && pid.isNotEmpty() }?.substringAfter('|').orEmpty()
+                    .split(',').mapNotNull { w -> w.split('-').takeIf { it.size == 2 }?.let { (a, b) -> (a.toLongOrNull(16) ?: return@let null) to (b.toLongOrNull(16) ?: return@let null) } }
+                itemLog("👁 Foto: " + shoot(wins) + if (wins.isNotEmpty()) " · comecei na área que achei antes neste mesmo jogo aberto (${wins.size} faixas)" else "")
                 itemLog("👁 Pode jogar: comparo a cada 8 s e vou afunilando.")
                 var round = 0
+                var shot = 0
+                var empty = 0
                 var level = if (wins.isEmpty()) 0 else 2  // 0 regiões, 1 blocos de 1 MB, 2 páginas, 3 objeto
                 while (true) {
                     delay(8000)
                     round++
+                    val now = (System.currentTimeMillis() - t0) / 1000
                     val got = call { d ->
-                        d.send("photodiff")
-                        d.send("list 3000", quiet = true).lines.mapNotNull { l ->
+                        d.send("photostep 20000", quiet = true).lines.mapNotNull { l ->
                             val f = l.split(' ')
-                            val v = f.getOrNull(3)?.toLongOrNull() ?: return@mapNotNull null
-                            Triple(f[0], v, f.getOrElse(2) { "" })
+                            if (f.size < 4) return@mapNotNull null
+                            Triple(f[0], (f[1].toLongOrNull() ?: return@mapNotNull null) to (f[2].toLongOrNull() ?: return@mapNotNull null), f[3])
                         }
                     }
-                    for ((a, v, r) in got) { region[a] = r; if (v in 1..10_000_000) hist.getOrPut(a) { mutableListOf() }.let { h -> if (h.lastOrNull() != v) h += v } }
-                    // muda em quase toda rodada: é da estrutura do jogo (relógio lento, posição, animação), não um evento
-                    val structural = hist.count { (_, h) -> round >= 3 && h.size - 1 >= round * 8 / 10 }
-                    // recurso: mudou pelo menos 2 vezes, em degraus pequenos e em momentos soltos (porque algo aconteceu)
-                    val cands = hist.filter { (_, h) -> h.size >= 2 && !(round >= 3 && h.size - 1 >= round * 8 / 10) &&
-                        h.zipWithNext().all { (x, y) -> kotlin.math.abs(y - x) in 1..10_000 } }
-                        .entries.sortedByDescending { it.value.size }.take(40)
-                    val items = cands.mapIndexed { i, (a, h) ->
+                    for ((a, ov, r) in got) {
+                        val (old, v) = ov
+                        region[a] = r
+                        val h = hist.getOrPut(a) { mutableListOf(old) }
+                        if (h.last() != v) h += v
+                        obs.getOrPut(a) { mutableListOf() } += now to v
+                    }
+                    // o número na tela (inventário aberto, contador do HUD): valor novo que aparece escrito vale +5
+                    val screen = runCatching { screenNumbers().map { it.first }.toSet() }.getOrDefault(emptySet())
+                    for ((a, h) in hist) if (h.last() in screen && shownAt[a] != h.last()) { shownAt[a] = h.last(); onScreen[a] = (onScreen[a] ?: 0) + 1 }
+                    val structuralN = hist.keys.count { (onScreen[it] ?: 0) < 2 && structural(it) }
+                    val cands = hist.filter { (a, h) -> h.size >= 2 && ((onScreen[a] ?: 0) >= 2 || !structural(a)) && h.zipWithNext().all { (x, y) -> kotlin.math.abs(y - x) in 1..10_000 } }
+                        .keys.sortedByDescending { score(it) }
+                    val items = cands.take(40).mapIndexed { i, a ->
+                        val h = hist[a]!!
                         GameItem("Mudou ${i + 1}", h.last().toString(), "📈", "i32", h.size.toLong(), Hit(a, "i32", region[a].orEmpty(), h.last().toString()),
-                            "mudou ${h.size - 1}× desde a foto: " + h.takeLast(6).joinToString(" → "))
+                            "mudou ${h.size - 1}×" + (onScreen[a]?.let { " · na tela ${it}×" } ?: "") + ": " + h.takeLast(6).joinToString(" → "))
                     }
                     withContext(Dispatchers.Main) { Session.items = Session.items.filter { it.icon != "📈" } + items; Session.itemsReady = Session.items.count { it.hit != null } }
-                    itemLog("👁 Rodada $round: ${got.size} mudaram desde a foto · $structural mudam sempre (estrutura do jogo) · ${items.size} mudaram por evento, em degraus (prováveis recursos)")
-                    // afunila a cada 3 rodadas com eventos: só olha em volta do que mudou por evento (e guarda para a próxima vez)
-                    if (cands.isNotEmpty() && round % 3 == 0 && level < 3) {
+                    itemLog("👁 Rodada $round: ${got.size} mudaram em degrau · $structuralN são relógio/contador (estrutura) · ${cands.size} mudaram por evento" +
+                        (cands.firstOrNull()?.let { " · o mais forte: ${hist[it]!!.takeLast(4).joinToString(" → ")}" + (onScreen[it]?.let { n -> " (na tela ${n}×)" } ?: "") } ?: ""))
+                    empty = if (cands.isEmpty()) empty + 1 else 0
+                    if (level > 0 && empty >= 3) {  // a área ficou sem nada: volta a olhar tudo
+                        level = 0; wins = emptyList(); hist.clear(); obs.clear(); shot = round
+                        itemLog("👁 ↺ Nada na área: volto às regiões. " + shoot(wins))
+                        continue
+                    }
+                    // só desce com prova: até os blocos vale tudo; daí para baixo, só quando os 512 mais fortes se destacam
+                    val sep = level == 0 || cands.size <= 512 || score(cands[511]) * 2 <= score(cands[minOf(39, cands.size - 1)])
+                    if (cands.isNotEmpty() && level < 3 && round - shot >= 3 && sep) {
                         level++
                         val half = when (level) { 1 -> 512L * 1024; 2 -> 4096L; else -> 512L }
-                        wins = windows(cands.map { it.key }, half)
-                        prefs.edit().putString(key, wins.joinToString(",") { "${it.first.toString(16)}-${it.second.toString(16)}" }).apply()
+                        wins = windows(if (level == 1) cands else cands.take(512), half)
+                        prefs.edit().putString(key, "$pid|" + wins.joinToString(",") { "${it.first.toString(16)}-${it.second.toString(16)}" }).apply()
+                        shot = round
                         val kb = wins.sumOf { it.second - it.first } / 1024
                         itemLog("👁 Afunilando (${listOf("regiões", "blocos de 1 MB", "páginas", "objetos")[level]}): ${wins.size} faixas, $kb KB. " + shoot(wins))
+                        // o que ficou fora das faixas não atualiza mais: sai do histórico
+                        hist.keys.retainAll { a -> a.toLongOrNull(16)?.let { x -> wins.any { x >= it.first && x < it.second } } == true }
                     }
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
