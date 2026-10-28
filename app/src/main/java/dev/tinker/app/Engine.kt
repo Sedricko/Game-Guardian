@@ -1481,7 +1481,9 @@ class Engine private constructor(private val app: Context) {
                         "opção que ainda não está nas suas anotações: toque nela uma vez, olhe o print de depois e anote numa linha: " +
                         "O QUÊ (a opção) | ONDE fica | PARA QUE serve | POR QUE usar (o que ganha) | QUANDO usar (o que precisa antes, " +
                         "tempo de espera) | PARA QUEM (qual recurso ou construção ela afeta) | RESULTADO (o que custou, quais números " +
-                        "subiram ou desceram e quanto)." +
+                        "subiram ou desceram e quanto). Antes de tocar, diga o que espera que aconteça; depois compare: se viu o mesmo " +
+                        "resultado de uma anotação antiga, anote de novo com (confirmado); se mudou, anote com (mudou). Anote também as " +
+                        "dependências (X precisa de Y; Y vem de Z) e, no fim, o OBJETIVO para a próxima rodada (o que buscar primeiro)." +
                         (if (known.isBlank()) "" else "\n\nO que você já aprendeu deste jogo em rodadas anteriores (use para jogar melhor e não repetir):\n$known")
                     while (System.currentTimeMillis() < end - 5000) {
                         val a = withTimeoutOrNull(end - System.currentTimeMillis()) { Assistant.ask(chat, { "" }, q, play) { log += it } } ?: break
@@ -2135,6 +2137,7 @@ class Engine private constructor(private val app: Context) {
     }
 
     private var monitorJob: kotlinx.coroutines.Job? = null
+    @Volatile private var lastAction: Pair<Long, String>? = null
 
     /**
      * 👁 Monitor de memória, como o Cheat Engine mas sozinho. Cada rodada (8 s) compara com a anterior (daemon photostep):
@@ -2215,6 +2218,14 @@ class Engine private constructor(private val app: Context) {
                     // o número na tela (inventário aberto, contador do HUD): valor novo que aparece escrito vale +5
                     val screen = runCatching { screenNumbers().map { it.first }.toSet() }.getOrDefault(emptySet())
                     for ((a, h) in hist) if (h.last() in screen && shownAt[a] != h.last()) { shownAt[a] = h.last(); onScreen[a] = (onScreen[a] ?: 0) + 1 }
+                    // a IA tocou numa opção nesta rodada: o que mudou na memória vai junto da anotação ("ação → endereço"),
+                    // primeiro os que agora batem com um número da tela; assim o bot aprende o endereço só de ver jogar
+                    lastAction?.takeIf { System.currentTimeMillis() - it.first < 9000 && got.isNotEmpty() }?.let { act ->
+                        lastAction = null
+                        val pick = got.filter { (a, _, _) -> !structural(a) }.sortedByDescending { (_, ov, _) -> ov.second in screen }.take(6)
+                        notesFile?.let { f -> appendNote(f, "Ação \"${act.second}\" → na memória mudou: " +
+                            pick.joinToString { (a, ov, _) -> "0x$a ${ov.first}→${ov.second}" + if (ov.second in screen) " (na tela)" else "" } + " (${got.size} mudaram na rodada)", 8000) }
+                    }
                     val structuralN = hist.keys.count { (onScreen[it] ?: 0) < 2 && structural(it) }
                     val cands = hist.filter { (a, h) -> h.size >= 2 && ((onScreen[a] ?: 0) >= 2 || !structural(a)) && h.zipWithNext().all { (x, y) -> kotlin.math.abs(y - x) in 1..10_000 } }
                         .keys.sortedByDescending { score(it) }
@@ -3074,6 +3085,7 @@ class Engine private constructor(private val app: Context) {
             "mudar. Depois do toque vem um print novo. NUNCA toque em compras com dinheiro real, preços em R$/US$, assinaturas ou na Play Store.",
             mapOf("x" to "x no último print", "y" to "y no último print", "motivo" to "o que esse toque faz (ex.: botão Melhorar, custa 150 ouro)"), listOf("x", "y", "motivo")) { a ->
             val (x, y) = screenPoint(a.optString("x"), a.optString("y")) ?: return@AiTool "Coordenada fora do último print. Use ver_tela antes e coordenadas dele."
+            lastAction = System.currentTimeMillis() to a.optString("motivo")  // o 👁 monitor liga esta ação ao que mudou na memória
             aiInput("tap $x $y")
         },
         AiTool("arrastar", "Arrasta na tela do jogo de um ponto a outro do último print (rolar lista, mover mapa).",
