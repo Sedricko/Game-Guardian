@@ -66,7 +66,8 @@ object Session {
     var sheetGroqKeys = setOf<String>()  // chaves do Groq que vieram do painel
     val pendingLessons = mutableStateListOf<String>()  // lições que a IA propôs, esperando a pessoa aprovar
     var autoFind by mutableStateOf<String?>(null)  // 🎯 Achar sozinho rodando: o que está fazendo agora (null = parado)
-    var items by mutableStateOf<List<GameItem>>(emptyList())  // 📋 Itens do jogo: o que ele achou sozinho para editar/congelar
+    var items by mutableStateOf<List<GameItem>>(emptyList())
+    var itemsPid = 0  // a vez do jogo em que a lista já foi feita sozinha (abrir o menu de novo não procura de novo)  // 📋 Itens do jogo: o que ele achou sozinho para editar/congelar
     var autoFindWinner by mutableStateOf<Hit?>(null)  // o que mudou o número da tela no teste
     var aiCanTest by mutableStateOf(false)  // a IA pode escrever um valor de teste (e voltar o original) para saber se é o verdadeiro
     var aiAuto by mutableStateOf(false)  // modo autônomo 1: a IA aplica, congela, testa e cria receitas sem esperar o toque

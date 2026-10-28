@@ -686,8 +686,12 @@ private val TIGHT = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
 private fun ItemsPanel(engine: Engine, enabled: Boolean, run: (suspend () -> String) -> Unit) {
     val s = Session
     // ao escolher um jogo (não o de teste, que as missões comandam), procura sozinho depois de o jogo carregar
+    // uma vez por vez do jogo: o efeito roda de novo a cada vez que o menu abre, e procurar de novo escondia o menu
+    // (ele sai da frente para ler a tela) — a pessoa abria e ele fechava sozinho 6 s depois, sem parar
     LaunchedEffect(s.process?.pid) {
         val p = s.process ?: return@LaunchedEffect
+        if (s.itemsPid == p.pid) return@LaunchedEffect
+        s.itemsPid = p.pid
         s.items = emptyList()
         if (p.pkg != TEST_GAME) { delay(6000); run { engine.scanItems() } }
     }
