@@ -2002,12 +2002,18 @@ class Engine private constructor(private val app: Context) {
             val base = t?.substringBefore('*')
             val v = if (k > 1) num.toDoubleOrNull()?.let { (it * k).toLong().toString() } ?: num else num
             runCatching { search(base?.let { setOf(it) } ?: emptySet(), v) }
-            val (n, hits) = list()
+            var (n, hits) = list()
+            // o que já se sabia não vale sem conferir: o tipo antigo não achou nada aqui → busca do zero (Auto)
+            if ((n ?: 0L) == 0L && base != null) {
+                itemLog("$label: o que eu sabia (${typeLabel(t)}) não achou nada agora; buscando do zero")
+                runCatching { search(emptySet(), num) }
+                list().let { n = it.first; hits = it.second }
+            }
             val c = n ?: 0L
             val known = all.any { it.game == game && it.name == key && it.wins > 0 }
             val status = when {
                 c == 0L -> "não achei com ${typeLabel(t ?: "auto")}"
-                c == 1L -> (if (known) "já sabia" else "provável") + " · 0x${hits.first().addr}"
+                c == 1L -> (if (known) "achado agora (bate com o que eu sabia)" else "achado agora") + " · 0x${hits.first().addr}"
                 c <= 3L -> "$c lugares: use 🎯 Achar sozinho"
                 else -> "$c lugares: jogue um pouco e use 🎯 Achar sozinho"
             }
@@ -2074,11 +2080,28 @@ class Engine private constructor(private val app: Context) {
         }.onFailure { Diag.add("Agente offline não foi para a planilha: ${it.message}") } }
     }
 
+    /**
+     * 🧹 Esquecer este jogo: tira do aparelho o que o agente aprendeu dele (dúvidas antigas que ninguém conferiu) e não
+     * traz mais da planilha; ele volta a aprender só com o que confirmar. Na planilha nada é apagado: as linhas desse
+     * jogo passam a receber os números novos.
+     */
+    fun forgetGame(pkg: String): String {
+        val before = knowledge()
+        storeKnowledge(before.filter { it.game != pkg }, push = false)
+        prefs.edit().putStringSet("esquecidos", forgotten() + pkg).apply()
+        Session.items = emptyList()
+        Session.itemsPid = 0
+        Diag.add("Agente offline esqueceu $pkg: ${before.count { it.game == pkg }} nomes")
+        return "Esqueci ${before.count { it.game == pkg }} coisas que eu sabia deste jogo. Agora aprendo do zero, só com o que eu confirmar."
+    }
+    private fun forgotten(): Set<String> = prefs.getStringSet("esquecidos", emptySet()).orEmpty()
+
     /** Traz da aba Agente offline o que ele aprendeu em outros aparelhos (o ensinado vem do código). */
     private fun agentPull(): String {
         val url = panelUrl("agente=1") ?: return ""
         val a = panelGet(url).mapCatching { JSONObject(it).takeIf { j -> j.optString("tinker") == "agente-offline" }?.optJSONArray("aprende") }.getOrNull() ?: return ""
-        val got = (0 until a.length()).mapNotNull { a.optJSONObject(it)?.toKnow() }.filter { it.game != "*" && PKG.matches(it.game) }
+        val gone = forgotten()  // jogo esquecido: o que estava na planilha dele era o antigo, que a pessoa quis largar
+        val got = (0 until a.length()).mapNotNull { a.optJSONObject(it)?.toKnow() }.filter { it.game != "*" && PKG.matches(it.game) && it.game !in gone }
         storeKnowledge(mergeKnow(knowledge(), got), push = false)
         return " · agente offline: ${got.size} da planilha"
     }

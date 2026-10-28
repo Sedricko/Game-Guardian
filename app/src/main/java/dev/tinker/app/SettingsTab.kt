@@ -340,7 +340,16 @@ internal fun SettingsTab(engine: Engine, overlay: Boolean, onResize: () -> Unit,
                     "primeiro o que errou. Sem internet e sem gastar a IA. Com um tipo marcado na busca, vale o seu.", s.offlineAgent) { s.offlineAgent = it; engine.saveSettings() }
                 Toggle("Pedir ajuda à IA quando não souber", "Quando não acha, faz uma pergunta curta à IA (poucos tokens, precisa de internet e de chave) e tenta de novo no " +
                     "tipo que ela sugerir. Só guarda se der certo, com origem IA; o aprendizado da IA fica separado.", s.offlineBorrowAi) { s.offlineBorrowAi = it; engine.saveSettings() }
-                val know = remember(s.offlineAgent, s.autoFind) { engine.knowAll() }
+                // esquecer o jogo escolhido: dois toques (não tem volta no aparelho)
+                var forget by remember { mutableStateOf(false) }
+                var forgot by remember { mutableStateOf(0) }
+                s.process?.let { p ->
+                    if (forget) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Button(shape = MaterialTheme.shapes.medium, onClick = { s.status = engine.forgetGame(p.pkg); forget = false; forgot++ }) { Text("Esquecer mesmo") }
+                        TextButton(onClick = { forget = false }) { Text("Cancelar") }
+                    } else OutlinedButton(shape = MaterialTheme.shapes.medium, onClick = { forget = true }) { Text("🧹 Esquecer o que sabe de ${p.label}") }
+                }
+                val know = remember(s.offlineAgent, s.autoFind, forgot) { engine.knowAll() }
                 val mine = know.filter { it.game != "*" }
                 Section("O que ele sabe", "${mine.size} aprendidos jogando · ${know.count { it.game == "*" }} ensinados") {
                     mine.sortedByDescending { it.at }.take(30).forEach { k ->
