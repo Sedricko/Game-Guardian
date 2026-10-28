@@ -1138,9 +1138,15 @@ if (-not (Test-Path $tok) -and -not ((Get-Command gh -ErrorAction SilentlyContin
 function Run-Dysmantle {
     $dg = "com.the10tons.dysmantle"
     # o emulador com Play Store (Dysmantle_Play): o DYSMANTLE confere a compra pela Play Store; video pela placa do PC
-    # sem Vulkan: o do emulador nao mostra a imagem do DYSMANTLE (logcat NEXUS "failed to present a swapchain image"); com OpenGL vai
-    Start-Emulator "*Dysmantle_Play*" "host -feature -Vulkan" "Normal"
+    # o Dysmantle_Play ja ligado (pode estar em emulator-5556 se o outro ocupou a 5554): usa esse
+    foreach ($d in ((& $adb devices) | Select-String "^(emulator-\d+)\s+device" | ForEach-Object { $_.Matches.Groups[1].Value })) {
+        if (((& $adb -s $d emu avd name) | Select-Object -First 1) -like "*Dysmantle_Play*") { $env:ANDROID_SERIAL = $d }
+    }
+    # o DYSMANTLE (motor NEXUS) so desenha com Vulkan, e o Vulkan da placa no emulador nao mostra a imagem
+    # ("failed to present a swapchain image"): Vulkan por software
+    if ($env:ANDROID_SERIAL -eq "emulator-5554") { Start-Emulator "*Dysmantle_Play*" "swiftshader_indirect" "Normal" }
     & $adb wait-for-device
+    & $adb shell wm size 720x1560; & $adb shell wm density 320  # menos pixels: o video por software aguenta
     if (-not (Wait-Booted)) { Say "o emulador nao ligou"; return }
     $avd = ((& $adb emu avd name) | Select-Object -First 1)
     if ($avd -notlike "*Dysmantle_Play*") { Say "o emulador ligado e o $avd: feche ele e rode de novo (o DYSMANTLE fica no Dysmantle_Play)"; return }
