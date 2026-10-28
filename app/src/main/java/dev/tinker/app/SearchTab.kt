@@ -700,7 +700,16 @@ private fun ItemsPanel(engine: Engine, enabled: Boolean, run: (suspend () -> Str
             Text("📋 Itens do jogo", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
             TextButton(onClick = { run { engine.scanItems() } }, enabled = enabled) { Text(if (s.items.isEmpty()) "Procurar" else "↻ De novo") }
         }
-        if (s.items.isEmpty()) Text(
+        // o que ele está fazendo agora, passo a passo (fica depois de pronto, recolhido)
+        var showLog by remember { mutableStateOf(true) }
+        if (s.itemsLog.isNotEmpty()) {
+            if (s.itemsBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            TextButton(onClick = { showLog = !showLog }) { Text((if (showLog || s.itemsBusy) "▾ " else "▸ ") + "Registro da procura (${s.itemsLog.size})") }
+            if (showLog || s.itemsBusy) Column(Modifier.fillMaxWidth().heightIn(max = 160.dp).verticalScroll(rememberScrollState(Int.MAX_VALUE))) {
+                s.itemsLog.forEach { Text(it, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace) }
+            }
+        }
+        if (s.items.isEmpty() && s.itemsLog.isEmpty()) Text(
             "Ele lê a tela e acha sozinho o que dá para editar e congelar (dinheiro, vida, diamantes…), mesmo num jogo que nunca viu. " +
                 "Deixe na tela do jogo a parte que mostra os números (inventário, loja…) e toque em Procurar.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,

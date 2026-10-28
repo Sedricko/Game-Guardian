@@ -1913,12 +1913,23 @@ class Engine private constructor(private val app: Context) {
      * O mapa do jogo Unity (as classes com nome, como o dump.cs): campos com nome conhecido (gold = moeda, life = vida) nos
      * objetos vivos, com o endereço, e as funções úteis (TakeDamage = tira vida) com o que fixar. Jogo sem IL2CPP: lista vazia.
      */
+    // também no Registro (aba Registro e relatório para a planilha): dá para acompanhar de fora
+    private suspend fun itemLog(t: String) {
+        Diag.add("Itens: $t")
+        withContext(Dispatchers.Main) {
+            Session.itemsLog += t
+            while (Session.itemsLog.size > 60) Session.itemsLog.removeAt(0)
+        }
+    }
+
     private suspend fun scanIl2cpp(): List<GameItem> {
+        itemLog("Lendo o mapa do jogo (classes com nome)…")
         val classes = runCatching { call { d -> d.send("il2classes", quiet = true).lines } }.getOrDefault(emptyList())
             .filter { it.startsWith("class ") }.map { it.split(' ', limit = 5) }.filter { it.size == 5 && LIBS.none { l -> it[1].startsWith(l) } }
-        if (classes.isEmpty()) return emptyList()
+        if (classes.isEmpty()) return emptyList<GameItem>().also { itemLog("Sem mapa (não é Unity IL2CPP ou está escondido): vou pela tela.") }
         val out = mutableListOf<GameItem>()
         val withFields = classes.filter { c -> c[4].split(',').any { fieldMeaning(it) != null } }.take(30)
+        itemLog("Mapa: ${classes.size} classes do jogo; ${withFields.size} com campos conhecidos (moeda, vida…)")
         for (c in withFields) call { d ->
             val objs = runCatching { d.send("il2objs ${c[1]}", quiet = true).lines }.getOrDefault(emptyList())
                 .map { it.removePrefix("obj ") }.filter { it.toLongOrNull(16) != null }.take(50)
@@ -1929,6 +1940,7 @@ class Engine private constructor(private val app: Context) {
                 val (icon, what) = fieldMeaning(f.name) ?: return@forEach
                 val addr = (first + f.offset).toString(16)
                 val v = runCatching { d.send("read $addr $t", quiet = true).status }.getOrDefault("?")
+                itemLog("$icon ${cls.name}.${f.name} = $v  (${f.name} = $what)")
                 out += GameItem("${cls.name}.${f.name}", v, icon, t, objs.size.toLong(), Hit(addr, t, "Il2", v),
                     "${f.name} = $what · do mapa do jogo" + if (objs.size > 1) " · ${objs.size} objetos (o 1º)" else "")
             }
@@ -1938,6 +1950,7 @@ class Engine private constructor(private val app: Context) {
         val withMethods = (withFields + classes.filter { typical.containsMatchIn(it[1]) }).distinctBy { it[1] }.take(40)
         for (c in withMethods) runCatching { il2Methods(c[2]) }.getOrDefault(emptyList()).forEach { m ->
             val (what, fix, label) = methodMeaning(m.name) ?: return@forEach
+            itemLog("🔧 ${c[1]}.${m.name}() = $what")
             out += GameItem("${c[1]}.${m.name}()", "", "🔧", "fn", 0, null, "função: $what", m, c[1], fix.takeIf { label.isNotEmpty() }, label)
         }
         Diag.add("Mapa do jogo: ${out.count { it.method == null }} campos e ${out.count { it.method != null }} funções com nome conhecido")
@@ -1951,10 +1964,17 @@ class Engine private constructor(private val app: Context) {
      */
     suspend fun scanItems(): String {
         val game = savedPkg ?: return "Escolha o jogo primeiro."
-        // o painel em cima do jogo seria lido no lugar dele: sai da frente para o print
+        withContext(Dispatchers.Main) { Session.itemsLog.clear(); Session.itemsBusy = true }
+        try { return scanItemsNow(game) } finally { withContext(Dispatchers.Main) { Session.itemsBusy = false } }
+    }
+
+    private suspend fun scanItemsNow(game: String): String {
+        // o painel em cima do jogo seria lido no lugar dele: sai da frente para o print e volta logo depois
+        itemLog("Lendo a tela do jogo…")
         withContext(Dispatchers.Main) { Session.aiHidePanel = true }
         delay(900)
-        val pairs = try { screenLabels() } finally { withContext(Dispatchers.Main) { Session.aiHidePanel = false } }
+        val pairs = try { screenLabels() } finally { withContext(Dispatchers.Main) { Session.aiHidePanel = false; Session.openPanelReq++ } }
+        itemLog("Na tela: ${pairs.size} \"nome: número\" (" + pairs.joinToString { "${it.first} ${it.second}" } + ")")
         // primeiro o mapa do jogo (Unity): tem nome e tipo de tudo, até do que não aparece na tela
         val out = runCatching { scanIl2cpp() }.getOrDefault(emptyList()).toMutableList()
         withContext(Dispatchers.Main) { Session.items = out.toList() }
@@ -1979,11 +1999,13 @@ class Engine private constructor(private val app: Context) {
                 c <= 3L -> "$c lugares: use 🎯 Achar sozinho"
                 else -> "$c lugares: jogue um pouco e use 🎯 Achar sozinho"
             }
+            itemLog("$icon $label $shown → ${typeLabel(t ?: "auto")}: $status")
             out += GameItem(label, shown, icon, t ?: "auto", c, hits.singleOrNull(), status)
             withContext(Dispatchers.Main) { Session.items = out.toList() }
         }
         val ready = out.count { it.hit != null }
         val fns = out.count { it.method != null }
+        itemLog("Pronto: $ready com endereço, $fns funções.")
         Diag.add("Itens do jogo: ${out.size} (${fns} funções), $ready com endereço: " + out.joinToString { "${it.label}=${it.value} (${it.count})" })
         return "Itens do jogo: $ready prontos para editar ou congelar" + (if (fns > 0) ", $fns funções para fixar" else "") + "."
     }

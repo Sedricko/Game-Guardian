@@ -80,6 +80,8 @@ class OverlayService : Service() {
         watch.launch { snapshotFlow { Session.panelLeft }.collect { relayout() } }
         // a tela principal do Tinker aberta: a bolinha some dela e volta quando sai
         watch.launch { snapshotFlow { Session.appVisible }.collect { v -> bubble?.visibility = if (v) android.view.View.GONE else android.view.View.VISIBLE } }
+        // quem saiu da frente para ler a tela (📋 Itens do jogo) pede para o menu voltar
+        watch.launch { snapshotFlow { Session.openPanelReq }.collect { if (it > 0 && panel == null) { closeBar(); openPanel() } } }
         watch.launch {
             snapshotFlow { Session.gameGone }.collect { gone ->
                 if (gone != null && panel == null && !Session.gameGoneByUser) {

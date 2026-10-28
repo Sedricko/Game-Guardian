@@ -67,6 +67,9 @@ object Session {
     val pendingLessons = mutableStateListOf<String>()  // lições que a IA propôs, esperando a pessoa aprovar
     var autoFind by mutableStateOf<String?>(null)  // 🎯 Achar sozinho rodando: o que está fazendo agora (null = parado)
     var items by mutableStateOf<List<GameItem>>(emptyList())
+    val itemsLog = mutableStateListOf<String>()  // o que a procura de itens está fazendo, passo a passo (aparece no painel)
+    var itemsBusy by mutableStateOf(false)
+    var openPanelReq by mutableIntStateOf(0)  // +1: o menu flutuante abre de novo (depois de sair da frente para ler a tela)
     var itemsPid = 0  // a vez do jogo em que a lista já foi feita sozinha (abrir o menu de novo não procura de novo)  // 📋 Itens do jogo: o que ele achou sozinho para editar/congelar
     var autoFindWinner by mutableStateOf<Hit?>(null)  // o que mudou o número da tela no teste
     var aiCanTest by mutableStateOf(false)  // a IA pode escrever um valor de teste (e voltar o original) para saber se é o verdadeiro
