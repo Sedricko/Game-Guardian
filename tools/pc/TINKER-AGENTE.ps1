@@ -1243,13 +1243,15 @@ function Run-RealGame($dg) {
     if ($have -ne $v) { Install-Tinker $rel }
     Set-NoOverlay
     & $adb shell monkey -p $dg -c android.intent.category.LAUNCHER 1 | Out-Null
-    # sem ninguem: espera o jogo carregar (Enter adianta) e toca no meio de baixo (o "Iniciar"/"Continuar" da tela de entrada)
-    Write-Host "Abrindo o $nome. Se quiser, deixe os NUMEROS na tela e aperte Enter; sem Enter eu sigo sozinho em 90 s." -ForegroundColor Yellow
-    for ($k = 0; $k -lt 90 -and -not [Console]::KeyAvailable; $k++) { Start-Sleep 1 }
-    if ([Console]::KeyAvailable) { [void][Console]::ReadKey($true) }
-    else {
-        $sz = (& $adb shell wm size) -join " "
-        if ($sz -match "Override size: (\d+)x(\d+)" -or $sz -match "(\d+)x(\d+)") { & $adb shell input tap ([int]$Matches[1] / 2) ([int]([int]$Matches[2] * 0.89)); Start-Sleep 15 }
+    # sem ninguem: espera o jogo carregar e o Tinker le a tela e toca sozinho nos botoes da entrada (INICIAR, CONTINUAR...)
+    Say "abrindo o $nome; passo a tela de entrada sozinho"
+    Start-Sleep 25
+    Step "jogo $dg" | Out-Null
+    for ($k = 0; $k -lt 5; $k++) {
+        $n = Step "tocar INICIAR|CONTINUAR|JOGAR|TOQUE PARA|PULAR|FECHAR|^OK$|TAP TO|START|PLAY"
+        if (-not $n) { break }
+        Say "  $((($script:last -split "`n")[0]) -replace '^ok ', '')"
+        Start-Sleep 8
     }
     # offline de verdade durante o teste: so o JOGO fica sem internet (firewall pelo uid dele); o Tinker continua com a dele,
     # para a IA que joga. Nada do que o Tinker escreve chega a um servidor do jogo (o bloqueio sai no fim)

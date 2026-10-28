@@ -1491,6 +1491,22 @@ class Engine private constructor(private val app: Context) {
                     "\n" + Session.itemsLog.filter { "Afunilando" in it || "Rodada" in it }.takeLast(4).joinToString("\n") { "log $it" } +
                     "\n" + log.takeLast(40).joinToString("\n") { "ia " + it.replace('\n', ' ').take(400) }
             }
+            // "tocar INICIAR|CONTINUAR": lê a tela do jogo e toca no primeiro texto que bate (passar a tela de entrada sozinho)
+            "tocar" -> return run {
+                front()
+                delay(2500)
+                val png = screenPng()
+                val box = withContext(Dispatchers.Default) {
+                    val bmp = android.graphics.BitmapFactory.decodeByteArray(png, 0, png.size) ?: return@withContext null
+                    val text = com.google.android.gms.tasks.Tasks.await(ocr.process(com.google.mlkit.vision.common.InputImage.fromBitmap(bmp, 0)))
+                    val re = Regex(arg, RegexOption.IGNORE_CASE)
+                    text.textBlocks.flatMap { it.lines }.firstOrNull { re.containsMatchIn(it.text) }?.let { it.text to it.boundingBox }
+                }
+                val r = box?.second ?: return "ok 0\ncount 0\nnão vi $arg na tela"
+                call { d -> d.send("input tap ${r.centerX()} ${r.centerY()}") }
+                Diag.add("Missão tocou em \"${box.first}\" (${r.centerX()}, ${r.centerY()})")
+                "ok tocou em ${box.first}\ncount 1"
+            }
             "ler" -> call { d -> d.send("read ${w[1]} ${w[2]}", quiet = true).status }
             // funções da lib do jogo pelo nome, quem uma função chama, fixar o retorno e desfazer (patch)
             "funcoes" -> return nativeFunctions(arg).let { (n, l) -> "ok $n\n" + l.joinToString("\n") { "fn ${it.addr} ${it.name}" } }
