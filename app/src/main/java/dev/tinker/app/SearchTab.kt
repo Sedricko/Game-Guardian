@@ -701,6 +701,8 @@ private fun ItemsPanel(engine: Engine, enabled: Boolean, run: (suspend () -> Str
     Panel {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("📋 Itens do jogo", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            // 👁 monitor de memória: compara a memória a cada 8 s e lista o que muda em degraus (sem tela, sem nome)
+            TextButton(onClick = { if (s.monitorOn) engine.monitorStop() else engine.monitorStart() }, enabled = enabled) { Text(if (s.monitorOn) "⏹ Parar monitor" else "👁 Monitorar") }
             TextButton(onClick = { engine.scanItemsLater() }, enabled = enabled && !s.itemsBusy) { Text(if (s.items.isEmpty()) "Procurar" else "↻ De novo") }
         }
         // o que ele está fazendo agora, passo a passo (fica depois de pronto, recolhido)

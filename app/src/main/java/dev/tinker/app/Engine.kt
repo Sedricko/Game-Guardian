@@ -2038,6 +2038,67 @@ class Engine private constructor(private val app: Context) {
         return out
     }
 
+    private var monitorJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * 👁 Monitor de memória, como o Cheat Engine mas sozinho: foto da memória (só nas regiões de valores), 4 s parado
+     * para marcar o que muda sozinho (relógio, animação), e a cada 8 s compara com a foto. O que muda em degraus
+     * (recurso: +1, +5, -10 em momentos soltos) entra na lista com o histórico; não precisa da tela nem do nome.
+     */
+    fun monitorStart() {
+        if (monitorJob?.isActive == true) return
+        monitorJob = scope.launch {
+            withContext(Dispatchers.Main) { Session.monitorOn = true; Session.itemsLog.clear() }
+            val hist = LinkedHashMap<String, MutableList<Long>>()
+            try {
+                itemLog("👁 Foto da memória (regiões de valores)…")
+                val mb = call { d ->
+                    d.send("ranges Jh,J,Ca,Cb,A", quiet = true)
+                    try { d.send("photo").status } finally { d.send("ranges all", quiet = true) }
+                }
+                itemLog("👁 Foto: $mb MB. Parado 4 s para tirar o que muda sozinho…")
+                delay(4000)
+                val noise = call { d -> d.send("photonoise").status }
+                itemLog("👁 $noise valores mudam sozinhos (ficam fora). Pode jogar: comparo a cada 8 s.")
+                var round = 0
+                while (true) {
+                    delay(8000)
+                    round++
+                    val got = call { d ->
+                        d.send("photodiff")
+                        d.send("list 3000", quiet = true).lines.mapNotNull { l ->
+                            val f = l.split(' ')
+                            val v = f.getOrNull(3)?.toLongOrNull() ?: return@mapNotNull null
+                            f[0] to v
+                        }
+                    }
+                    for ((a, v) in got) if (v in 1..10_000_000) hist.getOrPut(a) { mutableListOf() }.let { h -> if (h.lastOrNull() != v) h += v }
+                    // muda em quase toda rodada: é da estrutura do jogo (relógio lento, posição, animação), não um evento
+                    val structural = hist.count { (_, h) -> round >= 3 && h.size - 1 >= round * 8 / 10 }
+                    // recurso: mudou pelo menos 2 vezes, em degraus pequenos e em momentos soltos (porque algo aconteceu)
+                    val cands = hist.filter { (_, h) -> h.size >= 2 && !(round >= 3 && h.size - 1 >= round * 8 / 10) &&
+                        h.zipWithNext().all { (x, y) -> kotlin.math.abs(y - x) in 1..10_000 } }
+                        .entries.sortedByDescending { it.value.size }.take(40)
+                    val items = cands.mapIndexed { i, (a, h) ->
+                        GameItem("Mudou ${i + 1}", h.last().toString(), "📈", "i32", h.size.toLong(), Hit(a, "i32", "", h.last().toString()),
+                            "mudou ${h.size - 1}× desde a foto: " + h.takeLast(6).joinToString(" → "))
+                    }
+                    withContext(Dispatchers.Main) { Session.items = Session.items.filter { it.icon != "📈" } + items; Session.itemsReady = Session.items.count { it.hit != null } }
+                    itemLog("👁 Rodada $round: ${got.size} mudaram desde a foto · $structural mudam sempre (estrutura do jogo) · ${items.size} mudaram por evento, em degraus (prováveis recursos)")
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                itemLog("👁 Parou: ${e.message}")
+            } finally {
+                withContext(kotlinx.coroutines.NonCancellable + Dispatchers.Main) { Session.monitorOn = false }
+                runCatching { withContext(kotlinx.coroutines.NonCancellable) { call { d -> d.send("photodrop", quiet = true) } } }
+            }
+        }
+    }
+
+    fun monitorStop() { monitorJob?.cancel(); monitorJob = null }
+
     /** Pela tela: acha os parecidos no escopo do app e põe na lista do 📋 Itens do jogo. */
     fun siblingsLater(h: Hit, label: String) {
         scope.launch {

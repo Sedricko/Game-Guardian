@@ -72,7 +72,8 @@ object Session {
     var itemsProgress by mutableFloatStateOf(0f)  // 0 a 1: quanto da procura de itens já foi
     var itemsReady by mutableIntStateOf(0)  // itens já confirmados com endereço (prontos para editar/congelar)
     var openPanelReq by mutableIntStateOf(0)  // +1: o menu flutuante abre de novo (depois de sair da frente para ler a tela)
-    var itemsPid = 0  // a vez do jogo em que a lista já foi feita sozinha (abrir o menu de novo não procura de novo)  // 📋 Itens do jogo: o que ele achou sozinho para editar/congelar
+    var itemsPid = 0
+    var monitorOn by mutableStateOf(false)  // 👁 monitor de memória ligado (foto + comparação a cada 8 s)  // a vez do jogo em que a lista já foi feita sozinha (abrir o menu de novo não procura de novo)  // 📋 Itens do jogo: o que ele achou sozinho para editar/congelar
     var autoFindWinner by mutableStateOf<Hit?>(null)  // o que mudou o número da tela no teste
     var aiCanTest by mutableStateOf(false)  // a IA pode escrever um valor de teste (e voltar o original) para saber se é o verdadeiro
     var aiAuto by mutableStateOf(false)  // modo autônomo 1: a IA aplica, congela, testa e cria receitas sem esperar o toque
