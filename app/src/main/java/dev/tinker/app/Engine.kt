@@ -1473,7 +1473,9 @@ class Engine private constructor(private val app: Context) {
             "comparar" -> compare(w[1], w.drop(2).joinToString(" "))
             // o achar sozinho já provou qual muda a tela: escreve só nele (escrever em todos pôs 640 numa cópia nativa do
             // desenho do texto e derrubou o Jogo de Teste, SIGSEGV na libgui)
-            "escrever" -> Session.autoFindWinner?.takeIf { h -> list().second.any { it.addr == h.addr } }?.let { write(it.addr, it.type, arg); "1 valores alterados.\n${it.addr} ${it.type} $arg" } ?: writeAll(arg)
+            "escrever" -> Session.autoFindWinner?.takeIf { h -> list().second.any { it.addr == h.addr } }?.let { write(it.addr, it.type, arg); "1 valores alterados.\n${it.addr} ${it.type} $arg" }
+                // sem provado, só com poucos: o Crystals ficou com os 56 da busca do Vigor e escrever em todos derrubou o jogo
+                ?: (Session.count ?: 0L).let { n -> if (n in 1L..3L) writeAll(arg) else return "err $n resultados e nenhum provado: não escrevo em todos" }
             // soma N em cada resultado (o número da tela calculado: a missão confere que a tela subiu N)
             // map (inline) e não joinToString: dentro do lambda dele não dá para chamar o daemon (suspend)
             // só no provado (ou nos da memória Java): somar nos 7 da busca pela mudança escreveu em nativos e o jogo caiu
@@ -2037,7 +2039,7 @@ class Engine private constructor(private val app: Context) {
                 withContext(Dispatchers.Main) { Session.autoFind = "Procurando $target na tela…"; Session.aiHidePanel = true }
                 delay(waitMs)
                 withContext(Dispatchers.Main) { Session.aiHidePanel = false }
-                val byLabel = if (label != null) labeledNumber(label) ?: run { say("Não vi \"$label\" com um número do lado na tela."); return@launch } else null
+                val byLabel = if (label != null) labeledNumber(label) ?: run { withContext(Dispatchers.Main) { Session.count = null }; say("Não vi \"$label\" com um número do lado na tela."); return@launch } else null
                 val seen = if (byLabel != null) listOf(byLabel) else screenNumbers()
                 var spots = (if (byLabel != null) listOf(byLabel.second) else seen.filter { it.first == target }.map { it.second }).toMutableList()
                 // o número já mudou um pouco (abates, tempo): fica com o mais perto, até 30 de diferença
