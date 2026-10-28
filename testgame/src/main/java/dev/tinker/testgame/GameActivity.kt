@@ -158,7 +158,9 @@ class GameActivity : Activity() {
         wood = prefs.getInt("wood", Random.nextInt(5, 60))
         for (i in 0 until 40) inv.putInt(i * 4, Random.nextInt(0, 10))
         potions = prefs.getInt("potions", Random.nextInt(1, 9))
-        text = TextView(this).apply { textSize = 24f; setTextColor(Color.WHITE); gravity = Gravity.CENTER }
+        // 15sp: com a mochila, a Prata, as Esmeraldas e o Poder são 31 linhas; em 24sp as últimas ficavam fora da tela
+        // ("Não vi Poder com um número do lado") e o Tinker só lê o que aparece
+        text = TextView(this).apply { textSize = 15f; setTextColor(Color.WHITE); gravity = Gravity.CENTER }
         actions["+1 ouro"] = { gold = ganhaOuro(gold); xp += Random.nextInt(3, 10) }  // o bônus vem da lib nativa (libjogo.so)
         actions["+1 gema"] = { gems += 1 }
         actions["-10 vida"] = { hp -= 10f }
