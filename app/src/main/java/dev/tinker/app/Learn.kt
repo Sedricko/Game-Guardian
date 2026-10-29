@@ -152,7 +152,8 @@ internal fun methodMeaning(name: String): Triple<String, String, String>? = when
     Regex("^(Spend|Consume|Remove|Subtract|Use)(Gold|Coins?|Money|Gems?|Ammo|Energy|Stamina)", RegexOption.IGNORE_CASE).containsMatchIn(name) -> Triple("gasta", "", "não gastar")
     Regex("^(Die|Kill|OnDeath|Death)$", RegexOption.IGNORE_CASE).containsMatchIn(name) -> Triple("morte", "", "não morrer")
     Regex("Cooldown|GetWait|GetDuration|BuildTime", RegexOption.IGNORE_CASE).containsMatchIn(name) -> Triple("tempo de espera", "0", "sem espera")
-    Regex("^(Is|Has)(Unlocked|Owned|Purchased|Premium|Vip|Bought)", RegexOption.IGNORE_CASE).containsMatchIn(name) -> Triple("diz se tem / está liberado", "true", "sempre liberado")
+    // só desbloqueio de jogo: Owned/Purchased/Premium/Vip/Bought costumam ser compra com dinheiro de verdade (regra combinada: nunca)
+    Regex("^(Is|Has)Unlocked", RegexOption.IGNORE_CASE).containsMatchIn(name) -> Triple("diz se está liberado", "true", "sempre liberado")
     Regex("^(Add|Gain|Earn|Give)(Gold|Coins?|Money|Gems?|Xp|Exp)", RegexOption.IGNORE_CASE).containsMatchIn(name) -> Triple("ganha / soma", "", "")
     else -> null
 }  // sem texto de botão (ganha / soma): só informa
