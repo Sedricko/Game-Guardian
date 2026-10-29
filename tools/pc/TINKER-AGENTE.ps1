@@ -1290,9 +1290,11 @@ function Run-RealGame($dg) {
         # 2. pedido "Item = 999" em ate 4 itens: o Tinker prova sozinho (escreve e le a tela); o agente le a tela de novo e
         # volta o valor de antes. O primeiro provado fica salvo para os testes 3 (irmaos) e 7 (reabrir o jogo)
         $script:salvo = $null
-        foreach ($i in ($script:it | Where-Object { [double]$_.v -ge 2 -and [double]$_.v -lt 999 } | Select-Object -First 4)) {
-            T "2 pedido $($i.nome) = 999 (era $($i.v))" {
-                Step "sozinho $($i.nome)=999 auto" | Out-Null
+        # os maiores primeiro: o 3999 de ouro do Orecraft dava 32 lugares na memoria, o 6 dava 975 mil (e ficava de fora por passar de 999)
+        foreach ($i in ($script:it | Where-Object { $_.v -match '^\d+$' -and [double]$_.v -ge 2 } | Sort-Object { [double]$_.v } -Descending | Select-Object -First 4)) {
+            $alvo = if ([double]$i.v -lt 999) { "999" } else { "$([long]$i.v + 1000)" }
+            T "2 pedido $($i.nome) = $alvo (era $($i.v))" {
+                Step "sozinho $($i.nome)=$alvo auto" 420 | Out-Null  # o sozinho tenta ate 5 min; com 340 s o passo estourava antes dele terminar
                 $msg = ($script:last -split "`n")[0]
                 # logo depois do pedido (a lista de resultados ainda e a dele; o "itens" busca de novo e troca a lista)
                 if ($msg -match "Pronto" -and -not $script:salvo) {
@@ -1303,8 +1305,8 @@ function Run-RealGame($dg) {
                 $tela = (Items | Where-Object nome -eq $i.nome | Select-Object -First 1).v
                 Step "escrever $($i.v)" | Out-Null
                 $volta = (Items | Where-Object nome -eq $i.nome | Select-Object -First 1).v
-                if ($tela -ne "999") { throw "a tela mostrou $tela ($msg)" }
-                "a tela mostrou 999; voltei para $($i.v), a tela mostra $volta"
+                if ($tela -ne $alvo) { throw "a tela mostrou $tela ($msg)" }
+                "a tela mostrou $alvo; voltei para $($i.v), a tela mostra $volta"
             }
         }
         # 3. achou um, acha todos: vizinhos com o mesmo formato do primeiro provado (outros recursos do mesmo objeto)
@@ -1323,7 +1325,10 @@ function Run-RealGame($dg) {
         # sem IA (sem chave/cota): toques gravados ou o explorador
         T "5 IA joga 3 min + monitor de memoria" {
             $ia = 0
-            try { Step "jogar 180" | Out-Null; $ia = @(($script:last -split "`n") | Where-Object { $_ -like "ia IA:*" }).Count } catch { Say "a IA nao jogou: $($_.Exception.Message)" }
+            # a IA sem conexao ("Sem conexão com o Groq") nao jogou: entra o explorador
+            try { Step "jogar 180" | Out-Null; $ia = @(($script:last -split "`n") | Where-Object { $_ -like "ia IA:*" -and $_ -notmatch "Sem conex|Unable to resolve|chave" }).Count } catch { Say "a IA nao jogou: $($_.Exception.Message)" }
+            # internet do emulador (para saber se a falha da IA e do emulador ou so do Tinker)
+            $dns = if ((& $adb shell "ping -c 1 -W 3 api.groq.com" 2>&1) -match "bytes from") { "emulador alcanca o Groq" } else { "emulador sem DNS/internet" }
             if (-not $ia) {
                 $macro = "$env:USERPROFILE\tinker-macro-$dg.txt"
                 $job = if (Test-Path $macro) { Start-Replay $macro 180 } else { Start-Explore $dg 180 }
@@ -1334,7 +1339,8 @@ function Run-RealGame($dg) {
             $agora = Items
             # os que mudaram e tem o valor de um item da tela agora: candidatos de verdade
             $bate = @($mon | Where-Object { $m = ($_ -split ' ')[2]; $agora | Where-Object v -eq $m })
-            $quem = if ($ia) { "a IA jogou ($ia vezes): " + (($l | Where-Object { $_ -like "ia IA:*" } | Select-Object -Last 2) -join " / ") } else { "sem IA (explorador)" }
+            $quem = if ($ia) { "a IA jogou ($ia vezes): " + (($l | Where-Object { $_ -like "ia IA:*" } | Select-Object -Last 2) -join " / ") } else { "sem IA (explorador; $dns)" }
+            if (-not $mon.Count) { throw "$quem | o monitor nao viu nada mudar" }
             "$quem | monitor: $($mon.Count) mudaram por evento, $($bate.Count) com o valor de um item da tela: " + ($bate -join ", ") + " | " + (($l | Where-Object { $_ -like "log *" }) -join " / ")
         }
         # 6. cronometros (construcao, recarga): depois da IA jogar costuma haver algo construindo
