@@ -1250,10 +1250,13 @@ function Run-RealGame($dg) {
     Say "abrindo o $nome; passo a tela de entrada sozinho"
     Start-Sleep 25
     Step "jogo $dg" | Out-Null
-    for ($k = 0; $k -lt 5; $k++) {
+    $tocou = 0
+    for ($k = 0; $k -lt 12 -and $tocou -lt 5; $k++) {
         # so botoes de entrada ("TOQUE PARA MOSTRAR" e a dica do tutorial: quem segue o tutorial e a IA que joga)
         try { $n = Step "tocar INICIAR|CONTINUAR|JOGAR|TOQUE PARA (COME|CONTIN|JOGAR)|PULAR|FECHAR|^OK$|TAP TO|START|PLAY" 120 } catch { Say "  $($_.Exception.Message)"; break }
-        if (-not $n) { break }
+        # o Orecraft ainda carregava aos 25 s: sem nenhum toque ainda, espera o INICIAR aparecer (ate ~2 min) em vez de desistir
+        if (-not $n) { if ($tocou) { break }; Start-Sleep 10; continue }
+        $tocou++
         Say "  $((($script:last -split "`n")[0]) -replace '^ok ', '')"
         Start-Sleep 8
     }
