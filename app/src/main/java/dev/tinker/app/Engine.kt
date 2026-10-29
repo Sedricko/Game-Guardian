@@ -1585,6 +1585,15 @@ class Engine private constructor(private val app: Context) {
                 }
                 return "err nenhum achado de $arg está dentro de um objeto IL2CPP"
             }
+            // "metodo Classe.Metodo 1": troca a regra (o método passa a devolver o valor) pelo nome do mapa IL2CPP; o despatch desfaz
+            "metodo" -> {
+                val (cls, name) = w.getOrElse(1) { "" }.split('.', limit = 2).takeIf { it.size == 2 } ?: return "err use metodo Classe.Metodo valor"
+                clearMissionPatches()
+                val c = call { d -> d.send("il2classes", quiet = true).lines }.map { it.split(' ', limit = 5) }
+                    .firstOrNull { it.size == 5 && it[0] == "class" && it[1] == cls } ?: return "err não achei a classe $cls no mapa do jogo"
+                val m = il2Methods(c[2]).firstOrNull { it.name == name } ?: return "err não achei $name em $cls"
+                patchReturn(m, cls, w.getOrElse(2) { "" }, prefix = "missão ", apply = true)
+            }
             "despatch" -> "desfeitos ${clearMissionPatches()}"
             "desconhecido" -> startUnknown(setOf(w.getOrElse(1) { "i32" }))
             "comparar" -> compare(w[1], w.drop(2).joinToString(" "))
@@ -4124,7 +4133,7 @@ class Engine private constructor(private val app: Context) {
      * "Sempre devolve X": troca o começo do método por carregar o valor e voltar (vira um patch, com os bytes de antes guardados).
      * Método curto demais para as instruções (um getter de 2 instruções com um número grande) é recusado: escreveria no próximo.
      */
-    suspend fun patchReturn(m: Il2Method, cls: String, value: String): String {
+    suspend fun patchReturn(m: Il2Method, cls: String, value: String, prefix: String = "", apply: Boolean = false): String {
         require(Session.engine?.bits != 32) { "só jogos de 64 bits por enquanto" }
         val x86 = Session.engine?.x86 == true
         val hex = returnPatch(m.ret, value, x86) ?: return "Esse método devolve ${RET_NAMES[m.ret] ?: "um objeto"}: não dá para fixar com \"$value\"."
@@ -4132,7 +4141,7 @@ class Engine private constructor(private val app: Context) {
         val orig = codeAt(m.code, 0, n)
         if (!x86 && orig.dropLast(1).any { it.word == 0xd65f03c0.toInt() }) return "O método ${m.name} é curto demais para esse valor (termina antes): use um número até 65535."
         val label = if (m.ret == 0x01) "não faz nada" else "sempre $value"
-        return createPatch(m.code, hex, "$cls.${m.name} → $label", "${RET_NAMES[m.ret]} ${m.name}() passa a ${if (m.ret == 0x01) "voltar sem fazer nada" else "devolver $value"}", apply = false)
+        return createPatch(m.code, hex, "$prefix$cls.${m.name} → $label", "${RET_NAMES[m.ret]} ${m.name}() passa a ${if (m.ret == 0x01) "voltar sem fazer nada" else "devolver $value"}", apply)
     }
 
     /**

@@ -1363,6 +1363,20 @@ function Run-RealGame($dg) {
             if (-not ($l -match " voltou ")) { throw "nao voltou: $($l -join ' / ')" }
             ($l -join " / ")
         }
+        # 8. trocar a regra pelo nome (mapa do jogo): a roleta paga em joias (moeda do jogo) passa a custar 1; confere que o
+        # jogo segue aberto e desfaz. shortcut: ainda nao abre a roleta para ler o preco na tela; quando a IA souber chegar la
+        if ($dg -eq "com.evrika.miner.camp") {
+            T "8 trocar a regra (GetSpinGemsPrice = 1)" {
+                try {
+                    Step "metodo ShopRouletteController.GetSpinGemsPrice 1" | Out-Null
+                    $msg = ($script:last -split "`n")[0]
+                    if ($msg -notmatch "ligad|liguei") { throw "a troca nao ligou: $msg" }
+                    Start-Sleep 15
+                    if (-not (& $adb shell pidof $dg)) { throw "o jogo fechou depois da troca: $msg" }
+                    "$msg | o jogo seguiu aberto 15 s"
+                } finally { Step "despatch" | Out-Null }
+            }
+        }
     } catch { $script:rr += "parou: $($_.Exception.Message)"; Say $script:rr[-1] }
     $res = $script:rr
     $ok = @($res | Where-Object { $_ -like "OK *" }).Count
