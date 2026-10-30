@@ -1401,6 +1401,34 @@ function Run-RealGame($dg) {
             if (-not ($res -match "dono ")) { throw "nao achei o script dono do texto | " + ($res -join " / ") }
             $res -join " / "
         }
+        # 2e. a partir da roleta (a regra que ja funciona, 30/10): o objeto ShopRouletteController aponta para quem cobra as
+        # joias; procura nos objetos que ele aponta um campo com o numero da tela, escreve e confere
+        T "2e pedido a partir da roleta" {
+            $vistos = @()
+            foreach ($i in @($script:it | Where-Object { $_.v -match '^\d+$' -and [double]$_.v -ge 2 -and $_.nome -notmatch '\(' } | Select-Object -First 3)) {
+                $n = Step "doobjeto ShopRouletteController $($i.v)" 300
+                $cands = @(($script:last -split "`n") | Where-Object { $_ -like "valor *" } | Select-Object -First 6)
+                $vistos += "$($i.v): $n (" + (($cands | ForEach-Object { ($_ -split ' ')[3] }) -join ', ') + ")"
+                $alvo = if ([double]$i.v -lt 999) { "999" } else { "$([long]$i.v + 1000)" }
+                foreach ($c in $cands) {
+                    $f = $c -split ' '; $addr = $f[1]; $tipo = $f[2]; $campo = $f[3]
+                    $fotoAntes = $null; try { Show-Game $dg; $fotoAntes = Shot "jogo-antes" } catch { }
+                    Step "endereco $addr $tipo $alvo" | Out-Null; Start-Sleep 3
+                    $tela = (Items | Where-Object nome -eq $i.nome | Select-Object -First 1).v
+                    if ($tela -eq $alvo) {
+                        try {
+                            if ($fotoAntes) { Post-Sheet "agente PC: foto do jogo ANTES ($campo = $($i.v))" "" ("jpeg base64`n" + $fotoAntes) $v "$nome (emulador)" }
+                            Show-Game $dg
+                            Post-Sheet "agente PC: foto do jogo DEPOIS ($campo = $alvo)" "" ("jpeg base64`n" + (Shot "jogo-depois")) $v "$nome (emulador)"
+                        } catch { }
+                        Add-Content "$env:USERPROFILE\tinker-mantidos-$dg.txt" "$(Get-Date -Format 'dd/MM HH:mm') $campo $($i.v) -> $alvo (0x$addr, pela roleta)"
+                        return "ACHOU PELA ROLETA: $campo (0x$addr) era o $($i.v) da tela, virou $alvo e ficou"
+                    }
+                    Step "endereco $addr $tipo $($i.v)" | Out-Null
+                }
+            }
+            throw "nenhum campo com o numero da tela mudou a tela | " + ($vistos -join ' / ')
+        }
         # 2c. pedido pelo dicionario do jogo (revisao 30/10): busca o numero e pergunta ao mapa IL2CPP de quem e cada lugar
         # (Classe.campo). Nao precisa o numero mudar. Escreve nos candidatos com nome de moeda primeiro e confere na tela
         T "2c pedido pelo dicionario do jogo" {

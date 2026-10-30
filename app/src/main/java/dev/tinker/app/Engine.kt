@@ -1651,6 +1651,16 @@ class Engine private constructor(private val app: Context) {
                 }
                 return "ok ${strs.size} textos \"$arg\", ${out.size} ligações\ncount ${out.size}\n" + out.distinct().take(60).joinToString("\n")
             }
+            // "doobjeto ShopRouletteController 80": a partir de uma classe que já sabemos usar (a da roleta), segue os objetos
+            // que ela aponta (2 níveis) atrás de um campo com o número da tela (as joias de quem paga a roleta)
+            "doobjeto" -> {
+                val cls = w.getOrNull(1) ?: return "err use doobjeto <Classe> <valor>"
+                val want = w.getOrNull(2) ?: return "err use doobjeto <Classe> <valor>"
+                val objs = call { d -> d.send("il2objs $cls", quiet = true).lines }.mapNotNull { it.removePrefix("obj ").takeIf { a -> a.toLongOrNull(16) != null } }.take(5)
+                if (objs.isEmpty()) return "err nenhum objeto vivo de $cls"
+                val out = objs.flatMap { o -> il2cpp(o)?.let { valueFields(it, want, 2) } ?: emptyList() }.distinct()
+                return "ok ${out.size} campo(s) com $want a partir de ${objs.size} objeto(s) de $cls\ncount ${out.size}\n" + out.take(40).joinToString("\n")
+            }
             "despatch" -> "desfeitos ${clearMissionPatches()}"
             "desconhecido" -> startUnknown(setOf(w.getOrElse(1) { "i32" }))
             "comparar" -> compare(w[1], w.drop(2).joinToString(" "))
