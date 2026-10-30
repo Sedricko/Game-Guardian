@@ -71,7 +71,7 @@ O texto completo de cada opção está em `docs/tutorial/ajuda.py` (fonte única
   3 irmãos, 4 velocidade, 5 IA joga 3 min + monitor (sem IA: explorador que só toca com o jogo na frente), 6 cronômetros,
   7 reabrir (salvo volta), 8 trocar a regra (`metodo ShopRouletteController.GetSpinGemsPrice 1`, confere 15 s e desfaz).
   Cada teste vai "ao vivo" para Relatórios; o resumo "agente PC: Orecraft de verdade, X de Y ok" leva 300 linhas do registro.
-- Aba **Jogo real** da planilha: uma linha por rodada do Orecraft (só inserir), A–L texto, M = ok, N = feitos (gráfico).
+- Aba **Jogo real** da planilha: uma linha por rodada do Orecraft (só inserir, horário de Brasília), A–M texto (K = teste 8), N = ok, O = feitos (gráfico à direita, eixo = Quando).
   Rotina horária `trig_01ADiqWcVga3NWHb31CFuLf4` lê as rodadas novas, anota, corrige e publica.
 - Ler o resultado ~10–17 min depois do push (CI ~7 min + rodada ~10 min). PowerShell: `"${c}:"`, nunca `"$c:"`.
 - CI também testa o daemon contra a lib do jogo em 32 bits (gcc-multilib); YAML: comando com `: ` vai em bloco `|`.
@@ -140,8 +140,10 @@ O texto completo de cada opção está em `docs/tutorial/ajuda.py` (fonte única
 - `ShopRouletteController.GetSpinGemsPrice` = `mov w0,#25; ret` em `libil2cpp.so+1e31e54`: giro custa 25 joias. O patch
   "sempre 1" ligou e desligou sem fechar o jogo (2.93.0, 2 rodadas). Falta abrir a roleta e ler o 1 na tela.
 - 220 lugares de timeScale (quando dentro do jogo), 25–54 cronômetros.
-- Abertas (30/10): `itens` leva ~16 min no jogo (o agente desiste aos 900 s); o Tinker para de responder ~70 s depois do
-  monitor começar (suspeita: memória; 2.93.1 limita); a IA sem DNS no emulador (`api.groq.com`, `script.google.com`);
+- **Causa achada (30/10)**: o Android 16 do AVD congela app em segundo plano (`cached_apps_freezer`); com `Set-NoOverlay` o
+  Tinker não tem serviço na frente, então o `itens` e o monitor paravam e só terminavam quando o passo seguinte abria o
+  Tinker (1 s depois de o agente desistir, em 10 rodadas). O agente agora põe `settings put global cached_apps_freezer
+  disabled` e reinicia o emulador. O próprio emulador está sem DNS (ping api.groq.com falha): a IA não joga lá;
   emulador já caiu com driver NVIDIA (`nvoglv64.dll`/gfxstream) após 3h40.
 
 ## Próximos passos
