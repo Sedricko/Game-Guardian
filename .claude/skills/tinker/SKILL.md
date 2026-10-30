@@ -70,10 +70,11 @@ O texto completo de cada opção está em `docs/tutorial/ajuda.py` (fonte única
 - **Agente de jogo real**: `TINKER-ORECRAFT.bat` → `TINKER-AGENTE.ps1 -Jogo com.evrika.miner.camp` no AVD `Dysmantle_Play`
   (Play Store + Magisk, gpu host). Roda sem parar: acabou uma rodada, a outra começa 2 min depois (arquivo `%USERPROFILE%\tinker-agente-testado-<pkg>.txt`;
   apagar força a rodada). A internet do jogo NÃO é mais cortada (30/10, pedido do usuário: o corte do Android 16 derrubava o DNS do emulador inteiro). Espera o
-  INICIAR aparecer (até ~2 min). Testes: 1 lista de itens, 2 pedido (maiores valores primeiro; <999 → 999, senão +1000),
+  INICIAR aparecer (até ~2 min). Testes: 1 lista de itens, 2 pedido (1 tentativa, o maior valor; <999 → 999, senão +1000),
   (o valor certo FICA no jogo, anotado em `%USERPROFILE%\tinker-mantidos-<pkg>.txt`: a rodada seguinte acha com outro número),
-  3 irmãos, 4 velocidade, 5 IA joga 3 min + monitor (sem IA: explorador que só toca com o jogo na frente), 6 cronômetros,
-  7 reabrir (salvo volta), 8 trocar a regra (`metodo ShopRouletteController.GetSpinGemsPrice 1`, confere 15 s e desfaz).
+  3 irmãos, 4 velocidade, 5 IA joga 3 min + monitor (sem IA: só toques gravados; o explorador de toques cegos saiu em 30/10 porque podia tocar em ASSISTIR = anúncio), 6 cronômetros,
+  7 reabrir (salvo volta), 2b pedido pelos lugares que o monitor viu mudar, 8b preço das construções = 0 conferido na
+  tela, 8 trocar a regra (`metodo ShopRouletteController.GetSpinGemsPrice 1`, confere 15 s e desfaz).
   Cada teste vai "ao vivo" para Relatórios; o resumo "agente PC: Orecraft de verdade, X de Y ok" leva 300 linhas do registro.
 - Aba **Jogo real** da planilha: uma linha por rodada do Orecraft (só inserir, horário de Brasília), A–M texto (K = teste 8), N = ok, O = feitos (gráfico à direita, eixo = Quando).
   Rotina horária `trig_01ADiqWcVga3NWHb31CFuLf4` lê as rodadas novas, anota, corrige e publica.
