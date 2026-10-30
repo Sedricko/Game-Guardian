@@ -102,12 +102,30 @@ local function achar_por_valor(nome, tipo)
   return gg.getResults(1)[1].address
 end
 
+-- região de memória do valor (o "A" que o GG mostra no resultado): guardada ao refinar; a busca da assinatura usa só ela
+local REGIOES = { Jh = "REGION_JAVA_HEAP", Ch = "REGION_C_HEAP", Ca = "REGION_C_ALLOC", Cd = "REGION_C_DATA", Cb = "REGION_C_BSS",
+  PS = "REGION_PPSSPP", A = "REGION_ANONYMOUS", J = "REGION_JAVA", S = "REGION_STACK", As = "REGION_ASHMEM", O = "REGION_OTHER" }
+local function regarq(nome) return gg.EXT_STORAGE .. "/tinker-reg-" .. JOGO .. "-" .. nome:gsub("[^%w]", "_") .. ".txt" end
+local function lembrarRegiao(nome, addr)
+  local ok, r = pcall(gg.getValuesRange, { { address = addr, flags = gg.TYPE_DWORD } })
+  local letra = ok and r and r[1]
+  if letra and REGIOES[letra] then local f = io.open(regarq(nome), "w"); f:write(letra); f:close() end
+end
+local function regiaoDe(nome)
+  local f = io.open(regarq(nome), "r"); if not f then return nil end
+  local l = f:read("*l"); f:close()
+  return l and REGIOES[l] and gg[REGIOES[l]]
+end
+
 local function achar_por_assinatura(nome, tipo, viz)
   local ad, av
   for d, v in pairs(viz) do if v ~= 0 and (not ad or math.abs(v) > math.abs(av)) then ad, av = d, v end end
   if not ad then return {} end
   gg.clearResults()
+  local antes, reg = gg.getRanges(), regiaoDe(nome)
+  if reg then gg.setRanges(reg) end
   gg.searchNumber(tostring(av), gg.TYPE_DWORD)
+  if reg then gg.setRanges(antes) end
   local achados = {}
   for _, c in ipairs(gg.getResults(math.min(gg.getResultsCount(), 20000))) do
     local alvo, conf, ok = c.address - ad, {}, true
@@ -301,6 +319,7 @@ local function guardarTeste(r)
   local novo = true
   for _, n in ipairs(nomes_) do if n == nome then novo = false end end
   if novo then local f = io.open(SNAPIDX, "a"); f:write(nome, "\n"); f:close() end
+  lembrarRegiao(nome, r.address)
   local f = io.open(snaparq(nome), "a")
   f:write(string.format("#%d\n", r.flags))
   for d, v in pairs(ler(r.address)) do f:write(string.format("%d %d\n", d, v)) end
@@ -413,6 +432,7 @@ end
 
 local alvo = direto and um.address or achar_por_valor(nome, tipo)
 if not alvo then return end
+lembrarRegiao(nome, alvo)
 local agora = ler(alvo)
 if fase == 0 then
   -- assinatura já na 1ª vez: os vizinhos que não parecem ponteiro; vale se agora ela acha só este lugar. Se um dia
