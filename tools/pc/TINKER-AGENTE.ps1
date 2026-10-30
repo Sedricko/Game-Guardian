@@ -1078,9 +1078,43 @@ function Install-Tinker($rel) {
     Say "instalado: $inst"
     & $adb shell appops set $app SYSTEM_ALERT_WINDOW allow | Out-Null
     & $adb shell pm grant $app android.permission.POST_NOTIFICATIONS 2>$null | Out-Null
-    # root para o Tinker sem precisar tocar em Permitir (politica do Magisk para o uid do app)
-    $uid = ((& $adb shell dumpsys package $app) | Select-String "(?:userId|appId)=(\d+)" | Select-Object -First 1).Matches.Groups[1].Value
+    Grant-Root $app
+}
+
+# root para o app sem precisar tocar em Permitir (politica do Magisk para o uid do app)
+function Grant-Root($pkg) {
+    $uid = ((& $adb shell dumpsys package $pkg) | Select-String "(?:userId|appId)=(\d+)" | Select-Object -First 1).Matches.Groups[1].Value
     if ($uid) { Sh "magisk --sqlite 'REPLACE INTO policies (uid,policy,until,logging,notification) VALUES($uid,2,0,1,1)'" 2>$null | Out-Null }
+}
+
+# ===== Tinker 2 (app novo, app2/): cada versao nova roda o autoteste do modulo pronto e manda para Relatorios =====
+# as releases dele sao pre-release "tinker2-vX.Y.Z": nunca a mais recente, o teste da 2.x acima nao muda
+$app2 = "dev.tinker.v2"
+$done2 = "$env:USERPROFILE\tinker-agente-testado-tinker2.txt"
+function Test-Tinker2 {
+    $rel = Invoke-RestMethod "https://api.github.com/repos/Sedricko/Game-Guardian/releases?per_page=30" -Headers (Hdr) |
+        Where-Object { $_.tag_name -like "tinker2-v*" } | Select-Object -First 1
+    if (-not $rel) { return }
+    $v = $rel.tag_name -replace '^tinker2-v', ''
+    if ((Get-Content $done2 -ErrorAction SilentlyContinue) -eq $v) { return }
+    Say "=== Tinker 2 $v ==="
+    Get-Apk ($rel.assets | Where-Object name -like "Tinker2-*.apk" | Select-Object -First 1) "$env:TEMP\Tinker2.apk"
+    Say ("Tinker 2 instalado: " + ((& $adb install -r "$env:TEMP\Tinker2.apk") -join " "))
+    Grant-Root $app2
+    Sh "rm -f /data/data/$app2/files/autoteste.txt"
+    & $adb shell am force-stop $app2
+    & $adb shell am start -n "$app2/.MainActivity" --ez autoteste true | Out-Null
+    $out = $null
+    for ($k = 0; $k -lt 24 -and -not $out; $k++) {
+        Start-Sleep 5
+        $t = Sh "cat /data/data/$app2/files/autoteste.txt" 2>$null
+        if ($LASTEXITCODE -eq 0 -and $t) { $out = $t -join "`n" }
+    }
+    if (-not $out) { $out = "FALHA o autoteste do Tinker 2 nao terminou em 2 min" }
+    $first = ($out -split "`n")[0]
+    Say $first
+    Post-Sheet "agente PC: $first" ((($out -split "`n") | Where-Object { $_ -like "FALHA*" }) -join "`n") $out "tinker2-$v"
+    Set-Content $done2 $v
 }
 
 function Get-Release {
@@ -1441,6 +1475,7 @@ while ($true) {
         if (-not (Wait-Booted)) { continue }
         if (-not ((& $adb shell pm list packages com.topjohnwu.magisk) -match "magisk")) { Install-Magisk; continue }
         Test-Version
+        try { Test-Tinker2 } catch { Say "Tinker 2: $($_.Exception.Message)" }
     } catch { Say "erro: $($_.Exception.Message)" }
     Start-Sleep 30  # versão nova é testada em até 30 s depois de publicada
 }
