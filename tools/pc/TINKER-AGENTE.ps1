@@ -1371,6 +1371,17 @@ function Run-RealGame($dg) {
             if (-not $mon.Count) { throw "$quem | o monitor nao viu nada mudar" }
             "$quem | monitor: $($mon.Count) mudaram por evento, $($bate.Count) com o valor de um item da tela: " + ($bate -join ", ") + " | " + (($l | Where-Object { $_ -like "log *" }) -join " / ")
         }
+        # 2d. inspecionar a tela (pedido do usuario, 30/10: como o "Inspecionar elemento" do navegador): de onde vem o texto
+        # de cada numero da tela - o componente de texto e o script dono dele. So le
+        T "2d inspecionar o numero da tela" {
+            $res = @()
+            foreach ($i in @($script:it | Where-Object { $_.v -match '^\d+$' -and $_.nome -notmatch '\(' } | Select-Object -First 3)) {
+                $n = Step "inspecionar $($i.v)" 300
+                $res += "$($i.v) ($n): " + ((($script:last -split "`n") | Where-Object { $_ -like "texto *" -or $_ -like "dono *" } | Select-Object -First 8) -join "; ")
+            }
+            if (-not ($res -match "dono ")) { throw "nao achei o script dono do texto | " + ($res -join " / ") }
+            $res -join " / "
+        }
         # 2c. pedido pelo dicionario do jogo (revisao 30/10): busca o numero e pergunta ao mapa IL2CPP de quem e cada lugar
         # (Classe.campo). Nao precisa o numero mudar. Escreve nos candidatos com nome de moeda primeiro e confere na tela
         T "2c pedido pelo dicionario do jogo" {

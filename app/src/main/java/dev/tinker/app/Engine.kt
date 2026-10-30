@@ -1607,6 +1607,25 @@ class Engine private constructor(private val app: Context) {
                 val ranked = names.sortedByDescending { coin.containsMatchIn(it.value) }
                 return "ok ${ranked.size} de ${addrs.size}\ncount ${ranked.size}\n" + ranked.take(40).joinToString("\n") { "dono ${it.key} ${it.value}" }
             }
+            // "inspecionar 180": como o Inspecionar elemento do navegador. Acha o texto "180" que a tela desenha (string do C#:
+            // tamanho e UTF-16 depois de klass e monitor), quem guarda esse texto (o componente de texto) e quem guarda o
+            // componente (o script da tela, com o nome do campo). Só lê: não escreve nada
+            "inspecionar" -> {
+                val hex = "%02x000000".format(arg.length) + arg.map { "%02x00".format(it.code) }.joinToString("") + "0000"
+                val strs = call { d -> d.send("aobfind $hex data", quiet = true).lines }.mapNotNull { it.trim().toLongOrNull(16) }.map { it - 0x10 }.take(15)
+                suspend fun refs(obj: Long): List<Pair<String, String>> {  // quem aponta para obj: (endereço, Classe.campo)
+                    search(setOf("i64"), obj.toString())
+                    val a = call { d -> d.send("list 50", quiet = true).lines.map { it.substringBefore(' ') } }
+                    return il2Names(a).filterNot { it.value.startsWith("cópia") }.toList()
+                }
+                val out = mutableListOf<String>()
+                for (s0 in strs) for ((ra, rn) in refs(s0)) {
+                    out += "texto \"$arg\" em $rn"
+                    val holder = il2cpp(ra)?.start?.toLongOrNull(16) ?: continue
+                    refs(holder).take(5).forEach { (_, on) -> out += "dono $rn <- $on" }
+                }
+                return "ok ${strs.size} textos \"$arg\", ${out.size} ligações\ncount ${out.size}\n" + out.distinct().take(60).joinToString("\n")
+            }
             "despatch" -> "desfeitos ${clearMissionPatches()}"
             "desconhecido" -> startUnknown(setOf(w.getOrElse(1) { "i32" }))
             "comparar" -> compare(w[1], w.drop(2).joinToString(" "))
