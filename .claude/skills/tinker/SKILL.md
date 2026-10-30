@@ -7,7 +7,8 @@ description: Continua o projeto Tinker, editor de memória para Android (estilo 
 
 Responder sempre em **português do Brasil**, curto, direto e **com empatia** (o usuário pediu mais calor humano). Horário de
 Brasília (UTC−3); o relógio do emulador mostra UTC. O usuário testa no celular/PC e manda prints. Avisar no celular
-(PushNotification) só o que importa: versão nova com resultado, primeira vitória num teste, algo que precise dele.
+(PushNotification) sempre que uma mudança for aplicada (versão nova publicada, agente atualizado, planilha mexida), dizendo
+em uma linha o que mudou; também primeira vitória num teste ou algo que precise dele. Ele acompanha pelo celular.
 
 ## Onde está tudo
 - Repositório `Sedricko/Game-Guardian` (**público**: nunca pôr token do painel no código), branch de trabalho `ccr-92c99132-2ne91y`.
