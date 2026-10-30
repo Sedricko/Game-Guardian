@@ -1509,12 +1509,12 @@ function Run-RealGame($dg) {
                 try {
                     # descoberta confirmada pelo usuario (30/10): fica guardada no app como patch normal, desligado, para ele ligar
                     # quando quiser (Salvos -> Patches de codigo). Precisa do codigo original: com a troca ainda no jogo, reabre antes
-                    $g = try { Step "guardar ShopRouletteController.GetSpinGemsPrice 0 Roleta: preço do giro" | Out-Null; ($script:last -split "`n")[0] } catch { "$($_.Exception.Message)" }
+                    $g = ""; try { Step "guardar ShopRouletteController.GetSpinGemsPrice 0 Roleta: preco do giro" | Out-Null; $g = ($script:last -split "`n")[0] } catch { $g = "$($_.Exception.Message)" }
                     if ($g -match "j. s.o os bytes") {
                         & $adb shell am force-stop $dg; Start-Sleep 2
                         & $adb shell monkey -p $dg -c android.intent.category.LAUNCHER 1 | Out-Null; Start-Sleep 35
                         Step "jogo $dg" | Out-Null; Start-Sleep 15
-                        $g = try { Step "guardar ShopRouletteController.GetSpinGemsPrice 0 Roleta: preço do giro" | Out-Null; ($script:last -split "`n")[0] } catch { "$($_.Exception.Message)" }
+                        $g = ""; try { Step "guardar ShopRouletteController.GetSpinGemsPrice 0 Roleta: preco do giro" | Out-Null; $g = ($script:last -split "`n")[0] } catch { $g = "$($_.Exception.Message)" }
                     }
                     Say "  guardar no app: $g"
                     try { Step "metodo ShopRouletteController.GetSpinGemsPrice 0" | Out-Null; $msg = ($script:last -split "`n")[0] }
