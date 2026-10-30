@@ -1377,7 +1377,26 @@ function Run-RealGame($dg) {
             $res = @()
             foreach ($i in @($script:it | Where-Object { $_.v -match '^\d+$' -and $_.nome -notmatch '\(' } | Select-Object -First 3)) {
                 $n = Step "inspecionar $($i.v)" 300
-                $res += "$($i.v) ($n): " + ((($script:last -split "`n") | Where-Object { $_ -like "texto *" -or $_ -like "dono *" } | Select-Object -First 8) -join "; ")
+                $linhas = ($script:last -split "`n")
+                $res += "$($i.v) ($n): " + (($linhas | Where-Object { $_ -like "texto *" -or $_ -like "dono *" -or $_ -like "valor *" } | Select-Object -First 10) -join "; ")
+                # chegou na memoria do valor: os campos do dono com o mesmo numero. Escreve, confere na tela; o certo fica
+                $alvo = if ([double]$i.v -lt 999) { "999" } else { "$([long]$i.v + 1000)" }
+                foreach ($c in @($linhas | Where-Object { $_ -like "valor *" } | Select-Object -First 6)) {
+                    $f = $c -split ' '; $addr = $f[1]; $tipo = $f[2]; $campo = $f[3]
+                    $fotoAntes = $null; try { Show-Game $dg; $fotoAntes = Shot "jogo-antes" } catch { }
+                    Step "endereco $addr $tipo $alvo" | Out-Null; Start-Sleep 3
+                    $tela = (Items | Where-Object nome -eq $i.nome | Select-Object -First 1).v
+                    if ($tela -eq $alvo) {
+                        try {
+                            if ($fotoAntes) { Post-Sheet "agente PC: foto do jogo ANTES ($campo = $($i.v))" "" ("jpeg base64`n" + $fotoAntes) $v "$nome (emulador)" }
+                            Show-Game $dg
+                            Post-Sheet "agente PC: foto do jogo DEPOIS ($campo = $alvo)" "" ("jpeg base64`n" + (Shot "jogo-depois")) $v "$nome (emulador)"
+                        } catch { }
+                        Add-Content "$env:USERPROFILE\tinker-mantidos-$dg.txt" "$(Get-Date -Format 'dd/MM HH:mm') $campo $($i.v) -> $alvo (0x$addr, pela inspecao)"
+                        return "INSPECAO ACHOU: $campo (0x$addr) era o $($i.v) da tela, virou $alvo e ficou | " + ($res -join " / ")
+                    }
+                    Step "endereco $addr $tipo $($i.v)" | Out-Null
+                }
             }
             if (-not ($res -match "dono ")) { throw "nao achei o script dono do texto | " + ($res -join " / ") }
             $res -join " / "

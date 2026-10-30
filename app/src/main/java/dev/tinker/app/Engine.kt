@@ -656,6 +656,27 @@ class Engine private constructor(private val app: Context) {
         }.filterValues { it.isNotEmpty() }
     }
 
+    /** Campos numéricos do objeto (e, até `depth` níveis, dos objetos que ele aponta) que guardam `want`: "valor ADDR TIPO Classe.campo". */
+    private suspend fun valueFields(c: Il2Class, want: String, depth: Int, seen: MutableSet<String> = mutableSetOf()): List<String> {
+        if (!seen.add(c.start) || seen.size > 40) return emptyList()
+        val base = c.start.toLongOrNull(16) ?: return emptyList()
+        val n = want.toDoubleOrNull() ?: return emptyList()
+        val out = mutableListOf<String>()
+        for (f in c.fields) {
+            val a = (base + f.offset).toString(16)
+            val t = when (f.code) { 0x08, 0x09 -> "i32"; 0x0a, 0x0b -> "i64"; 0x0c -> "f32"; 0x0d -> "f64"; else -> null }
+            if (t != null) {
+                val v = runCatching { call { d -> d.send("read $a $t", quiet = true).status } }.getOrNull()?.toDoubleOrNull()
+                if (v == n) out += "valor $a $t ${c.name}.${f.name}"
+            } else if (depth > 0 && f.code in setOf(0x12, 0x15, 0x1c)) {  // classe, genérico, object: segue o ponteiro
+                val p = runCatching { call { d -> d.send("read $a i64", quiet = true).status } }.getOrNull()?.toLongOrNull() ?: continue
+                if (p == 0L) continue
+                il2cpp(p.toString(16))?.takeIf { it.start == p.toString(16) }?.let { out += valueFields(it, want, depth - 1, seen) }
+            }
+        }
+        return out
+    }
+
     private fun fieldLabel(c: Il2Class, addr: String): String {
         if (c.name in BOXED) return "cópia temporária (${c.name.substringAfterLast('.')})"
         val off = addr.toLong(16) - c.start.toLong(16)
@@ -1622,7 +1643,11 @@ class Engine private constructor(private val app: Context) {
                 for (s0 in strs) for ((ra, rn) in refs(s0)) {
                     out += "texto \"$arg\" em $rn"
                     val holder = il2cpp(ra)?.start?.toLongOrNull(16) ?: continue
-                    refs(holder).take(5).forEach { (_, on) -> out += "dono $rn <- $on" }
+                    refs(holder).take(5).forEach { (oa, on) ->
+                        out += "dono $rn <- $on"
+                        // o "Atributos" do inspetor: campos do script dono (e dos objetos que ele aponta) com o mesmo número
+                        il2cpp(oa)?.let { valueFields(it, arg, 2).forEach { v -> out += v } }
+                    }
                 }
                 return "ok ${strs.size} textos \"$arg\", ${out.size} ligações\ncount ${out.size}\n" + out.distinct().take(60).joinToString("\n")
             }
