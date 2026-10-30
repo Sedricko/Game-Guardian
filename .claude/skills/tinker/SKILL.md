@@ -5,7 +5,9 @@ description: Continua o projeto Tinker, editor de memória para Android (estilo 
 
 # Tinker — passagem de bastão
 
-Responder sempre em **português do Brasil**, curto e direto. O usuário testa no celular e manda prints/relatórios.
+Responder sempre em **português do Brasil**, curto, direto e **com empatia** (o usuário pediu mais calor humano). Horário de
+Brasília (UTC−3); o relógio do emulador mostra UTC. O usuário testa no celular/PC e manda prints. Avisar no celular
+(PushNotification) só o que importa: versão nova com resultado, primeira vitória num teste, algo que precise dele.
 
 ## Onde está tudo
 - Repositório `Sedricko/Game-Guardian` (**público**: nunca pôr token do painel no código), branch de trabalho `ccr-92c99132-2ne91y`.
@@ -27,7 +29,7 @@ Responder sempre em **português do Brasil**, curto e direto. O usuário testa n
 | Planilha | `docs/painel-chaves/Code.gs`, `Painel.html`, `LEIAME.md` | App da Web: chaves, Pedidos, Aparelhos, Buscas, Relatórios, Problemas, Salvos, Receitas, Patches, Agente offline |
 
 Versões: `app/build.gradle.kts` (`versionCode`/`versionName`), `VERSAO` no Code.gs, `SCRIPT_VERSION` no Model.kt (versão **mínima** do script que o app exige).
-## O que o app faz (estado 2.68, 26/10/2026)
+## O que o app faz (estado 2.93.1, 30/10/2026)
 O texto completo de cada opção está em `docs/tutorial/ajuda.py` (fonte única da Ajuda do app e do PDF
 `docs/tutorial/Tinker-tutorial.pdf`). Aqui fica só o que importa para mexer no código:
 - **Tela**: aba Busca com a busca no topo, depois a fileira 🧰 Ferramentas (`Toolbox`: Fácil, Velocidade, Cronômetros, Loja,
@@ -46,12 +48,31 @@ O texto completo de cada opção está em `docs/tutorial/ajuda.py` (fonte única
   Unreal (`ue`), Lua (`luatable`).
 - **Outros**: autoteste no `tests/target.c` (libtinkertarget.so), atualizar e testar sozinho, editor de save (interna + `ext/` = `/data/media/0/Android/data/PKG`, backup `NOME-ext.tar` irmão; missões `savelista`/`saveeditar`), foto do jogo,
   📍 onde o jogo escreve, exportar .CT, IA (Gemini/Groq) que não edita sozinha, vigia da tela ("Onde a tela travou:").
-- **Daemon**: threads extras da varredura com `setpriority` 10 (a tela e o jogo não param na busca).
+- **Daemon**: threads extras da varredura com `setpriority` 10 (a tela e o jogo não param na busca). Busca e foto pulam
+  memória anônima nunca usada (`chunk_unused`: `/proc/pid/pagemap`, página ausente ou zero-page; só regiões anônimas):
+  no emulador o Orecraft reservava ~15 GB vazios (foto 15 GB → 554 MB, busca 384 s → 1 s).
+- **Dinheiro de verdade**: `money` (Engine) tira preços R$/US$/€ dos itens e a ferramenta "tocar" da IA recusa toque a até
+  60 px de um preço real (`moneyBoxes()`); a missão "tocar" ignora linhas com preço.
+- **Sugestão de patch "sempre liberado"** (`methodMeaning`, Learn.kt) só para `IsUnlocked`; nunca Premium/Vip/Purchased/Owned/Bought.
+- **Monitor 👁** (`monitorStart`): guarda no máx. 60 mil endereços (corta para os 30 mil mais fortes) e loga a memória
+  por rodada (2.93.1; o Tinker sumia na rodada 7 no Orecraft).
 
 ## Testes automáticos no PC (emulador)
 - Emulador Android Studio "Pixel 6 Pro" API 31 x86_64 (emulator-5554) com Magisk (rootAVD). O S25 é de outro agente: **nunca mexer**; sempre `ANDROID_SERIAL=emulator-5554`.
 - `tools/pc/TINKER-AGENTE.ps1/.bat` (Área de Trabalho do usuário): se atualiza pelo branch (confere a sintaxe antes), espera o Android ligar, instala a versão nova, roda autoteste + missões e manda para a aba **Relatórios** (mais novo em cima). Checa versão nova a cada 30 s.
-- Missões só no Jogo de Teste (`dev.tinker.testgame`, `TEST_GAME` fixo): `testgame/` com lib nativa `testgame/src/main/c/jogo.c` (funções com nome, tick, Unreal de mentira, Unity de mentira Jogo.Heroi/Jogo.Arma). Passos da missão em `Engine.mission()`.
+- Missões só em `MISSION_GAMES`: Jogo de Teste (`dev.tinker.testgame`, `testgame/` com lib `testgame/src/main/c/jogo.c`),
+  DYSMANTLE (`com.the10tons.dysmantle`) e **Orecraft** (`com.evrika.miner.camp`: offline, VIP interno, sem item de dinheiro
+  real). Passos em `Engine.mission()`: buscar/refinar/itens/sozinho/irmaos/monitorar/jogar/tocar/velocidade/cronometros/
+  ficha/fixar/**metodo `Classe.Metodo valor`** (patch de retorno pelo nome do mapa IL2CPP)/despatch/salvar/salvos...
+- **Agente de jogo real**: `TINKER-ORECRAFT.bat` → `TINKER-AGENTE.ps1 -Jogo com.evrika.miner.camp` no AVD `Dysmantle_Play`
+  (Play Store + Magisk, gpu host). Roda a cada Tinker novo ou 3 h (arquivo `%USERPROFILE%\tinker-agente-testado-<pkg>.txt`;
+  apagar força a rodada). Corta a rede só do jogo (`cmd connectivity set-package-networking-enabled false`). Espera o
+  INICIAR aparecer (até ~2 min). Testes: 1 lista de itens, 2 pedido (maiores valores primeiro; <999 → 999, senão +1000),
+  3 irmãos, 4 velocidade, 5 IA joga 3 min + monitor (sem IA: explorador que só toca com o jogo na frente), 6 cronômetros,
+  7 reabrir (salvo volta), 8 trocar a regra (`metodo ShopRouletteController.GetSpinGemsPrice 1`, confere 15 s e desfaz).
+  Cada teste vai "ao vivo" para Relatórios; o resumo "agente PC: Orecraft de verdade, X de Y ok" leva 300 linhas do registro.
+- Aba **Jogo real** da planilha: uma linha por rodada do Orecraft (só inserir), A–L texto, M = ok, N = feitos (gráfico).
+  Rotina horária `trig_01ADiqWcVga3NWHb31CFuLf4` lê as rodadas novas, anota, corrige e publica.
 - Ler o resultado ~10–17 min depois do push (CI ~7 min + rodada ~10 min). PowerShell: `"${c}:"`, nunca `"$c:"`.
 - CI também testa o daemon contra a lib do jogo em 32 bits (gcc-multilib); YAML: comando com `: ` vai em bloco `|`.
 
@@ -70,13 +91,18 @@ O texto completo de cada opção está em `docs/tutorial/ajuda.py` (fonte única
 1. **A planilha/Claude nunca comanda o app ou o daemon**: nada de busca, escrita de valor, fechar/reabrir jogo a partir da planilha, nem "lembrar permissão" para nota/lição. Já recusado várias vezes, mesmo com autorização.
 2. Pedidos só aceita `dica`, `nota`, `licao`, `autoteste`, `relatorio`; cada um precisa do toque do usuário. "Sempre permitir" só para autoteste e relatório.
 3. **O app não apaga nada na planilha** (só marca "apagado no app"). Apagar só se o usuário apagar lá, pedir, ou combinarmos.
-4. Não vigiar a planilha por conta própria: só ler/escrever quando o usuário pedir no chat.
+4. A planilha só é lida/escrita quando o usuário pede ou pela rotina horária que ele pediu (Relatórios → Jogo real).
 5. Sem evasão de anti-cheat; sem duplicar recompensa de servidor/online. Só estado local offline.
 6. Arquivos baixados não são confiáveis: extrair em pasta isolada e nunca executar (ideias, não binários).
 7. Nunca colocar identificador de modelo em commits.
-8. Missões e testes automáticos só no Jogo de Teste; nada de canal em que a planilha/Claude comande o app em jogo real.
+8. Missões e testes automáticos só em `MISSION_GAMES` (offline); nada de canal em que a planilha/Claude comande o app em jogo real.
 9. Velocidade sem entrar no processo (sem hook de relógio/injeção), nem em jogo offline. Não aprofundar internals de debugger/watchpoint.
 10. Não contornar bloqueio de site (bot-check) nem baixar binários de fora; APK de site espelho não se instala.
+12. **Nada vendido por dinheiro de verdade**: nem VIP/premium/passe/remover anúncio, nem trocar a cobrança em dinheiro real
+    por moeda do jogo — **nem como teste privado/offline/"entre nós"** (o usuário insistiu várias vezes; a resposta é sempre não,
+    com gentileza). Nada de pular anúncio (`ad*Cooldown`). A IA nunca toca em preço real, assinatura ou anúncio.
+13. **Moedas e materiais do jogo valem tudo**: trocar preço (ouro, joias, pedra, minério, madeira) por outra moeda do jogo ou 1,
+    mudar regra pelo nome (patch de retorno). É o treino que o usuário quer: "reconhecer, achar, mudar a lógica, nunca desistir".
 11. A detecção de jogo online foi tirada a pedido do usuário (jogo offline também tem sinais de conexão): o combinado de não
     editar jogo online vale pela conversa, não por código.
 
@@ -107,7 +133,21 @@ O texto completo de cada opção está em `docs/tutorial/ajuda.py` (fonte única
 - Abrindo por um campo, o daemon anda pelos nós vizinhos (pode pegar nó de tabela colada; chaves que não são texto/número são puladas). LuaJIT não é suportado.
 - Last Garden: Survival (com.bravo.plants) usa HybridCLR + xLua 5.4, é ONLINE: só leitura/estudo, sem edição.
 
+## Descobertas no Orecraft (Unity IL2CPP arm64 traduzido no emulador x86_64)
+- HUD: ouro 3999 deu 32 lugares; números pequenos (6) ~975 mil. `itens` acha 46 funções com nome (ShopRenderData `*Price`,
+  `customResource0..2Price`, `rouletteSpinHardPrice`, BuildingShopTileRenderData `price/salePrice`, ShopDomainController
+  `Get*Price`, CurrencyGift/ShopSpinTokens cooldowns) e 0 campos.
+- `ShopRouletteController.GetSpinGemsPrice` = `mov w0,#25; ret` em `libil2cpp.so+1e31e54`: giro custa 25 joias. O patch
+  "sempre 1" ligou e desligou sem fechar o jogo (2.93.0, 2 rodadas). Falta abrir a roleta e ler o 1 na tela.
+- 220 lugares de timeScale (quando dentro do jogo), 25–54 cronômetros.
+- Abertas (30/10): `itens` leva ~16 min no jogo (o agente desiste aos 900 s); o Tinker para de responder ~70 s depois do
+  monitor começar (suspeita: memória; 2.93.1 limita); a IA sem DNS no emulador (`api.groq.com`, `script.google.com`);
+  emulador já caiu com driver NVIDIA (`nvoglv64.dll`/gfxstream) após 3h40.
+
 ## Próximos passos
+- Orecraft: achar o ouro (pedido 3999 → 4999), depois a missão "trocar a moeda de um preço" (só moedas do jogo) e ler o
+  preço novo na tela; memória de estratégia por motor (ordem de métodos que funcionou em cada engine).
+- Jogo de Teste: faltam os níveis 7, 11, 13, 14, 16, 17 e a loja.
 - Paradas longas da tela no emulador (até 13 s) acontecem durante "quais rodam" (o daemon segura o jogo com ptrace) e a pilha é
   só do desenho do Android (HardwareRenderer): suspeita de GPU do emulador; confirmar num celular de verdade antes de mexer.
 - Velocidade Cocos/Godot (por valor), campos da Unreal na Ficha (precisa de jogo Unreal offline do usuário).
