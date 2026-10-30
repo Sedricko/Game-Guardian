@@ -54,10 +54,15 @@ end
 
 -- busca + refino guiado até sobrar 1: devolve o endereço
 local function achar_por_valor(nome, tipo)
-  local v = gg.prompt({ "Quanto " .. nome .. " mostra na tela agora?" }, { "" }, { "number" })
-  if not v or v[1] == "" then return nil end
-  gg.clearResults()
-  gg.searchNumber(v[1], tipo)
+  -- você já buscou/refinou no GG: continua dos seus resultados (com 1, usa direto)
+  local ja = gg.getResultsCount()
+  local usar = ja > 0 and gg.choice({ "Usar os " .. ja .. " resultado(s) que já filtrei", "Fazer uma busca nova" }, nil, nome) == 1
+  if not usar then
+    local v = gg.prompt({ "Quanto " .. nome .. " mostra na tela agora?" }, { "" }, { "number" })
+    if not v or v[1] == "" then return nil end
+    gg.clearResults()
+    gg.searchNumber(v[1], tipo)
+  end
   while gg.getResultsCount() > 1 do
     local n = gg.getResultsCount()
     local novo = gg.prompt({ n .. " lugares. Faça " .. nome .. " MUDAR no jogo (gaste, ganhe, fabrique) e digite o valor novo:" }, { "" }, { "number" })
