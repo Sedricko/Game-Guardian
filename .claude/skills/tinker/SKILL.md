@@ -182,17 +182,6 @@ segurança (preço real, `MISSION_GAMES`) e esta skill.
 | `5 cronometros` | achar e terminar esperas | já passa |
 Depois, só com o núcleo verde: velocidade, IA, editor de save, Lua/Unreal (um por vez, com teste).
 
-**Onde está a v2 (começada em 30/10):** módulo Gradle `app2/` (pacote `dev.tinker.v2`, nome "Tinker 2", `versionName`
-próprio a partir de 0.1.0). Instala **ao lado** da 2.x; usa o mesmo `libtinkerd.so`/`libtinkertarget.so` (jniLibs do `app/`).
-O CI publica `Tinker2-X.Y.Z.apk` na release `tinker2-vX.Y.Z` (**pre-release**, nunca a "mais recente": o agente da 2.x lê a
-mais recente e não muda). O agente do PC (`Test-Tinker2`, depois do teste da 2.x) instala cada versão nova, dá root pelo
-Magisk, roda `--ez autoteste true` e manda `files/autoteste.txt` para Relatórios (versão `tinker2-X.Y.Z`).
-Pastas: um pacote por módulo (`core/daemon` = `Daemon` com fluxos injetáveis + `Autoteste`; teste JVM `DaemonTest`).
-| Módulo | Estado |
-|---|---|
-| `core/daemon` | 0.1.0: código + autoteste (root, ciclo de memória no próprio daemon, jogo de teste com 1 endereço). Falta: 3 rodadas ok do agente |
-| demais | não começados (não começar antes do anterior ficar verde) |
-
 **Ordem de trabalho:** um módulo → teste no Jogo de Teste → teste no Orecraft pelo agente → só então o próximo. Cada
 módulo tem uma linha na aba Jogo real. Não juntar duas mudanças grandes num mesmo push.
 
