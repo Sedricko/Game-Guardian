@@ -118,15 +118,24 @@ local function entregar(nome, tipo, alvo, msg)
   gg.alert(msg .. "\n" .. nome .. " está na lista salva: edite ou congele por lá.")
 end
 
--- escolher o valor
+-- escolher o valor; com 1 resultado já refinado no GG, a 1ª opção é ele (o tipo vem do próprio resultado)
 local lista = nomes()
-local opcoes = { "➕ Novo valor" }
+local um = gg.getResultsCount() == 1 and gg.getResults(1)[1] or nil
+local NOMETIPO = { [gg.TYPE_DWORD] = "Dword", [gg.TYPE_FLOAT] = "Float", [gg.TYPE_DOUBLE] = "Double" }
+local opcoes, base = {}, 1
+if um then opcoes[1] = "✔ Assinatura do resultado que filtrei (valor " .. tostring(um.value) .. ", " .. (NOMETIPO[um.flags] or "tipo " .. um.flags) .. ")"; base = 2 end
+opcoes[base] = "➕ Novo valor"
 for _, n in ipairs(lista) do opcoes[#opcoes + 1] = n end
 local c = gg.choice(opcoes, nil, "Assinatura automática")
 if not c then return end
-local nome = lista[c - 1]
+local nome = lista[c - base]
 local tipo, fase, viz
-if not nome then
+local direto = um and c == 1
+if direto then
+  local r = gg.prompt({ "Nome deste valor (ex.: Barra de Cobre)" }, { "" }, { "text" })
+  if not r or r[1] == "" then return end
+  nome, tipo, fase = r[1], um.flags, 0
+elseif not nome then
   local r = gg.prompt({ "Nome do valor (ex.: Barra de Cobre)" }, { "" }, { "text" })
   if not r or r[1] == "" then return end
   nome = r[1]
@@ -145,7 +154,7 @@ if fase >= 2 then
                     or "A assinatura achou " .. #a .. " lugares. Vamos achar pelo valor e deixar ela mais firme.")
 end
 
-local alvo = achar_por_valor(nome, tipo)
+local alvo = direto and um.address or achar_por_valor(nome, tipo)
 if not alvo then return end
 local agora = ler(alvo)
 if fase == 0 then
