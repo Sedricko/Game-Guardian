@@ -138,6 +138,19 @@ local function achar_por_assinatura(nome, tipo, viz)
   return achados
 end
 
+-- a assinatura achou vários lugares iguais (estruturas repetidas no jogo, ex.: cada barra tem o mesmo formato):
+-- separa pelo valor que a tela mostra agora
+local function desempatar(nome, tipo, achados)
+  if #achados <= 1 then return achados end
+  local r = gg.prompt({ "A assinatura achou " .. #achados .. " lugares parecidos. Quanto " .. nome .. " mostra na tela agora?" }, { "" }, { "number" })
+  if not r or r[1] == "" then return achados end
+  local want, out = tonumber(r[1]), {}
+  local vals = {}
+  for i, a in ipairs(achados) do vals[i] = { address = a.address, flags = tipo } end
+  for i, v in ipairs(gg.getValues(vals)) do if math.abs(v.value - want) < 0.5 then out[#out + 1] = achados[i] end end
+  return out
+end
+
 local function esc(t)  -- texto dentro de JSON
   local r = tostring(t):gsub("\\", "\\\\"):gsub('"', '\\"')
   return r
@@ -209,7 +222,7 @@ local function painel(lista)
     local tipo, fase, viz = carregar(n)
     if fase and fase >= 2 then
       local a = achar_por_assinatura(n, tipo, viz)
-      itens[#itens + 1] = { nome = n, tipo = tipo, addr = #a == 1 and a[1].address or nil }
+      itens[#itens + 1] = { nome = n, tipo = tipo, addr = #a == 1 and a[1].address or nil, varios = #a > 1 and a or nil }
     end
   end
   if #itens == 0 then gg.alert("Ainda não há valor com assinatura pronta neste jogo. Refine um valor e guarde (3 testes).") return end
@@ -221,11 +234,16 @@ local function painel(lista)
       if it.addr then
         local v = gg.getValues({ { address = it.addr, flags = it.tipo } })[1].value
         nomesTela[i] = it.nome .. " = " .. tostring(v) .. (congelados[it.addr] and "  ❄" or "")
+      elseif it.varios then nomesTela[i] = it.nome .. " (" .. #it.varios .. " lugares parecidos: toque e diga o valor da tela)"
       else nomesTela[i] = it.nome .. " (não achei agora: abra a tela dele)" end
     end
     local i = gg.choice(nomesTela, nil, "📋 Painel de " .. JOGO)
     if not i then return end
     local it = itens[i]
+    if not it.addr and it.varios then
+      local a = desempatar(it.nome, it.tipo, it.varios)
+      if #a == 1 then it.addr, it.varios = a[1].address, nil else gg.alert("Ainda " .. #a .. " lugares com esse valor: mude o valor no jogo e tente de novo.") end
+    end
     if it.addr then
       local acao = gg.choice({ "✏️ Mudar valor", "❄ Congelar (no valor que eu digitar)", "🔓 Soltar (descongelar)" }, nil, it.nome)
       if acao == 1 or acao == 2 then
@@ -392,7 +410,7 @@ if um or k >= 2 then
     local fr = io.open(regarq(PEND), "r")
     if fr then local l = fr:read("*l"); fr:close(); local fw = io.open(regarq(nome), "w"); fw:write(l or ""); fw:close() end
     os.remove(snaparq(PEND))
-    local a = achar_por_assinatura(nome, tipo, fica)
+    local a = desempatar(nome, tipo, achar_por_assinatura(nome, tipo, fica))
     if #a == 1 then entregar(nome, tipo, a[1].address, "Assinatura de " .. nome .. " gerada e o valor achado ✅" .. publicar(nome, tipo, fica, a[1].address))
     else gg.alert("Assinatura de " .. nome .. " gerada ✅ (agora acha " .. #a .. " lugar(es); abra a tela do valor e use o 📋 Painel).") end
     return
@@ -469,7 +487,7 @@ if fase == -1 then
 end
 
 if fase >= 2 then
-  local a = achar_por_assinatura(nome, tipo, viz)
+  local a = desempatar(nome, tipo, achar_por_assinatura(nome, tipo, viz))
   if #a == 1 then entregar(nome, tipo, a[1].address, "Achei pela assinatura ✅") return end
   gg.alert(#a == 0 and "A assinatura não achou (a tela do valor está aberta?). Vamos achar pelo valor e atualizar a assinatura."
                     or "A assinatura achou " .. #a .. " lugares. Vamos achar pelo valor e deixar ela mais firme.")
