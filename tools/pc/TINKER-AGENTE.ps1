@@ -1271,14 +1271,11 @@ function Run-RealGame($dg) {
         Say "  $((($script:last -split "`n")[0]) -replace '^ok ', '')"
         Start-Sleep 8
     }
-    # offline de verdade durante o teste: so o JOGO fica sem internet (firewall pelo uid dele); o Tinker continua com a dele,
-    # para a IA que joga. Nada do que o Tinker escreve chega a um servidor do jogo (o bloqueio sai no fim)
-    # Android 14+: o proprio sistema corta a rede de um app (o iptables com --uid-owner nao existe no kernel do Android 16)
-    $net = (& $adb shell cmd connectivity set-package-networking-enabled false $dg 2>&1) -join " "
-    if ($net -match "Unknown|unknown|rror|xception") {
-        $guid = $null
-        & $adb shell cmd connectivity airplane-mode enable; Say "modo aviao ligado no emulador durante o teste (a IA que joga fica sem internet: entra o explorador)"
-    } else { $guid = "pkg"; Say "o $nome esta sem internet durante o teste (so ele; o Tinker tem internet)" }
+    # pedido do usuario (30/10): nao bloqueia mais a internet do jogo. O corte do Android 16 derrubava o DNS do emulador inteiro
+    # (a IA e a planilha so voltavam no fim da rodada). Garante que nada ficou cortado de rodadas antigas
+    & $adb shell cmd connectivity set-package-networking-enabled true $dg 2>&1 | Out-Null
+    & $adb shell cmd connectivity airplane-mode disable 2>&1 | Out-Null
+    $guid = "pkg"
     $script:rr = @()
     function Items { Step "itens" 900 | Out-Null; @(($script:last -split "`n") | Where-Object { $_ -like "item *" } | ForEach-Object { $f = $_ -split ' '; [pscustomobject]@{ nome = $f[1]; v = $f[2]; addr = $f[4] } }) }
     # um teste da lista: falha de um nao para os outros; cada um vai para a planilha com OK/FALHA e o tempo
