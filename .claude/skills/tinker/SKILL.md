@@ -160,3 +160,32 @@ O texto completo de cada opção está em `docs/tutorial/ajuda.py` (fonte única
 - `Engine.kt` tem ~5.200 linhas: dividir em arquivos por assunto (busca, salvos, ferramentas, IA) aos poucos, com CI a cada passo.
 - O ptrace com registradores de hardware em arm64/vPhoneOS ainda **não foi confirmado** no aparelho.
 - Adiados ("depois fazemos"): macro de toques, indicador de captura, assistente "materiais infinitos", aba Jogos.
+
+## Guia da versão 2 (app novo, combinado em 30/10)
+O usuário quer recomeçar o **app** com o que já sabemos: **uma função de cada vez, cada seção separada** (fácil manutenção),
+e nada novo entra antes de a anterior passar **no Orecraft, rodada após rodada**. O motivo: a 2.x tem muitas opções e
+várias não funcionam em jogo real.
+
+**Aproveitar (já provado, não reescrever):** `daemon/tinkerd.c` + `tests/daemon_test.sh` + `tests/target.c`, o Jogo de
+Teste (`testgame/`), o agente do PC (`tools/pc/`), a planilha (Code.gs, abas Relatórios e Jogo real), as regras de
+segurança (preço real, `MISSION_GAMES`) e esta skill.
+
+**Estrutura do app novo** (um módulo por seção; cada um com sua tela, seu código e seu teste; nenhum arquivo > ~600 linhas):
+| Módulo | Faz | Pronto quando (no Orecraft, 3 rodadas seguidas) |
+|---|---|---|
+| `core/daemon` | fala com o tinkerd (o `call {}` de hoje) | autoteste do daemon ok |
+| `core/jogo` | escolher o jogo, anexar, saber se é Unity | anexa sozinho depois de reabrir |
+| `1 achar` | número da tela → OCR → busca → refinar (com o explorador mudando o número) | acha o ouro com 1 endereço |
+| `2 mudar` | escrever e congelar; conferir na tela | a tela mostra o valor novo (foto antes/depois) |
+| `3 guardar` | salvo com ponteiro/assinatura; volta ao reabrir | reabriu e o valor voltou sem buscar |
+| `4 regra` | patch de retorno pelo nome IL2CPP (missão `metodo`) | já passa (roleta 25 → 1); falta ler na tela |
+| `5 cronometros` | achar e terminar esperas | já passa |
+Depois, só com o núcleo verde: velocidade, IA, editor de save, Lua/Unreal (um por vez, com teste).
+
+**Ordem de trabalho:** um módulo → teste no Jogo de Teste → teste no Orecraft pelo agente → só então o próximo. Cada
+módulo tem uma linha na aba Jogo real. Não juntar duas mudanças grandes num mesmo push.
+
+**Não repetir (já custou rodadas):** Android 14+ congela app em segundo plano (desligar `cached_apps_freezer` no emulador
+ou usar serviço em primeiro plano nas missões); memória anônima vazia de ~15 GB no emulador (pular com pagemap); não
+buscar 0/1; esperar o INICIAR; chaves da IA vêm do painel; emulador sem DNS; preço R$/US$ não é item; o pedido precisa
+de alguém jogando para o número mudar; registro do Tinker com 300 linhas no relatório; horário de Brasília na planilha.
