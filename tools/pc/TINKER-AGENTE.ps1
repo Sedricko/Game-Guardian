@@ -123,7 +123,11 @@ function Post-Sheet($motivo, $problemas, $texto, $versao, $jogo = "jogo de teste
 
 # print da tela do emulador, menor e em JPEG (cabe numa linha da planilha), como texto base64
 # poe o jogo na frente (o passo do Tinker abre o app por cima) e espera a tela assentar, para a foto ser do jogo
-function Show-Game($dg) { & $adb shell monkey -p $dg -c android.intent.category.LAUNCHER 1 | Out-Null; Start-Sleep 3 }
+function Show-Game($dg) {
+    # a janela "OLA! a mineracao continuou" ficava na frente e a foto nao mostrava o numero mudado (30/10): fecha antes
+    try { Step "tocar ^OK$" 30 | Out-Null } catch { }
+    & $adb shell monkey -p $dg -c android.intent.category.LAUNCHER 1 | Out-Null; Start-Sleep 3
+}
 
 function Shot($name) {
     $png = "$env:TEMP\tinker-$name.png"; $jpg = "$env:TEMP\tinker-$name.jpg"
