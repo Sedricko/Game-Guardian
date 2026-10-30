@@ -2077,7 +2077,22 @@ class Engine private constructor(private val app: Context) {
         }
     }
 
+    // o mapa (classes, objetos, funções) não muda enquanto o jogo não reabre: guarda por PID e só relê o valor dos campos
+    private var mapCache: Pair<Int, List<GameItem>>? = null
+
     private suspend fun scanIl2cpp(): List<GameItem> {
+        val pid = Session.process?.pid
+        mapCache?.takeIf { it.first == pid }?.second?.let { cached ->
+            itemLog("Mapa do jogo: o mesmo de antes (o jogo não reabriu), só relendo os valores")
+            return cached.map { g -> g.hit?.let { h ->
+                val v = runCatching { call { d -> d.send("read ${h.addr} ${h.type}", quiet = true).status } }.getOrDefault(g.value)
+                g.copy(value = v, hit = h.copy(value = v))
+            } ?: g }
+        }
+        return scanIl2cppNow().also { if (pid != null && it.isNotEmpty()) mapCache = pid to it }
+    }
+
+    private suspend fun scanIl2cppNow(): List<GameItem> {
         itemLog("Lendo o mapa do jogo (classes com nome)…")
         val classes = runCatching { call { d -> d.send("il2classes", quiet = true).lines } }.getOrDefault(emptyList())
             .filter { it.startsWith("class ") }.map { it.split(' ', limit = 5) }.filter { it.size == 5 && LIBS.none { l -> it[1].startsWith(l) } }
