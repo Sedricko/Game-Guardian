@@ -1452,13 +1452,13 @@ function Run-RealGame($dg) {
 # jogo de verdade: fica ligado como o agente de sempre; a cada versao nova do Tinker roda uma rodada sozinho no jogo
 if ($Jogo) {
     $doneJ = "$env:USERPROFILE\tinker-agente-testado-$Jogo.txt"
-    Say "agente do $($realGames[$Jogo].nome) ligado: a cada versao nova do Tinker (e a cada 3 h) faco uma rodada sozinho. Deixe esta janela aberta; Ctrl+C para sair."
+    Say "agente do $($realGames[$Jogo].nome) ligado: a cada versao nova do Tinker e sem parar, uma rodada atras da outra) faco as rodadas sozinho. Deixe esta janela aberta; Ctrl+C para sair."
     while ($true) {
         Update-Self
         try {
             $v = (Get-Release).tag_name.TrimStart("v")
-            # versao nova, ou 3 h desde a ultima rodada: o agente offline aprende um pouco mais a cada rodada (acertos e erros)
-            $velha = -not (Test-Path $doneJ) -or ((Get-Date) - (Get-Item $doneJ).LastWriteTime).TotalHours -ge 3
+            # pedido do usuario (30/10): acabou uma rodada, comeca a outra (2 min de folga para o emulador assentar)
+            $velha = -not (Test-Path $doneJ) -or ((Get-Date) - (Get-Item $doneJ).LastWriteTime).TotalMinutes -ge 2
             if ((Get-Content $doneJ -ErrorAction SilentlyContinue) -ne $v -or $velha) { Run-RealGame $Jogo; Set-Content $doneJ $v }
         } catch { Say "erro: $($_.Exception.Message)" }
         Start-Sleep 60
