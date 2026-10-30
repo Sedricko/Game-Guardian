@@ -85,6 +85,28 @@ local function achar_por_assinatura(nome, tipo, viz)
   return achados
 end
 
+-- receita do Tinker (a nossa biblioteca): a assinatura vira bytes (?? onde muda) e o valor fica em sigOff. Colar em
+-- Tinker → Salvos → Colar lista; o Tinker sincroniza as receitas com a planilha (aba Receitas)
+local function receita(nome, tipo, viz, valor)
+  local hex, primeiro, ultimo = {}, nil, nil
+  for d = -JANELA, JANELA, 4 do
+    local v = viz[d]
+    if v and d ~= 0 then
+      local u, b = math.floor(v % 4294967296), {}  -- GG usa Lua 5.2 (sem //)
+      for k = 1, 4 do b[k] = string.format("%02x", math.floor(u % 256)); u = math.floor(u / 256) end
+      hex[#hex + 1] = table.concat(b)
+      primeiro = primeiro or #hex; ultimo = #hex
+    else hex[#hex + 1] = "????????" end
+  end
+  if not primeiro then return nil end
+  local sig = table.concat(hex, "", primeiro, ultimo)
+  local sigOff = JANELA - (primeiro - 1) * 4
+  local t = tipo == gg.TYPE_FLOAT and "f32" or tipo == gg.TYPE_DOUBLE and "f64" or "i32"
+  local pkg = gg.getTargetPackage and gg.getTargetPackage() or ""
+  return string.format('{"tinker_receita":1,"jogo":"%s","receita":{"name":"%s","auto":false,"steps":[{"cls":"","off":0,"type":"%s","value":"%s","freeze":false,"label":"%s","sig":"%s","sigOff":%d}]}}',
+    pkg, nome, t, tostring(valor), nome, sig, sigOff)
+end
+
 local function entregar(nome, tipo, alvo, msg)
   local item = { { address = alvo, flags = tipo, name = nome } }
   gg.addListItems(item); gg.loadResults(item)
@@ -137,4 +159,11 @@ if n < 3 then
   return
 end
 gravar(nome, tipo, 2, fica)
-entregar(nome, tipo, alvo, "Assinatura pronta com " .. n .. " vizinhos fixos ✅ Nas próximas vezes eu acho sozinho.")
+local valor = gg.getValues({ { address = alvo, flags = tipo } })[1].value
+local r = receita(nome, tipo, fica, valor)
+if r then
+  gg.copyText(r, false)
+  local f = io.open(gg.EXT_STORAGE .. "/tinker-biblioteca.txt", "a"); f:write(r, "\n"); f:close()
+end
+entregar(nome, tipo, alvo, "Assinatura pronta com " .. n .. " vizinhos fixos ✅ Nas próximas vezes eu acho sozinho." ..
+  (r and "\n\nReceita para a biblioteca do Tinker COPIADA: no Tinker, Salvos → Colar lista. (também em tinker-biblioteca.txt)" or ""))
