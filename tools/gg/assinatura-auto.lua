@@ -264,23 +264,96 @@ local function mods()
   gg.alert(m.nome .. " = " .. n .. " ✅ (volta a " .. m.orig .. " quando o jogo reabrir; para voltar agora, ponha " .. m.orig .. ")")
 end
 
+-- testes manuais: você refina, o script guarda os vizinhos (1 teste por abertura do jogo); depois de 3, "Criar
+-- assinatura" fica só com o que foi igual em todos os testes
+local SNAPIDX = gg.EXT_STORAGE .. "/tinker-testes-" .. JOGO .. ".txt"
+local function snaparq(nome) return gg.EXT_STORAGE .. "/tinker-teste-" .. JOGO .. "-" .. nome:gsub("[^%w]", "_") .. ".txt" end
+local function snapnomes()
+  local out, f = {}, io.open(SNAPIDX, "r")
+  if f then for l in f:lines() do if l ~= "" then out[#out + 1] = l end end f:close() end
+  return out
+end
+local function snaptestes(nome)  -- lista de testes: cada um { [desloc] = valor }, e o tipo
+  local f, out, tipo = io.open(snaparq(nome), "r"), {}, nil
+  if not f then return out end
+  for l in f:lines() do
+    if l:sub(1, 1) == "#" then out[#out + 1] = {}; tipo = tonumber(l:sub(2)) or tipo else
+      local d, v = l:match("^(-?%d+) (-?%d+)$")
+      if d and out[#out] then out[#out][tonumber(d)] = tonumber(v) end
+    end
+  end
+  f:close()
+  return out, tipo
+end
+local function escolherNome(lista, titulo)
+  local ops = { "➕ Nome novo" }
+  for _, n in ipairs(lista) do ops[#ops + 1] = n end
+  local c = gg.choice(ops, nil, titulo)
+  if not c then return nil end
+  if c > 1 then return lista[c - 1] end
+  local r = gg.prompt({ "Nome do valor (ex.: Barra de Cobre)" }, { "" }, { "text" })
+  return r and r[1] ~= "" and r[1] or nil
+end
+local function guardarTeste(r)
+  local nomes_ = snapnomes()
+  local nome = escolherNome(nomes_, "Guardar vizinhos de qual valor?")
+  if not nome then return end
+  local novo = true
+  for _, n in ipairs(nomes_) do if n == nome then novo = false end end
+  if novo then local f = io.open(SNAPIDX, "a"); f:write(nome, "\n"); f:close() end
+  local f = io.open(snaparq(nome), "a")
+  f:write(string.format("#%d\n", r.flags))
+  for d, v in pairs(ler(r.address)) do f:write(string.format("%d %d\n", d, v)) end
+  f:close()
+  local n = #snaptestes(nome)
+  gg.alert("Teste " .. n .. " de " .. nome .. " guardado ✅\n\n" .. (n < 3 and "Feche e abra o jogo, refine de novo até 1 resultado e guarde o próximo teste."
+    or "Já tem " .. n .. " testes: escolha \"🧩 Criar assinatura\" no menu."))
+end
+local function criarAssinatura()
+  local nome = escolherNome(snapnomes(), "Criar assinatura de qual valor?")
+  if not nome then return end
+  local testes, tipo = snaptestes(nome)
+  if #testes < 2 then gg.alert(nome .. " tem " .. #testes .. " teste(s). Guarde pelo menos 2 (o ideal é 3), um em cada abertura do jogo.") return end
+  local fica, n = {}, 0
+  for d, v in pairs(testes[1]) do
+    local igual = d ~= 0 and not ponteiro(v)
+    for k = 2, #testes do if testes[k][d] ~= v then igual = false end end
+    if igual then fica[d] = v; n = n + 1 end
+  end
+  if n < 3 then gg.alert("Só " .. n .. " vizinhos ficaram iguais nos " .. #testes .. " testes: pouco. Aumente a JANELA no topo do script (até 88).") return end
+  gravar(nome, tipo, 2, fica)
+  local a = achar_por_assinatura(nome, tipo, fica)
+  if #a == 1 then
+    entregar(nome, tipo, a[1].address, "Assinatura criada com " .. n .. " vizinhos fixos (" .. #testes .. " testes) e achou o valor agora ✅" .. publicar(nome, tipo, fica, a[1].address))
+  else
+    gg.alert("Assinatura de " .. nome .. " criada com " .. n .. " vizinhos fixos (" .. #testes .. " testes) ✅\nAgora ela acha " .. #a .. " lugar(es)" ..
+      (#a == 0 and " (abra a tela do valor e use o Painel)." or ": guarde mais um teste e crie de novo para firmar."))
+  end
+end
+
 -- escolher o valor; com 1 resultado já refinado no GG, a 1ª opção é ele (o tipo vem do próprio resultado)
 local lista = nomes()
 local um = gg.getResultsCount() == 1 and gg.getResults(1)[1] or nil
 local varios = gg.getResultsCount() >= 2 and gg.getResultsCount() <= 50 and gg.getResults(50) or nil
-local opcoes, base = { "📋 Painel: mudar e congelar os valores deste jogo", "🔧 Mods de regra (" .. (MODS[JOGO] and #MODS[JOGO] or 0) .. ")" }, 3
-if um then opcoes[3] = "✔ Assinatura do resultado que filtrei (valor " .. tostring(um.value) .. ", " .. (NOMETIPO[um.flags] or "tipo " .. um.flags) .. ")"; base = 4 end
-if varios then opcoes[3] = "💾 Guardar os " .. #varios .. " resultados (na próxima abertura eu descubro qual é o certo)"; base = 4 end
+local opcoes, base = { "📋 Painel: mudar e congelar os valores deste jogo", "🔧 Mods de regra (" .. (MODS[JOGO] and #MODS[JOGO] or 0) .. ")",
+  "📸 Guardar os vizinhos do resultado refinado (1 teste)", "🧩 Criar assinatura (com os testes guardados)" }, 5
+if um then opcoes[5] = "✔ Assinatura rápida do resultado que filtrei (valor " .. tostring(um.value) .. ", " .. (NOMETIPO[um.flags] or "tipo " .. um.flags) .. ")"; base = 6 end
+if varios then opcoes[5] = "💾 Guardar os " .. #varios .. " resultados (na próxima abertura eu descubro qual é o certo)"; base = 6 end
 opcoes[base] = "➕ Novo valor"
 for _, n in ipairs(lista) do opcoes[#opcoes + 1] = n end
 local c = gg.choice(opcoes, nil, "Biblioteca de " .. JOGO)
 if not c then return end
 if c == 1 then painel(lista) return end
 if c == 2 then mods() return end
+if c == 3 then
+  if not um then gg.alert("Refine no GG até sobrar 1 resultado (agora: " .. gg.getResultsCount() .. ").") return end
+  guardarTeste(um) return
+end
+if c == 4 then criarAssinatura() return end
 local nome = lista[c - base]
 local tipo, fase, viz
-local direto = um and c == 3
-if varios and c == 3 then
+local direto = um and c == 5
+if varios and c == 5 then
   local r = gg.prompt({ "Nome deste valor (ex.: Barra de Cobre)" }, { "" }, { "text" })
   if not r or r[1] == "" then return end
   local lista = {}
