@@ -224,22 +224,63 @@ local function painel(lista)
   end
 end
 
+-- mods de regra que o Tinker descobriu por jogo (patch de retorno: "mov w0,#N; ret"). Antes de escrever, confere que o
+-- código ali é o esperado (o jogo atualizado tem outro código: aí não escreve nada)
+local MODS = {
+  ["com.evrika.miner.camp"] = {
+    { nome = "🎰 Roleta: preço do giro (joias)", lib = "libil2cpp.so", off = 0x1e31e54, orig = 25 },
+  },
+}
+local function base_lib(lib)  -- início da lib (o "libil2cpp.so+1e31e54" do Tinker conta do começo dela)
+  local b
+  for _, r in ipairs(gg.getRangesList(lib)) do if not b or r.start < b then b = r.start end end
+  return b
+end
+local function mods()
+  local lista = MODS[JOGO]
+  if not lista then gg.alert("Ainda não há mods de regra para " .. JOGO .. ".") return end
+  local nomesM = {}
+  for i, m in ipairs(lista) do nomesM[i] = m.nome end
+  local i = gg.choice(nomesM, nil, "🔧 Mods de " .. JOGO)
+  if not i then return end
+  local m = lista[i]
+  local b = base_lib(m.lib)
+  if not b then gg.alert("Não achei " .. m.lib .. " no jogo.") return end
+  local a = b + m.off
+  local cur = gg.getValues({ { address = a, flags = gg.TYPE_DWORD }, { address = a + 4, flags = gg.TYPE_DWORD } })
+  local w0, ret = cur[1].value % 4294967296, cur[2].value % 4294967296
+  -- mov w0,#N = 0x52800000 | N<<5 ; ret = 0xd65f03c0
+  if ret ~= 0xd65f03c0 or math.floor(w0 / 2097152) ~= 0x52800000 / 2097152 then
+    gg.alert("O código ali não é o esperado (o jogo atualizou?). Não mexi em nada; o bot vai achar de novo pelo nome.") return
+  end
+  local agora = math.floor((w0 - 0x52800000) / 32) % 65536
+  local r = gg.prompt({ m.nome .. "\nAgora: " .. agora .. " (original " .. m.orig .. "). Novo valor (0 = de graça):" }, { "0" }, { "number" })
+  if not r or r[1] == "" then return end
+  local n = math.floor(tonumber(r[1]))
+  if n < 0 or n > 65535 then gg.alert("Use de 0 a 65535.") return end
+  local novo = 0x52800000 + n * 32
+  if novo >= 2147483648 then novo = novo - 4294967296 end
+  gg.setValues({ { address = a, flags = gg.TYPE_DWORD, value = novo } })
+  gg.alert(m.nome .. " = " .. n .. " ✅ (volta a " .. m.orig .. " quando o jogo reabrir; para voltar agora, ponha " .. m.orig .. ")")
+end
+
 -- escolher o valor; com 1 resultado já refinado no GG, a 1ª opção é ele (o tipo vem do próprio resultado)
 local lista = nomes()
 local um = gg.getResultsCount() == 1 and gg.getResults(1)[1] or nil
 local varios = gg.getResultsCount() >= 2 and gg.getResultsCount() <= 50 and gg.getResults(50) or nil
-local opcoes, base = { "📋 Painel: mudar e congelar os valores deste jogo" }, 2
-if um then opcoes[2] = "✔ Assinatura do resultado que filtrei (valor " .. tostring(um.value) .. ", " .. (NOMETIPO[um.flags] or "tipo " .. um.flags) .. ")"; base = 3 end
-if varios then opcoes[2] = "💾 Guardar os " .. #varios .. " resultados (na próxima abertura eu descubro qual é o certo)"; base = 3 end
+local opcoes, base = { "📋 Painel: mudar e congelar os valores deste jogo", "🔧 Mods de regra (" .. (MODS[JOGO] and #MODS[JOGO] or 0) .. ")" }, 3
+if um then opcoes[3] = "✔ Assinatura do resultado que filtrei (valor " .. tostring(um.value) .. ", " .. (NOMETIPO[um.flags] or "tipo " .. um.flags) .. ")"; base = 4 end
+if varios then opcoes[3] = "💾 Guardar os " .. #varios .. " resultados (na próxima abertura eu descubro qual é o certo)"; base = 4 end
 opcoes[base] = "➕ Novo valor"
 for _, n in ipairs(lista) do opcoes[#opcoes + 1] = n end
 local c = gg.choice(opcoes, nil, "Biblioteca de " .. JOGO)
 if not c then return end
 if c == 1 then painel(lista) return end
+if c == 2 then mods() return end
 local nome = lista[c - base]
 local tipo, fase, viz
-local direto = um and c == 2
-if varios and c == 2 then
+local direto = um and c == 3
+if varios and c == 3 then
   local r = gg.prompt({ "Nome deste valor (ex.: Barra de Cobre)" }, { "" }, { "text" })
   if not r or r[1] == "" then return end
   local lista = {}
