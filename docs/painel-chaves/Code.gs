@@ -2,7 +2,7 @@
 // A planilha nunca fica pública: o link só devolve as chaves ativas para quem tem o token.
 
 // Versão do script: sobe a cada mudança. O Tinker mostra no registro e avisa quando a planilha está numa anterior.
-const VERSAO = 17;
+const VERSAO = 18;
 
 const ABA = 'Chaves';
 const COLS = ['Chave', 'Nome', 'Ativa', 'Situação', 'Atualizado', 'Provedor'];
@@ -457,6 +457,21 @@ function guardarRelatorio_(r) {
   // nada é apagado: a planilha guarda todos os relatórios (o mais novo em cima)
 }
 
+const BIBLIO = 'Biblioteca';
+const LCOLS = ['Quando', 'Jogo', 'Nome', 'Tipo', 'Assinatura (bytes, ?? = muda)', 'Posição do valor', 'Vizinhos fixos', 'Receita do Tinker'];
+function guardarBiblioteca_(r) {
+  const ss = SpreadsheetApp.getActive();
+  const s = ss.getSheetByName(BIBLIO) || ss.insertSheet(BIBLIO);
+  const head = s.getRange(1, 1, 1, LCOLS.length);
+  if (head.getValues()[0].join('|') !== LCOLS.join('|')) { head.setValues([LCOLS]).setFontWeight('bold'); s.setFrozenRows(1); }
+  const row = [new Date(), String(r.jogo || '').slice(0, 200), String(r.nome || '').slice(0, 200), String(r.tipo || '').slice(0, 10),
+    String(r.sig || '').slice(0, 400), String(r.sigOff || ''), String(r.fixos || ''), String(r.receita || '').slice(0, 5000)];
+  s.insertRowAfter(1);  // o mais novo em cima
+  s.getRange(2, 2, 1, LCOLS.length - 1).setNumberFormat('@');
+  s.getRange(2, 1, 1, LCOLS.length).setValues([row.map(texto_)]);
+  linhaFina_(s, 2, 1, LCOLS.length);
+}
+
 function relatorios_(n) {
   const s = SpreadsheetApp.getActive().getSheetByName(RELS);
   if (!s || s.getLastRow() < 2) return [];
@@ -619,6 +634,16 @@ function doPost(e) {
     const lock = LockService.getScriptLock();
     lock.waitLock(20000);
     try { return json_({ ok: true, linhas: guardarAgente_(lista_(r.aprende)) }); } finally { lock.releaseLock(); }
+  }
+  // biblioteca do GameGuardian: o script assinatura-auto.lua manda cada assinatura pronta (só acrescenta, nunca apaga)
+  if (p.biblioteca) {
+    let r;
+    try { r = JSON.parse((e.postData && e.postData.contents) || ''); } catch (err) { return json_({ erro: 'json' }); }
+    if (!r || r.tinker !== 'biblioteca') return json_({ erro: 'nao e a biblioteca' });
+    const lock = LockService.getScriptLock();
+    lock.waitLock(20000);
+    try { guardarBiblioteca_(r); } finally { lock.releaseLock(); }
+    return json_({ ok: true });
   }
   if (p.relatorio) {
     let r;

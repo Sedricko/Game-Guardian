@@ -7,6 +7,7 @@
 local JANELA = 64                                   -- bytes para cima e para baixo do valor
 local JOGO = (gg.getTargetPackage and gg.getTargetPackage() or "jogo"):gsub("[^%w%.]", "_")
 local INDICE = gg.EXT_STORAGE .. "/tinker-assinaturas-" .. JOGO .. ".txt"   -- nomes dos valores deste jogo
+local NOMETIPO = { [gg.TYPE_DWORD] = "Dword", [gg.TYPE_FLOAT] = "Float", [gg.TYPE_DOUBLE] = "Double" }
 local TIPOS = { { "Inteiro (Dword)", gg.TYPE_DWORD }, { "Com vírgula (Float)", gg.TYPE_FLOAT }, { "Grande com vírgula (Double)", gg.TYPE_DOUBLE } }
 
 local function arq(nome) return gg.EXT_STORAGE .. "/tinker-assin-" .. JOGO .. "-" .. nome:gsub("[^%w]", "_") .. ".txt" end
@@ -118,6 +119,11 @@ local function achar_por_assinatura(nome, tipo, viz)
   return achados
 end
 
+local function esc(t)  -- texto dentro de JSON
+  local r = tostring(t):gsub("\\", "\\\\"):gsub('"', '\\"')
+  return r
+end
+
 -- receita do Tinker (a nossa biblioteca): a assinatura vira bytes (?? onde muda) e o valor fica em sigOff. Colar em
 -- Tinker → Salvos → Colar lista; o Tinker sincroniza as receitas com a planilha (aba Receitas)
 local function receita(nome, tipo, viz, valor)
@@ -137,7 +143,38 @@ local function receita(nome, tipo, viz, valor)
   local t = tipo == gg.TYPE_FLOAT and "f32" or tipo == gg.TYPE_DOUBLE and "f64" or "i32"
   local pkg = gg.getTargetPackage and gg.getTargetPackage() or ""
   return string.format('{"tinker_receita":1,"jogo":"%s","receita":{"name":"%s","auto":false,"steps":[{"cls":"","off":0,"type":"%s","value":"%s","freeze":false,"label":"%s","sig":"%s","sigOff":%d}]}}',
-    pkg, nome, t, tostring(valor), nome, sig, sigOff)
+    pkg, esc(nome), t, tostring(valor), esc(nome), sig, sigOff)
+end
+
+-- manda para a nossa base (aba Biblioteca da planilha): precisa do link do painel (o mesmo do Tinker, com ?token=),
+-- pedido uma vez e guardado só neste celular
+local LINK = gg.EXT_STORAGE .. "/tinker-painel.txt"
+local function enviar(nome, tipo, viz, r)
+  local f, link = io.open(LINK, "r"), nil
+  if f then link = f:read("*l"); f:close() end
+  if not link or link == "" then
+    local p = gg.prompt({ "Para mandar à planilha: cole o link do painel (o mesmo do Tinker, com ?token=). Vazio = não mandar" }, { "" }, { "text" })
+    link = p and p[1] or ""
+    if link == "" then return "" end
+    f = io.open(LINK, "w"); f:write(link); f:close()
+  end
+  local n = 0
+  for _ in pairs(viz) do n = n + 1 end
+  local sig, off = r:match('"sig":"([^"]*)","sigOff":(%d+)')
+  local corpo = string.format('{"tinker":"biblioteca","jogo":"%s","nome":"%s","tipo":"%s","sig":"%s","sigOff":"%s","fixos":"%d","receita":"%s"}',
+    JOGO, esc(nome), NOMETIPO[tipo] or tostring(tipo), sig or "", off or "", n, esc(r))
+  local resp = gg.makeRequest(link .. (link:find("?", 1, true) and "&" or "?") .. "biblioteca=1", { ["Content-Type"] = "application/json" }, corpo)
+  if type(resp) == "table" and resp.code and resp.code < 400 then return "\nEnviada para a planilha (aba Biblioteca) ✅" end
+  return "\nNão consegui mandar para a planilha agora (" .. (type(resp) == "table" and tostring(resp.code) or tostring(resp)) .. "); ficou no celular."
+end
+
+-- receita copiada, guardada no celular e mandada para a planilha
+local function publicar(nome, tipo, viz, alvo)
+  local r = receita(nome, tipo, viz, gg.getValues({ { address = alvo, flags = tipo } })[1].value)
+  if not r then return "" end
+  gg.copyText(r, false)
+  local f = io.open(gg.EXT_STORAGE .. "/tinker-biblioteca.txt", "a"); f:write(r, "\n"); f:close()
+  return "\n\nReceita para o Tinker COPIADA: Salvos → Colar lista." .. enviar(nome, tipo, viz, r)
 end
 
 local function entregar(nome, tipo, alvo, msg)
@@ -191,7 +228,6 @@ end
 local lista = nomes()
 local um = gg.getResultsCount() == 1 and gg.getResults(1)[1] or nil
 local varios = gg.getResultsCount() >= 2 and gg.getResultsCount() <= 50 and gg.getResults(50) or nil
-local NOMETIPO = { [gg.TYPE_DWORD] = "Dword", [gg.TYPE_FLOAT] = "Float", [gg.TYPE_DOUBLE] = "Double" }
 local opcoes, base = { "📋 Painel: mudar e congelar os valores deste jogo" }, 2
 if um then opcoes[2] = "✔ Assinatura do resultado que filtrei (valor " .. tostring(um.value) .. ", " .. (NOMETIPO[um.flags] or "tipo " .. um.flags) .. ")"; base = 3 end
 if varios then opcoes[2] = "💾 Guardar os " .. #varios .. " resultados (na próxima abertura eu descubro qual é o certo)"; base = 3 end
@@ -249,10 +285,8 @@ if fase == -1 then
   end
   local a = achar_por_assinatura(nome, tipo, melhor)
   gravar(nome, tipo, 2, melhor)
-  local r = receita(nome, tipo, melhor, gg.getValues({ { address = malvo, flags = tipo } })[1].value)
-  if r then gg.copyText(r, false); local f = io.open(gg.EXT_STORAGE .. "/tinker-biblioteca.txt", "a"); f:write(r, "\n"); f:close() end
   entregar(nome, tipo, malvo, "Descobri qual é o certo: o que repetiu " .. mn .. " vizinhos entre as aberturas ✅ (a assinatura acha " .. #a .. " lugar(es))." ..
-    (r and "\n\nReceita para o Tinker COPIADA: Salvos → Colar lista." or ""))
+    publicar(nome, tipo, melhor, malvo))
   return
 end
 
@@ -274,13 +308,8 @@ if fase == 0 then
   local a = achar_por_assinatura(nome, tipo, rapida)
   if #a == 1 and a[1].address == alvo then
     gravar(nome, tipo, 2, rapida)
-    local r = receita(nome, tipo, rapida, gg.getValues({ { address = alvo, flags = tipo } })[1].value)
-    if r then
-      gg.copyText(r, false)
-      local f = io.open(gg.EXT_STORAGE .. "/tinker-biblioteca.txt", "a"); f:write(r, "\n"); f:close()
-    end
     entregar(nome, tipo, alvo, "Assinatura pronta ✅ (acha só este lugar). Da próxima vez é só rodar e escolher " .. nome .. "." ..
-      (r and "\n\nReceita para o Tinker COPIADA: Salvos → Colar lista." or ""))
+      publicar(nome, tipo, rapida, alvo))
     return
   end
   gravar(nome, tipo, 1, agora)
@@ -298,11 +327,4 @@ if n < 3 then
   return
 end
 gravar(nome, tipo, 2, fica)
-local valor = gg.getValues({ { address = alvo, flags = tipo } })[1].value
-local r = receita(nome, tipo, fica, valor)
-if r then
-  gg.copyText(r, false)
-  local f = io.open(gg.EXT_STORAGE .. "/tinker-biblioteca.txt", "a"); f:write(r, "\n"); f:close()
-end
-entregar(nome, tipo, alvo, "Assinatura pronta com " .. n .. " vizinhos fixos ✅ Nas próximas vezes eu acho sozinho." ..
-  (r and "\n\nReceita para a biblioteca do Tinker COPIADA: no Tinker, Salvos → Colar lista. (também em tinker-biblioteca.txt)" or ""))
+entregar(nome, tipo, alvo, "Assinatura pronta com " .. n .. " vizinhos fixos ✅ Nas próximas vezes eu acho sozinho." .. publicar(nome, tipo, fica, alvo))
