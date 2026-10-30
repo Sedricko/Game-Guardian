@@ -605,6 +605,15 @@ class Engine private constructor(private val app: Context) {
     /** Classe IL2CPP do objeto que contém addr (null: o jogo não é IL2CPP ou o valor não está num objeto). */
     suspend fun il2cpp(addr: String): Il2Class? = call { d -> d.il2(addr) }
 
+    /** Endereço do código de "Classe.Metodo" pelo mapa IL2CPP (para religar um patch depois que o jogo atualiza). */
+    private fun Daemon.il2Code(full: String): String? {
+        val (cls, name) = full.split('.').let { it.dropLast(1).joinToString(".") to it.last() }
+        val c = runCatching { send("il2classes", quiet = true).lines }.getOrNull()?.map { it.split(' ', limit = 5) }
+            ?.firstOrNull { it.size == 5 && it[0] == "class" && it[1] == cls } ?: return null
+        return runCatching { send("il2methods ${c[2]}", quiet = true).lines }.getOrNull()?.filter { it.startsWith("method ") }
+            ?.map { it.split(' ', limit = 5) }?.firstOrNull { it.size == 5 && it[4] == name }?.get(1)
+    }
+
     private fun Daemon.il2(addr: String): Il2Class? {
         val r = runCatching { send("il2cpp $addr", quiet = true) }.getOrNull() ?: return null
         val head = r.lines.firstOrNull { it.startsWith("class ") }?.removePrefix("class ")?.split(" ") ?: return null
@@ -4243,7 +4252,7 @@ class Engine private constructor(private val app: Context) {
         val orig = codeAt(m.code, 0, n)
         if (!x86 && orig.dropLast(1).any { it.word == 0xd65f03c0.toInt() }) return "O método ${m.name} é curto demais para esse valor (termina antes): use um número até 65535."
         val label = if (m.ret == 0x01) "não faz nada" else "sempre $value"
-        return createPatch(m.code, hex, "$prefix$cls.${m.name} → $label", "${RET_NAMES[m.ret]} ${m.name}() passa a ${if (m.ret == 0x01) "voltar sem fazer nada" else "devolver $value"}", apply)
+        return createPatch(m.code, hex, "$prefix$cls.${m.name} → $label", "${RET_NAMES[m.ret]} ${m.name}() passa a ${if (m.ret == 0x01) "voltar sem fazer nada" else "devolver $value"}", apply, sym = "il2:$cls.${m.name}")
     }
 
     /**
@@ -4599,7 +4608,7 @@ class Engine private constructor(private val app: Context) {
     suspend fun setPatch(p: CodePatch, on: Boolean): String {
         var relocated: String? = null
         val msg = call { d ->
-            val bySym = if (p.sym.isEmpty() || p.pid == currentPid) null else runCatching {
+            val bySym = if (p.sym.isEmpty() || p.sym.startsWith("il2:") || p.pid == currentPid) null else runCatching {
                 d.send("syms ${p.sym}", quiet = true).lines.firstOrNull { it.startsWith("sym ") && it.substringAfterLast(' ') == p.sym }?.split(' ')?.get(1)
             }.getOrNull()
             val addr = if (p.pid == currentPid && p.addr.isNotEmpty()) p.addr else bySym ?: d.send("resolve ${p.where}", quiet = true).status
@@ -4615,8 +4624,11 @@ class Engine private constructor(private val app: Context) {
                 }
                 else -> {
                     // jogo atualizado: a instrução foi para outro lugar; acha pelos bytes em volta, no código do jogo (Xa)
-                    val moved = if (p.ctx.isEmpty()) null else runCatching { d.send("aobfind ${p.ctx} xa", quiet = true) }.getOrNull()
-                        ?.takeIf { it.status == "1" }?.lines?.firstOrNull()?.trim()?.toLongOrNull(16)?.let { (it + 16).toString(16) }
+                    val moved = (if (p.ctx.isEmpty()) null else runCatching { d.send("aobfind ${p.ctx} xa", quiet = true) }.getOrNull()
+                        ?.takeIf { it.status == "1" }?.lines?.firstOrNull()?.trim()?.toLongOrNull(16)?.let { (it + 16).toString(16) })
+                        // o código em volta mudou: acha o método pelo nome no mapa do jogo (o nome quase nunca muda na atualização)
+                        ?: p.sym.removePrefix("il2:").takeIf { p.sym.startsWith("il2:") }?.let { d.il2Code(it) }
+                            ?.takeIf { a -> wordsHex(d.send("dump $a i32 $n", quiet = true).lines.map { it.substringAfter(' ').toLong().toInt() }) == (if (on) p.orig else p.new) }
                     if (moved == null) error("o código ali mudou (jogo atualizado?): esperava ${if (on) p.orig else p.new}, achei $cur, e não achei a instrução em outro lugar")
                     val w = d.send("where $moved", quiet = true).status
                     relocated = w
