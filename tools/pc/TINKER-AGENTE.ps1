@@ -1368,9 +1368,36 @@ function Run-RealGame($dg) {
             $agora = Items
             # os que mudaram e tem o valor de um item da tela agora: candidatos de verdade
             $bate = @($mon | Where-Object { $m = ($_ -split ' ')[2]; $agora | Where-Object v -eq $m })
+            $script:bate = $bate
             $quem = if ($ia) { "a IA jogou ($ia vezes): " + (($l | Where-Object { $_ -like "ia IA:*" } | Select-Object -Last 2) -join " / ") } else { "sem IA (explorador; $dns)" }
             if (-not $mon.Count) { throw "$quem | o monitor nao viu nada mudar" }
             "$quem | monitor: $($mon.Count) mudaram por evento, $($bate.Count) com o valor de um item da tela: " + ($bate -join ", ") + " | " + (($l | Where-Object { $_ -like "log *" }) -join " / ")
+        }
+        # 2b. pedido pelos lugares que o monitor viu mudar com o valor da tela (30/10: o sozinho tinha 3 mil lugares e o numero
+        # parado; o monitor tinha 6 candidatos). Escreve o pedido em cada um e confere na tela; o certo fica, os outros voltam
+        T "2b pedido pelo monitor" {
+            $cands = @($script:bate | Select-Object -First 8)
+            if (-not $cands.Count) { throw "o monitor nao viu nenhum lugar com o valor de um item da tela" }
+            $antes = Items
+            foreach ($c in $cands) {
+                $f = $c -split ' '; $addr = $f[1]; $val = $f[2]
+                $item = $antes | Where-Object v -eq $val | Select-Object -First 1
+                $alvo = if ([double]$val -lt 999) { "999" } else { "$([long]$val + 1000)" }
+                $fotoAntes = $null; try { Show-Game $dg; $fotoAntes = Shot "jogo-antes" } catch { }
+                Step "endereco $addr i32 $alvo" | Out-Null; Start-Sleep 3
+                $tela = (Items | Where-Object nome -eq $item.nome | Select-Object -First 1).v
+                if ($tela -eq $alvo) {
+                    try {
+                        if ($fotoAntes) { Post-Sheet "agente PC: foto do jogo ANTES ($($item.nome) = $val)" "" ("jpeg base64`n" + $fotoAntes) $v "$nome (emulador)" }
+                        Show-Game $dg
+                        Post-Sheet "agente PC: foto do jogo DEPOIS ($($item.nome) = $alvo)" "" ("jpeg base64`n" + (Shot "jogo-depois")) $v "$nome (emulador)"
+                    } catch { }
+                    Add-Content "$env:USERPROFILE\tinker-mantidos-$dg.txt" "$(Get-Date -Format 'dd/MM HH:mm') $($item.nome) $val -> $alvo (0x$addr, pelo monitor)"
+                    return "0x$addr era o $($item.nome): a tela foi de $val para $alvo e ficou assim"
+                }
+                Step "endereco $addr i32 $val" | Out-Null  # nao era esse: volta o valor
+            }
+            throw "nenhum dos $($cands.Count) candidatos mudou a tela"
         }
         # 6. cronometros (construcao, recarga): depois da IA jogar costuma haver algo construindo
         T "6 cronometros (construcao)" {
