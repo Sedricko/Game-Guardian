@@ -104,7 +104,8 @@ end
 
 -- região de memória do valor (o "A" que o GG mostra no resultado): guardada ao refinar; a busca da assinatura usa só ela
 local REGIOES = { Jh = "REGION_JAVA_HEAP", Ch = "REGION_C_HEAP", Ca = "REGION_C_ALLOC", Cd = "REGION_C_DATA", Cb = "REGION_C_BSS",
-  PS = "REGION_PPSSPP", A = "REGION_ANONYMOUS", J = "REGION_JAVA", S = "REGION_STACK", As = "REGION_ASHMEM", O = "REGION_OTHER" }
+  PS = "REGION_PPSSPP", A = "REGION_ANONYMOUS", J = "REGION_JAVA", S = "REGION_STACK", As = "REGION_ASHMEM", O = "REGION_OTHER",
+  V = "REGION_VIDEO", B = "REGION_BAD", Xa = "REGION_CODE_APP", Xs = "REGION_CODE_SYS" }  -- todas as do GG: vale para qualquer jogo
 local function regarq(nome) return gg.EXT_STORAGE .. "/tinker-reg-" .. JOGO .. "-" .. nome:gsub("[^%w]", "_") .. ".txt" end
 local function lembrarRegiao(nome, addr)
   local ok, r = pcall(gg.getValuesRange, { { address = addr, flags = gg.TYPE_DWORD } })
