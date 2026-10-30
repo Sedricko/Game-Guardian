@@ -315,7 +315,7 @@ local function escolherNome(lista, titulo)
 end
 local function guardarTeste(r)
   local nomes_ = snapnomes()
-  local nome = escolherNome(nomes_, "Guardar vizinhos de qual valor?")
+  local nome = escolherNome(nomes_, "Achei o seu resultado refinado (" .. tostring(r.value) .. ") ✅\nQue nome ele tem? (1º teste: Nome novo; depois, escolha o nome na lista)")
   if not nome then return end
   local novo = true
   for _, n in ipairs(nomes_) do if n == nome then novo = false end end
