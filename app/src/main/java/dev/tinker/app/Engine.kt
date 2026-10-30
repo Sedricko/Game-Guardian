@@ -1661,6 +1661,19 @@ class Engine private constructor(private val app: Context) {
                 val out = objs.flatMap { o -> il2cpp(o)?.let { valueFields(it, want, 2) } ?: emptyList() }.distinct()
                 return "ok ${out.size} campo(s) com $want a partir de ${objs.size} objeto(s) de $cls\ncount ${out.size}\n" + out.take(40).joinToString("\n")
             }
+            // "guardar ShopRouletteController.GetSpinGemsPrice 0 Roleta: preço do giro": descoberta confirmada vira patch normal,
+            // com nome amigável, em Salvos → Patches de código, DESLIGADO (quem liga é a pessoa; volta ao reabrir o jogo)
+            "guardar" -> {
+                val (cls, name) = w.getOrElse(1) { "" }.split('.', limit = 2).takeIf { it.size == 2 } ?: return "err use guardar Classe.Metodo valor nome"
+                val value = w.getOrNull(2) ?: return "err use guardar Classe.Metodo valor nome"
+                val label = w.drop(3).joinToString(" ").ifBlank { "$cls.$name" }
+                if (Session.patches.any { it.name.startsWith("$label · ") }) return "ok já guardado: $label"
+                clearMissionPatches()
+                val c = call { d -> d.send("il2classes", quiet = true).lines }.map { it.split(' ', limit = 5) }
+                    .firstOrNull { it.size == 5 && it[0] == "class" && it[1] == cls } ?: return "err não achei a classe $cls no mapa do jogo"
+                val m = il2Methods(c[2]).firstOrNull { it.name == name } ?: return "err não achei $name em $cls"
+                patchReturn(m, cls, value, prefix = "$label · ", apply = false)
+            }
             "despatch" -> "desfeitos ${clearMissionPatches()}"
             "desconhecido" -> startUnknown(setOf(w.getOrElse(1) { "i32" }))
             "comparar" -> compare(w[1], w.drop(2).joinToString(" "))

@@ -1507,6 +1507,16 @@ function Run-RealGame($dg) {
         if ($dg -eq "com.evrika.miner.camp") {
             T "8 trocar a regra (GetSpinGemsPrice = 0, de graca)" {
                 try {
+                    # descoberta confirmada pelo usuario (30/10): fica guardada no app como patch normal, desligado, para ele ligar
+                    # quando quiser (Salvos -> Patches de codigo). Precisa do codigo original: com a troca ainda no jogo, reabre antes
+                    $g = try { Step "guardar ShopRouletteController.GetSpinGemsPrice 0 Roleta: preço do giro" | Out-Null; ($script:last -split "`n")[0] } catch { "$($_.Exception.Message)" }
+                    if ($g -match "j. s.o os bytes") {
+                        & $adb shell am force-stop $dg; Start-Sleep 2
+                        & $adb shell monkey -p $dg -c android.intent.category.LAUNCHER 1 | Out-Null; Start-Sleep 35
+                        Step "jogo $dg" | Out-Null; Start-Sleep 15
+                        $g = try { Step "guardar ShopRouletteController.GetSpinGemsPrice 0 Roleta: preço do giro" | Out-Null; ($script:last -split "`n")[0] } catch { "$($_.Exception.Message)" }
+                    }
+                    Say "  guardar no app: $g"
                     try { Step "metodo ShopRouletteController.GetSpinGemsPrice 0" | Out-Null; $msg = ($script:last -split "`n")[0] }
                     catch { if ($_.Exception.Message -match "j. s.o os bytes") { $msg = "ja estava ligada (os bytes de agora ja sao os da troca)" } else { throw } }
                     # a troca da rodada anterior ficou no jogo (o teste 7 nao reabriu): "ja sao os bytes de agora" = ja esta de graca
@@ -1524,7 +1534,7 @@ function Run-RealGame($dg) {
                         $foto = " | foto da roleta na planilha"
                     } catch { $foto = " | nao achei a loja/roleta para a foto: $($_.Exception.Message)" }
                     Say "  a roleta ficou de graca (0 joias): abra a roleta no emulador para conferir (volta ao normal quando o jogo reabrir)"
-                    "$msg | o jogo seguiu aberto 15 s; a troca ficou ligada$foto"
+                    "$msg | o jogo seguiu aberto 15 s; a troca ficou ligada$foto | no app: $g"
                 } catch { Step "despatch" | Out-Null; throw }
             }
         }
