@@ -1542,7 +1542,10 @@ class Engine private constructor(private val app: Context) {
                 val canTest = Session.aiCanTest
                 // "sozinho Ouro auto leitura": sem escrever nada (como quem não liga o teste); a missão confere o palpite pela vizinhança
                 withContext(Dispatchers.Main) { Session.aiCanTest = w.getOrNull(3) != "leitura" }
-                autoFindStart(w[1].replace('_', ' '), w.getOrElse(2) { "i32" }.let { if (it == "auto") emptySet() else setOf(it) }, waitMs = 2500)
+                // "Item 1" (sem nome na tela) virava o número 1 do próprio rótulo: vai pelo valor mostrado, como o 🎯 da lista
+                val asked = w[1].replace('_', ' ').let { a -> Regex("""^(Item \d+)(=.*)?$""").find(a)?.let { m ->
+                    Session.items.firstOrNull { it.label == m.groupValues[1] }?.value?.let { it + m.groupValues[2] } } ?: a }
+                autoFindStart(asked, w.getOrElse(2) { "i32" }.let { if (it == "auto") emptySet() else setOf(it) }, waitMs = 2500)
                 val end = System.currentTimeMillis() + 300_000  // disfarçado e calculado levam mais: testa ×1, ×10, cifrado, pela mudança… até um segurar
                 while (autoJob?.isActive == true && System.currentTimeMillis() < end) delay(500)
                 delay(300)  // a última frase chega pela thread da tela
@@ -2520,7 +2523,8 @@ class Engine private constructor(private val app: Context) {
         autoFindStop()
         Session.autoFindWinner = null
         // pedido "Gemas = 9999" (ou "Gemas para 9999"): acha pelo nome e, provado, já põe o valor pedido
-        val pedido = Regex("""^(.*\p{L}.*?)\s*(?:=|->|→|\bpara\b)\s*(-?\d+(?:[.,]\d+)?)\s*$""").find(asked.trim())
+        // "180 = 999" também: item sem nome na tela vai pelo número (como o 🎯 da lista faz com "Item N")
+        val pedido = Regex("""^(.*?\S)\s*(?:=|->|→|\bpara\b)\s*(-?\d+(?:[.,]\d+)?)\s*$""").find(asked.trim())
         val value = pedido?.groupValues?.get(1) ?: asked
         val want = pedido?.groupValues?.get(2)?.replace(',', '.')?.toDoubleOrNull()
         // número ("113") ou o nome escrito ao lado dele na tela ("Abates"): com o nome, o número pode mudar à vontade
