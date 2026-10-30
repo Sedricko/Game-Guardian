@@ -144,6 +144,9 @@ O texto completo de cada opção está em `docs/tutorial/ajuda.py` (fonte única
   `Get*Price`, CurrencyGift/ShopSpinTokens cooldowns) e 0 campos.
 - `ShopRouletteController.GetSpinGemsPrice` = `mov w0,#25; ret` em `libil2cpp.so+1e31e54`: giro custa 25 joias. O patch
   "sempre 1" ligou e desligou sem fechar o jogo (2.93.0, 2 rodadas). Falta abrir a roleta e ler o 1 na tela.
+- **30/10: primeira mudança confirmada pelo usuário na tela**: com `GetSpinGemsPrice` → 0 (teste 8, fica ligada), o botão
+  da roleta mostra 💎 0 (antes 25). O botão de joias só aparece depois do giro grátis e com a loja liberada (fim do tutorial).
+  A roleta também tem "ASSISTIR" (anúncio): nunca tocar.
 - 220 lugares de timeScale (quando dentro do jogo), 25–54 cronômetros.
 - **Causa achada (30/10)**: o Android 16 do AVD congela app em segundo plano (`cached_apps_freezer`); com `Set-NoOverlay` o
   Tinker não tem serviço na frente, então o `itens` e o monitor paravam e só terminavam quando o passo seguinte abria o
