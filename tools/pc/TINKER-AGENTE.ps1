@@ -1371,6 +1371,36 @@ function Run-RealGame($dg) {
             if (-not $mon.Count) { throw "$quem | o monitor nao viu nada mudar" }
             "$quem | monitor: $($mon.Count) mudaram por evento, $($bate.Count) com o valor de um item da tela: " + ($bate -join ", ") + " | " + (($l | Where-Object { $_ -like "log *" }) -join " / ")
         }
+        # 2c. pedido pelo dicionario do jogo (revisao 30/10): busca o numero e pergunta ao mapa IL2CPP de quem e cada lugar
+        # (Classe.campo). Nao precisa o numero mudar. Escreve nos candidatos com nome de moeda primeiro e confere na tela
+        T "2c pedido pelo dicionario do jogo" {
+            $alvos = @($script:it | Where-Object { $_.v -match '^\d+$' -and [double]$_.v -ge 2 -and $_.nome -notmatch '\(' } | Select-Object -First 3)
+            if (-not $alvos.Count) { throw "nenhum numero na tela para procurar" }
+            $vistos = @()
+            foreach ($i in $alvos) {
+                $n = Step "dono $($i.v)" 300
+                $donos = @(($script:last -split "`n") | Where-Object { $_ -like "dono *" } | Select-Object -First 6)
+                $vistos += "$($i.v): $n com nome (" + (($donos | ForEach-Object { ($_ -split ' ')[2] }) -join ', ') + ")"
+                $alvo = if ([double]$i.v -lt 999) { "999" } else { "$([long]$i.v + 1000)" }
+                foreach ($d in $donos) {
+                    $addr = ($d -split ' ')[1]; $campo = ($d -split ' ')[2]
+                    $fotoAntes = $null; try { Show-Game $dg; $fotoAntes = Shot "jogo-antes" } catch { }
+                    Step "endereco $addr i32 $alvo" | Out-Null; Start-Sleep 3
+                    $tela = (Items | Where-Object nome -eq $i.nome | Select-Object -First 1).v
+                    if ($tela -eq $alvo) {
+                        try {
+                            if ($fotoAntes) { Post-Sheet "agente PC: foto do jogo ANTES ($campo = $($i.v))" "" ("jpeg base64`n" + $fotoAntes) $v "$nome (emulador)" }
+                            Show-Game $dg
+                            Post-Sheet "agente PC: foto do jogo DEPOIS ($campo = $alvo)" "" ("jpeg base64`n" + (Shot "jogo-depois")) $v "$nome (emulador)"
+                        } catch { }
+                        Add-Content "$env:USERPROFILE\tinker-mantidos-$dg.txt" "$(Get-Date -Format 'dd/MM HH:mm') $campo $($i.v) -> $alvo (0x$addr, pelo dicionario)"
+                        return "$campo (0x$addr) era o numero $($i.v) da tela: virou $alvo e ficou"
+                    }
+                    Step "endereco $addr i32 $($i.v)" | Out-Null  # nao era esse: volta
+                }
+            }
+            throw "nenhum candidato mudou a tela | " + ($vistos -join ' / ')
+        }
         # 2b. pedido pelos lugares que o monitor viu mudar com o valor da tela (30/10: o sozinho tinha 3 mil lugares e o numero
         # parado; o monitor tinha 6 candidatos). Escreve o pedido em cada um e confere na tela; o certo fica, os outros voltam
         T "2b pedido pelo monitor" {

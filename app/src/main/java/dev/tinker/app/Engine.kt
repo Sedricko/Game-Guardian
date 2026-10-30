@@ -1597,6 +1597,16 @@ class Engine private constructor(private val app: Context) {
                 val m = il2Methods(c[2]).firstOrNull { it.name == name } ?: return "err não achei $name em $cls"
                 patchReturn(m, cls, w.getOrElse(2) { "" }, prefix = "missão ", apply = true)
             }
+            // "dono 180": busca o número (Dword) e pergunta ao mapa do jogo de quem é cada lugar (Classe.campo). Não precisa o
+            // número mudar: no Orecraft o ouro parado tinha 3 mil lugares e o sozinho nunca separava
+            "dono" -> {
+                search(setOf("i32"), arg)
+                val addrs = call { d -> d.send("list 4000", quiet = true).lines.map { it.substringBefore(' ') } }
+                val names = addrs.chunked(200).flatMap { il2Names(it).entries }.filterNot { it.value.startsWith("cópia") }
+                val coin = Regex("gold|coin|gem|crystal|diamond|currenc|resource|money|soft|hard|amount|balance|ouro|joia", RegexOption.IGNORE_CASE)
+                val ranked = names.sortedByDescending { coin.containsMatchIn(it.value) }
+                return "ok ${ranked.size} de ${addrs.size}\ncount ${ranked.size}\n" + ranked.take(40).joinToString("\n") { "dono ${it.key} ${it.value}" }
+            }
             "despatch" -> "desfeitos ${clearMissionPatches()}"
             "desconhecido" -> startUnknown(setOf(w.getOrElse(1) { "i32" }))
             "comparar" -> compare(w[1], w.drop(2).joinToString(" "))
