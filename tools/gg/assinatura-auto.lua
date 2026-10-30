@@ -355,6 +355,50 @@ end
 local lista = nomes()
 local um = gg.getResultsCount() == 1 and gg.getResults(1)[1] or nil
 local varios = gg.getResultsCount() >= 2 and gg.getResultsCount() <= 50 and gg.getResults(50) or nil
+-- caminho rápido (pedido do usuário): com 1 resultado refinado, a 1ª opção é salvar os vizinhos (teste 1, 2, 3);
+-- depois do 3º, gerar a assinatura (só aí pede o nome). Os testes ficam pendentes por jogo até gerar
+local PEND = "_pendente"
+local k = #snaptestes(PEND)
+if um or k >= 2 then
+  local rap, acao = {}, {}
+  if k >= 3 then rap[#rap + 1] = "🧩 Gerar assinatura (" .. k .. " testes)"; acao[#rap] = "gerar" end
+  if um then rap[#rap + 1] = "📸 Salvar vizinhos (teste " .. (k + 1) .. (k < 3 and " de 3)" or ", deixa mais firme)"); acao[#rap] = "salvar" end
+  if k == 2 then rap[#rap + 1] = "🧩 Gerar assinatura já (2 testes; o ideal é 3)"; acao[#rap] = "gerar" end
+  rap[#rap + 1] = "☰ Mais opções"; acao[#rap] = "mais"
+  local q = gg.choice(rap, nil, um and ("Resultado refinado: " .. tostring(um.value) .. " ✅") or "Biblioteca de " .. JOGO)
+  if not q then return end
+  if acao[q] == "salvar" then
+    lembrarRegiao(PEND, um.address)
+    local f = io.open(snaparq(PEND), "a")
+    f:write(string.format("#%d\n", um.flags))
+    for d, v in pairs(ler(um.address)) do f:write(string.format("%d %d\n", d, v)) end
+    f:close()
+    gg.alert("Teste " .. (k + 1) .. " salvo ✅\n\n" .. (k + 1 < 3 and "Feche e abra o jogo, refine de novo até 1 resultado e rode o script."
+      or "Pronto para gerar: rode o script e escolha 🧩 Gerar assinatura."))
+    return
+  elseif acao[q] == "gerar" then
+    local testes, tipo = snaptestes(PEND)
+    local fica, n = {}, 0
+    for d, v in pairs(testes[1]) do
+      local igual = d ~= 0 and not ponteiro(v)
+      for t = 2, #testes do if testes[t][d] ~= v then igual = false end end
+      if igual then fica[d] = v; n = n + 1 end
+    end
+    if n < 3 then gg.alert("Só " .. n .. " vizinhos ficaram iguais nos " .. #testes .. " testes: pouco. Os testes podem ser de valores diferentes; apague " .. snaparq(PEND) .. " e recomece.") return end
+    local r = gg.prompt({ "Assinatura com " .. n .. " vizinhos fixos ✅ Nome deste valor (ex.: Barra de Cobre):" }, { "" }, { "text" })
+    if not r or r[1] == "" then return end
+    local nome = r[1]
+    gravar(nome, tipo, 2, fica)
+    local fr = io.open(regarq(PEND), "r")
+    if fr then local l = fr:read("*l"); fr:close(); local fw = io.open(regarq(nome), "w"); fw:write(l or ""); fw:close() end
+    os.remove(snaparq(PEND))
+    local a = achar_por_assinatura(nome, tipo, fica)
+    if #a == 1 then entregar(nome, tipo, a[1].address, "Assinatura de " .. nome .. " gerada e o valor achado ✅" .. publicar(nome, tipo, fica, a[1].address))
+    else gg.alert("Assinatura de " .. nome .. " gerada ✅ (agora acha " .. #a .. " lugar(es); abra a tela do valor e use o 📋 Painel).") end
+    return
+  end
+end
+
 local opcoes, base = { "📋 Painel: mudar e congelar os valores deste jogo", "🔧 Mods de regra (" .. (MODS[JOGO] and #MODS[JOGO] or 0) .. ")",
   "📸 Guardar os vizinhos do resultado refinado (1 teste)", "🧩 Criar assinatura (com os testes guardados)" }, 5
 if um then opcoes[5] = "✔ Assinatura rápida do resultado que filtrei (valor " .. tostring(um.value) .. ", " .. (NOMETIPO[um.flags] or "tipo " .. um.flags) .. ")"; base = 6 end
