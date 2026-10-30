@@ -149,8 +149,24 @@ local alvo = achar_por_valor(nome, tipo)
 if not alvo then return end
 local agora = ler(alvo)
 if fase == 0 then
+  -- assinatura já na 1ª vez: os vizinhos que não parecem ponteiro; vale se agora ela acha só este lugar. Se um dia
+  -- falhar (o jogo reabriu e algum vizinho mudou), o script volta a pedir o valor e deixa só os que ficaram iguais
+  local rapida = {}
+  for d, v in pairs(agora) do if d ~= 0 and not ponteiro(v) then rapida[d] = v end end
+  local a = achar_por_assinatura(nome, tipo, rapida)
+  if #a == 1 and a[1].address == alvo then
+    gravar(nome, tipo, 2, rapida)
+    local r = receita(nome, tipo, rapida, gg.getValues({ { address = alvo, flags = tipo } })[1].value)
+    if r then
+      gg.copyText(r, false)
+      local f = io.open(gg.EXT_STORAGE .. "/tinker-biblioteca.txt", "a"); f:write(r, "\n"); f:close()
+    end
+    entregar(nome, tipo, alvo, "Assinatura pronta ✅ (acha só este lugar). Da próxima vez é só rodar e escolher " .. nome .. "." ..
+      (r and "\n\nReceita para o Tinker COPIADA: Salvos → Colar lista." or ""))
+    return
+  end
   gravar(nome, tipo, 1, agora)
-  entregar(nome, tipo, alvo, "Achei e guardei os vizinhos (1ª vez). Na próxima vez que abrir o jogo, rode de novo: eu comparo e monto a assinatura.")
+  entregar(nome, tipo, alvo, "Os vizinhos de agora acham " .. #a .. " lugares: guardei e, na próxima vez que abrir o jogo, rode de novo que eu comparo e monto a assinatura.")
   return
 end
 -- compara com o que estava guardado: fica só o que não mudou entre as aberturas do jogo
