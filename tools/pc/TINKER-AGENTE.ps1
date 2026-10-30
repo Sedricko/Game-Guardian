@@ -1303,17 +1303,17 @@ function Run-RealGame($dg) {
         # volta o valor de antes. O primeiro provado fica salvo para os testes 3 (irmaos) e 7 (reabrir o jogo)
         $script:salvo = $null
         # os maiores primeiro: o 3999 de ouro do Orecraft dava 32 lugares na memoria, o 6 dava 975 mil (e ficava de fora por passar de 999)
-        foreach ($i in ($script:it | Where-Object { $_.v -match '^\d+$' -and [double]$_.v -ge 2 } | Sort-Object { [double]$_.v } -Descending | Select-Object -First 4)) {
+        foreach ($i in ($script:it | Where-Object { $_.v -match '^\d+$' -and [double]$_.v -ge 2 } | Sort-Object { [double]$_.v } -Descending | Select-Object -First 1)) {  # revisao 30/10: 1 tentativa (4 levavam 22 min e falhavam igual); o 2b tenta pelos lugares do monitor
             $alvo = if ([double]$i.v -lt 999) { "999" } else { "$([long]$i.v + 1000)" }
             T "2 pedido $($i.nome) = $alvo (era $($i.v))" {
                 # foto da tela do jogo antes e depois: o usuario quer ver no celular a mudanca feita no jogo
                 $fotoAntes = $null; try { Show-Game $dg; $fotoAntes = Shot "jogo-antes" } catch { }
-                # o sozinho so separa os milhares de lugares quando o numero muda no jogo (30/10: 4 pedidos com "jogue para o numero
-                # mudar" e ninguem jogando): o explorador (ou os toques gravados) joga enquanto ele procura
+                # o sozinho so separa os lugares quando o numero muda: com os toques gravados do usuario, se houver. Sem o explorador
+                # de toques cegos (revisao 30/10: com a loja aberta ele podia tocar em ASSISTIR, que e anuncio)
                 $macro = "$env:USERPROFILE\tinker-macro-$dg.txt"
-                $joga = if (Test-Path $macro) { Start-Replay $macro 300 } else { Start-Explore $dg 300 }
+                $joga = if (Test-Path $macro) { Start-Replay $macro 300 } else { $null }
                 try { Step "sozinho $($i.nome)=$alvo auto" 420 | Out-Null }  # o sozinho tenta ate 5 min; com 340 s o passo estourava antes dele terminar
-                finally { Stop-Job $joga; Remove-Job $joga -Force }
+                finally { if ($joga) { Stop-Job $joga; Remove-Job $joga -Force } }
                 $msg = ($script:last -split "`n")[0]
                 # logo depois do pedido (a lista de resultados ainda e a dele; o "itens" busca de novo e troca a lista)
                 if ($msg -match "Pronto" -and -not $script:salvo) {
@@ -1357,8 +1357,9 @@ function Run-RealGame($dg) {
             Say "  rede: $dns"
             if (-not $ia) {
                 $macro = "$env:USERPROFILE\tinker-macro-$dg.txt"
-                $job = if (Test-Path $macro) { Start-Replay $macro 180 } else { Start-Explore $dg 180 }
-                try { Step "monitorar 180" | Out-Null } finally { Stop-Job $job; Remove-Job $job -Force }
+                # sem IA: so os toques gravados; senao o monitor so observa o que muda sozinho (gerador de Valentia, producao)
+                $job = if (Test-Path $macro) { Start-Replay $macro 180 } else { $null }
+                try { Step "monitorar 180" | Out-Null } finally { if ($job) { Stop-Job $job; Remove-Job $job -Force } }
             }
             $l = $script:last -split "`n"
             $mon = @($l | Where-Object { $_ -like "mudou *" })
@@ -1412,6 +1413,29 @@ function Run-RealGame($dg) {
             $l = ($script:last -split "`n") | Where-Object { $_ -like "salvo *" }
             if (-not ($l -match " voltou ")) { throw "nao voltou: $($l -join ' / ')" }
             ($l -join " / ")
+        }
+        # 8b. trocar uma regra que aparece na tela: o preco das construcoes (as etiquetas 100 e 200 do mapa, em ouro) passa a 0;
+        # confere pela leitura da tela e manda foto; desfaz (o 8 liga a roleta de graca depois e ela fica)
+        if ($dg -eq "com.evrika.miner.camp") {
+            T "8b preco das construcoes = 0 (na tela)" {
+                $antes = @(Items | ForEach-Object { $_.v })
+                $fotoAntes = $null; try { Show-Game $dg; $fotoAntes = Shot "jogo-antes" } catch { }
+                try {
+                    Step "metodo BuildingShopTileRenderData.get_price 0" | Out-Null
+                    $msg = ($script:last -split "`n")[0]
+                    if ($msg -notmatch "ligad|liguei") { throw "a troca nao ligou: $msg" }
+                    Start-Sleep 5
+                    $depois = @(Items | ForEach-Object { $_.v })
+                    $sumiu = @($antes | Where-Object { $_ -in @("100", "200") -and $_ -notin $depois })
+                    if (-not $sumiu.Count) { throw "a tela nao mudou (antes: $($antes -join ','); depois: $($depois -join ','))" }
+                    try {
+                        if ($fotoAntes) { Post-Sheet "agente PC: foto do jogo ANTES (preco das construcoes)" "" ("jpeg base64`n" + $fotoAntes) $v "$nome (emulador)" }
+                        Show-Game $dg
+                        Post-Sheet "agente PC: foto do jogo DEPOIS (preco das construcoes = 0)" "" ("jpeg base64`n" + (Shot "jogo-depois")) $v "$nome (emulador)"
+                    } catch { }
+                    "$msg | na tela: antes $($antes -join ','), depois $($depois -join ',')"
+                } finally { Step "despatch" | Out-Null }
+            }
         }
         # 8. trocar a regra pelo nome (mapa do jogo): a roleta paga em joias (moeda do jogo) passa a custar 1; confere que o
         # jogo segue aberto e desfaz. shortcut: ainda nao abre a roleta para ler o preco na tela; quando a IA souber chegar la

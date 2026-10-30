@@ -1517,7 +1517,7 @@ class Engine private constructor(private val app: Context) {
                     val bmp = android.graphics.BitmapFactory.decodeByteArray(png, 0, png.size) ?: return@withContext null
                     val text = com.google.android.gms.tasks.Tasks.await(ocr.process(com.google.mlkit.vision.common.InputImage.fromBitmap(bmp, 0)))
                     val re = Regex(arg, RegexOption.IGNORE_CASE)
-                    text.textBlocks.flatMap { it.lines }.firstOrNull { re.containsMatchIn(it.text) && !money.containsMatchIn(it.text) }?.let { it.text to it.boundingBox }
+                    text.textBlocks.flatMap { it.lines }.firstOrNull { re.containsMatchIn(it.text) && !money.containsMatchIn(it.text) && !ads.containsMatchIn(it.text) }?.let { it.text to it.boundingBox }
                 }
                 val r = box?.second ?: return "ok 0\ncount 0\nnão vi $arg na tela"
                 call { d -> d.send("input tap ${r.centerX()} ${r.centerY()}") }
@@ -2013,6 +2013,8 @@ class Engine private constructor(private val app: Context) {
 
     // preço em dinheiro de verdade ("R$ 53,99", "US$ 4.99", "€1,99"; o OCR às vezes lê "R 53,99"): nunca é item nem botão para tocar
     private val money = Regex("""[$€£¥]|^(R|RS|US|USD|BRL|EUR)\b|\b(R|RS|US)\s?\d+[.,]\d{2}\b""", RegexOption.IGNORE_CASE)
+    // anúncio também não se toca (regra combinada): o botão "ASSISTIR" da roleta do Orecraft dá o prêmio por vídeo
+    private val ads = Regex("""ASSISTIR|AN[ÚU]NCIO|\bWATCH\b|\bADS?\b|V[ÍI]DEO""", RegexOption.IGNORE_CASE)
 
     /** Onde há preço em dinheiro de verdade na tela agora (pixels da tela de verdade). */
     private suspend fun moneyBoxes(): List<android.graphics.Rect> {
@@ -2020,7 +2022,7 @@ class Engine private constructor(private val app: Context) {
         return withContext(Dispatchers.Default) {
             val bmp = android.graphics.BitmapFactory.decodeByteArray(png, 0, png.size) ?: return@withContext emptyList()
             val text = com.google.android.gms.tasks.Tasks.await(ocr.process(com.google.mlkit.vision.common.InputImage.fromBitmap(bmp, 0)))
-            text.textBlocks.flatMap { it.lines }.filter { money.containsMatchIn(it.text.trim()) }.mapNotNull { it.boundingBox }
+            text.textBlocks.flatMap { it.lines }.filter { money.containsMatchIn(it.text.trim()) || ads.containsMatchIn(it.text) }.mapNotNull { it.boundingBox }
         }
     }
 
@@ -3139,7 +3141,7 @@ class Engine private constructor(private val app: Context) {
             val (x, y) = screenPoint(a.optString("x"), a.optString("y")) ?: return@AiTool "Coordenada fora do último print. Use ver_tela antes e coordenadas dele."
             // a regra não fica só no texto para a IA: toque perto de um preço em dinheiro de verdade é recusado aqui
             if (moneyBoxes().any { r -> android.graphics.Rect(r).apply { inset(-60, -60) }.contains(x, y) })
-                return@AiTool "Recusado: aí tem um preço em dinheiro de verdade. Nunca toque em compras com dinheiro real; feche essa tela (voltar)."
+                return@AiTool "Recusado: aí tem um preço em dinheiro de verdade ou um anúncio (Assistir). Nunca toque em compras com dinheiro real nem em anúncios; feche essa tela (voltar)."
             lastAction = System.currentTimeMillis() to a.optString("motivo")  // o 👁 monitor liga esta ação ao que mudou na memória
             aiInput("tap $x $y")
         },
