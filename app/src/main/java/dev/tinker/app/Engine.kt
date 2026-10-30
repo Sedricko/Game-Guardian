@@ -1683,6 +1683,23 @@ class Engine private constructor(private val app: Context) {
                 val m = il2Methods(c[2]).firstOrNull { it.name == name } ?: return "err não achei $name em $cls"
                 patchReturn(m, cls, value, prefix = "$label · ", apply = false)
             }
+            // "trocartexto 80 99": o Orecraft guarda os recursos como texto JSON (JSONString.m_Data = "80", visto pela inspeção).
+            // Troca o texto dentro das strings que um JSONString aponta (mesmo tamanho: a string do C# não cresce no lugar)
+            "trocartexto" -> {
+                val old = w.getOrNull(1) ?: return "err use trocartexto <antes> <depois>"
+                val new = w.getOrNull(2)?.takeIf { it.length == old.length } ?: return "err o texto novo precisa ter ${old.length} caracteres"
+                val hex = "%02x000000".format(old.length) + old.map { "%02x00".format(it.code) }.joinToString("") + "0000"
+                val strs = call { d -> d.send("aobfind $hex data", quiet = true).lines }.mapNotNull { it.trim().toLongOrNull(16) }.map { it - 0x10 }.take(30)
+                val trocados = mutableListOf<String>()
+                for (s0 in strs) {
+                    search(setOf("i64"), s0.toString())
+                    val refs = call { d -> d.send("list 50", quiet = true).lines.map { it.substringBefore(' ') } }
+                    if (il2Names(refs).values.none { it.endsWith("JSONString.m_Data") }) continue
+                    call { d -> new.forEachIndexed { i, ch -> d.send("write ${(s0 + 0x14 + 2 * i).toString(16)} i16 ${ch.code}", quiet = true) } }
+                    trocados += (s0 + 0x14).toString(16)
+                }
+                return "ok ${trocados.size} texto(s) \"$old\" do JSON viraram \"$new\" (de ${strs.size} achados)\ncount ${trocados.size}\n" + trocados.joinToString("\n") { "texto $it" }
+            }
             "despatch" -> "desfeitos ${clearMissionPatches()}"
             "desconhecido" -> startUnknown(setOf(w.getOrElse(1) { "i32" }))
             "comparar" -> compare(w[1], w.drop(2).joinToString(" "))

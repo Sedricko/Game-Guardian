@@ -71,7 +71,8 @@ function Start-Emulator($like = "*Pixel_6_Pro*", $gpu = "swiftshader_indirect", 
     Say "ligando o emulador $avd..."
     # placa de video por software: com a do PC e a janela minimizada a tela do emulador parava 10-30 s por quadro
     # (logcat "dequeueBuffer failed"), o Tinker lia a tela velha e a curva da 2.79.2 deu 0 de 16
-    Start-Process $emu -ArgumentList "-avd $avd -no-snapshot-load -gpu $gpu" -WindowStyle $style
+    # DNS fixo: o emulador ficava sem resolver nomes (api.groq.com, script.google.com) e a IA nunca jogava (30/10)
+    Start-Process $emu -ArgumentList "-avd $avd -no-snapshot-load -gpu $gpu -dns-server 8.8.8.8,1.1.1.1" -WindowStyle $style
     & $adb wait-for-device
     do { Start-Sleep 5 } until ((& $adb shell getprop sys.boot_completed) -match "1")
     Say "emulador ligado"
@@ -1432,6 +1433,32 @@ function Run-RealGame($dg) {
                 }
             }
             throw "nenhum campo com o numero da tela mudou a tela | " + ($vistos -join ' / ')
+        }
+        # 2f. o Orecraft guarda os recursos como texto JSON (a inspecao achou "80" em JSONString.m_Data, 30/10): troca o texto
+        # (mesmo tamanho) e confere na tela; o certo fica, senao volta
+        T "2f trocar o texto do JSON" {
+            $vistos = @()
+            foreach ($i in @($script:it | Where-Object { $_.v -match '^\d{2,4}$' -and $_.nome -notmatch '\(' } | Select-Object -First 3)) {
+                $novo = if ($i.v -match '^9+$') { "8" * $i.v.Length } else { "9" * $i.v.Length }
+                $fotoAntes = $null; try { Show-Game $dg; $fotoAntes = Shot "jogo-antes" } catch { }
+                $n = Step "trocartexto $($i.v) $novo" 300
+                $vistos += "$($i.v): $n trocado(s)"
+                if (-not $n) { continue }
+                Start-Sleep 3
+                $tela = (Items | Where-Object nome -eq $i.nome | Select-Object -First 1).v
+                if ($tela -eq $novo) {
+                    try {
+                        if ($fotoAntes) { Post-Sheet "agente PC: foto do jogo ANTES (texto JSON $($i.v))" "" ("jpeg base64`n" + $fotoAntes) $v "$nome (emulador)" }
+                        Show-Game $dg
+                        Post-Sheet "agente PC: foto do jogo DEPOIS (texto JSON $novo)" "" ("jpeg base64`n" + (Shot "jogo-depois")) $v "$nome (emulador)"
+                    } catch { }
+                    Add-Content "$env:USERPROFILE\tinker-mantidos-$dg.txt" "$(Get-Date -Format 'dd/MM HH:mm') $($i.nome) $($i.v) -> $novo (texto JSON)"
+                    return "TEXTO JSON: $($i.nome) $($i.v) virou $novo na tela e ficou ($n lugar(es))"
+                }
+                Step "trocartexto $novo $($i.v)" 300 | Out-Null  # a tela nao mudou: volta
+                $vistos[-1] += ", a tela seguiu $tela"
+            }
+            throw "nenhuma troca de texto mudou a tela | " + ($vistos -join ' / ')
         }
         # 2c. pedido pelo dicionario do jogo (revisao 30/10): busca o numero e pergunta ao mapa IL2CPP de quem e cada lugar
         # (Classe.campo). Nao precisa o numero mudar. Escreve nos candidatos com nome de moeda primeiro e confere na tela
