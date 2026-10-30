@@ -7,3 +7,4 @@ dependencyResolutionManagement {
 rootProject.name = "Tinker"
 include(":app")
 include(":testgame")
+include(":app2")

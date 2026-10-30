@@ -58,7 +58,9 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: tinker-apk
-          path: app/build/outputs/apk/release/app-release.apk
+          path: |
+            app/build/outputs/apk/release/app-release.apk
+            app2/build/outputs/apk/release/app2-release.apk
 
       # página fixa de download: uma release por versão (versionName), atualizada a cada push
       - name: Publica na página de releases
@@ -74,4 +76,20 @@ jobs:
           else
             gh release create "v$v" "Tinker-$v.apk" JogoTeste.apk --target "$GITHUB_SHA" --title "Tinker $v" \
               --notes "APK do Tinker $v (arm64). Instala por cima da versão anterior, sem perder os salvos."
+          fi
+
+      # Tinker 2 (app novo, app2/): release própria "tinker2-vX.Y.Z", nunca marcada como a mais recente
+      # (o agente do PC da 2.x lê a release mais recente)
+      - name: Publica o Tinker 2
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v=$(grep -oP 'versionName = "\K[^"]+' app2/build.gradle.kts)
+          cp app2/build/outputs/apk/release/app2-release.apk "Tinker2-$v.apk"
+          if gh release view "tinker2-v$v" >/dev/null 2>&1; then
+            gh release upload "tinker2-v$v" "Tinker2-$v.apk" --clobber
+          else
+            gh release create "tinker2-v$v" "Tinker2-$v.apk" --target "$GITHUB_SHA" --title "Tinker 2 $v" --latest=false --prerelease \
+              --notes "Tinker 2 $v (app novo, instala ao lado do Tinker 2.x)."
           fi
