@@ -41,6 +41,32 @@ local function carregar(nome)
   return tipo, fase, viz
 end
 
+-- vários candidatos guardados (fase -1): cada um com os vizinhos; na próxima abertura do jogo o certo é o que se repete
+local function gravarVarios(nome, tipo, lista)
+  local f = io.open(arq(nome), "w")
+  f:write(nome, "\n", string.format("%d\n%d\n", tipo, -1))
+  for _, viz in ipairs(lista) do
+    f:write("#\n")
+    for d, v in pairs(viz) do f:write(string.format("%d %d\n", d, v)) end
+  end
+  f:close()
+  anotar(nome)
+end
+
+local function carregarVarios(nome)
+  local f = io.open(arq(nome), "r")
+  local out = {}
+  f:read("*l"); f:read("*l"); f:read("*l")
+  for l in f:lines() do
+    if l == "#" then out[#out + 1] = {} else
+      local d, v = l:match("^(-?%d+) (-?%d+)$")
+      if d and out[#out] then out[#out][tonumber(d)] = tonumber(v) end
+    end
+  end
+  f:close()
+  return out
+end
+
 local function nomes()  -- valores que já têm assinatura
   local out, f = {}, io.open(INDICE, "r")
   if f then for l in f:lines() do if l ~= "" then out[#out + 1] = l end end f:close() end
@@ -121,9 +147,11 @@ end
 -- escolher o valor; com 1 resultado já refinado no GG, a 1ª opção é ele (o tipo vem do próprio resultado)
 local lista = nomes()
 local um = gg.getResultsCount() == 1 and gg.getResults(1)[1] or nil
+local varios = gg.getResultsCount() >= 2 and gg.getResultsCount() <= 50 and gg.getResults(50) or nil
 local NOMETIPO = { [gg.TYPE_DWORD] = "Dword", [gg.TYPE_FLOAT] = "Float", [gg.TYPE_DOUBLE] = "Double" }
 local opcoes, base = {}, 1
 if um then opcoes[1] = "✔ Assinatura do resultado que filtrei (valor " .. tostring(um.value) .. ", " .. (NOMETIPO[um.flags] or "tipo " .. um.flags) .. ")"; base = 2 end
+if varios then opcoes[1] = "💾 Guardar os " .. #varios .. " resultados (na próxima abertura eu descubro qual é o certo)"; base = 2 end
 opcoes[base] = "➕ Novo valor"
 for _, n in ipairs(lista) do opcoes[#opcoes + 1] = n end
 local c = gg.choice(opcoes, nil, "Assinatura automática")
@@ -131,6 +159,15 @@ if not c then return end
 local nome = lista[c - base]
 local tipo, fase, viz
 local direto = um and c == 1
+if varios and c == 1 then
+  local r = gg.prompt({ "Nome deste valor (ex.: Barra de Cobre)" }, { "" }, { "text" })
+  if not r or r[1] == "" then return end
+  local lista = {}
+  for _, v in ipairs(varios) do lista[#lista + 1] = ler(v.address) end
+  gravarVarios(r[1], varios[1].flags, lista)
+  gg.alert("Guardei os " .. #varios .. " candidatos de " .. r[1] .. ".\nFeche e abra o jogo, refine de novo (pode sobrar mais de 1) e rode o script escolhendo " .. r[1] .. ": o certo é o que tiver os mesmos vizinhos.")
+  return
+end
 if direto then
   local r = gg.prompt({ "Nome deste valor (ex.: Barra de Cobre)" }, { "" }, { "text" })
   if not r or r[1] == "" then return end
@@ -147,6 +184,34 @@ else
 end
 
 -- já tem assinatura firme: acha sozinho
+if fase == -1 then
+  local n = gg.getResultsCount()
+  if n < 1 or n > 50 then gg.alert("Refine " .. nome .. " no GG até sobrarem até 50 resultados e rode de novo.") return end
+  local antes, melhor, mn, malvo = carregarVarios(nome), nil, 0, nil
+  for _, r in ipairs(gg.getResults(n)) do
+    local agora = ler(r.address)
+    for _, viz in ipairs(antes) do
+      local fica, k = {}, 0
+      for d, v in pairs(viz) do if d ~= 0 and agora[d] == v and not ponteiro(v) then fica[d] = v; k = k + 1 end end
+      if k > mn then melhor, mn, malvo = fica, k, r.address end
+    end
+  end
+  if mn < 3 then
+    local lista = {}
+    for _, r in ipairs(gg.getResults(n)) do lista[#lista + 1] = ler(r.address) end
+    gravarVarios(nome, tipo, lista)
+    gg.alert("Nenhum candidato repetiu os vizinhos ainda. Guardei os de agora: na próxima abertura do jogo, refine e rode de novo.")
+    return
+  end
+  local a = achar_por_assinatura(nome, tipo, melhor)
+  gravar(nome, tipo, 2, melhor)
+  local r = receita(nome, tipo, melhor, gg.getValues({ { address = malvo, flags = tipo } })[1].value)
+  if r then gg.copyText(r, false); local f = io.open(gg.EXT_STORAGE .. "/tinker-biblioteca.txt", "a"); f:write(r, "\n"); f:close() end
+  entregar(nome, tipo, malvo, "Descobri qual é o certo: o que repetiu " .. mn .. " vizinhos entre as aberturas ✅ (a assinatura acha " .. #a .. " lugar(es))." ..
+    (r and "\n\nReceita para o Tinker COPIADA: Salvos → Colar lista." or ""))
+  return
+end
+
 if fase >= 2 then
   local a = achar_por_assinatura(nome, tipo, viz)
   if #a == 1 then entregar(nome, tipo, a[1].address, "Achei pela assinatura ✅") return end
