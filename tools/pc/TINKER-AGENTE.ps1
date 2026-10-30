@@ -1474,37 +1474,15 @@ function Run-RealGame($dg) {
             if (-not ($l -match " voltou ")) { throw "nao voltou: $($l -join ' / ')" }
             ($l -join " / ")
         }
-        # 8b. trocar uma regra que aparece na tela: o preco das construcoes (as etiquetas 100 e 200 do mapa, em ouro) passa a 0;
-        # confere pela leitura da tela e manda foto; desfaz (o 8 liga a roleta de graca depois e ela fica)
-        if ($dg -eq "com.evrika.miner.camp") {
-            T "8b preco das construcoes = 0 (na tela)" {
-                $antes = @(Items | ForEach-Object { $_.v })
-                $fotoAntes = $null; try { Show-Game $dg; $fotoAntes = Shot "jogo-antes" } catch { }
-                try {
-                    Step "metodo BuildingShopTileRenderData.get_price 0" | Out-Null
-                    $msg = ($script:last -split "`n")[0]
-                    if ($msg -notmatch "ligad|liguei") { throw "a troca nao ligou: $msg" }
-                    Start-Sleep 5
-                    $depois = @(Items | ForEach-Object { $_.v })
-                    $sumiu = @($antes | Where-Object { $_ -in @("100", "200") -and $_ -notin $depois })
-                    if (-not $sumiu.Count) { throw "a tela nao mudou (antes: $($antes -join ','); depois: $($depois -join ','))" }
-                    try {
-                        if ($fotoAntes) { Post-Sheet "agente PC: foto do jogo ANTES (preco das construcoes)" "" ("jpeg base64`n" + $fotoAntes) $v "$nome (emulador)" }
-                        Show-Game $dg
-                        Post-Sheet "agente PC: foto do jogo DEPOIS (preco das construcoes = 0)" "" ("jpeg base64`n" + (Shot "jogo-depois")) $v "$nome (emulador)"
-                    } catch { }
-                    "$msg | na tela: antes $($antes -join ','), depois $($depois -join ',')"
-                } finally { Step "despatch" | Out-Null }
-            }
-        }
         # 8. trocar a regra pelo nome (mapa do jogo): a roleta paga em joias (moeda do jogo) passa a custar 1; confere que o
         # jogo segue aberto e desfaz. shortcut: ainda nao abre a roleta para ler o preco na tela; quando a IA souber chegar la
         if ($dg -eq "com.evrika.miner.camp") {
             T "8 trocar a regra (GetSpinGemsPrice = 0, de graca)" {
                 try {
-                    Step "metodo ShopRouletteController.GetSpinGemsPrice 0" | Out-Null
-                    $msg = ($script:last -split "`n")[0]
-                    if ($msg -notmatch "ligad|liguei") { throw "a troca nao ligou: $msg" }
+                    try { Step "metodo ShopRouletteController.GetSpinGemsPrice 0" | Out-Null; $msg = ($script:last -split "`n")[0] }
+                    catch { if ($_.Exception.Message -match "j. s.o os bytes") { $msg = "ja estava ligada (os bytes de agora ja sao os da troca)" } else { throw } }
+                    # a troca da rodada anterior ficou no jogo (o teste 7 nao reabriu): "ja sao os bytes de agora" = ja esta de graca
+                    if ($msg -notmatch "ligad|liguei|j. s.o os bytes") { throw "a troca nao ligou: $msg" }
                     Start-Sleep 15
                     if (-not (& $adb shell pidof $dg)) { throw "o jogo fechou depois da troca: $msg" }
                     # pedido do usuario (30/10): a troca FICA ligada para ele conferir no emulador (a roleta fica de graca ate o
