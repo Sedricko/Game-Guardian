@@ -1311,7 +1311,12 @@ function Run-RealGame($dg) {
             T "2 pedido $($i.nome) = $alvo (era $($i.v))" {
                 # foto da tela do jogo antes e depois: o usuario quer ver no celular a mudanca feita no jogo
                 $fotoAntes = $null; try { Show-Game $dg; $fotoAntes = Shot "jogo-antes" } catch { }
-                Step "sozinho $($i.nome)=$alvo auto" 420 | Out-Null  # o sozinho tenta ate 5 min; com 340 s o passo estourava antes dele terminar
+                # o sozinho so separa os milhares de lugares quando o numero muda no jogo (30/10: 4 pedidos com "jogue para o numero
+                # mudar" e ninguem jogando): o explorador (ou os toques gravados) joga enquanto ele procura
+                $macro = "$env:USERPROFILE\tinker-macro-$dg.txt"
+                $joga = if (Test-Path $macro) { Start-Replay $macro 300 } else { Start-Explore $dg 300 }
+                try { Step "sozinho $($i.nome)=$alvo auto" 420 | Out-Null }  # o sozinho tenta ate 5 min; com 340 s o passo estourava antes dele terminar
+                finally { Stop-Job $joga; Remove-Job $joga -Force }
                 $msg = ($script:last -split "`n")[0]
                 # logo depois do pedido (a lista de resultados ainda e a dele; o "itens" busca de novo e troca a lista)
                 if ($msg -match "Pronto" -and -not $script:salvo) {
