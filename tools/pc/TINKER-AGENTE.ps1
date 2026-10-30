@@ -1332,6 +1332,7 @@ function Run-RealGame($dg) {
             try { Step "jogar 180" | Out-Null; $ia = @(($script:last -split "`n") | Where-Object { $_ -like "ia IA:*" -and $_ -notmatch "Sem conex|Unable to resolve|chave" }).Count } catch { Say "a IA nao jogou: $($_.Exception.Message)" }
             # internet do emulador (para saber se a falha da IA e do emulador ou so do Tinker)
             $dns = if ((& $adb shell "ping -c 1 -W 3 api.groq.com" 2>&1) -match "bytes from") { "emulador alcanca o Groq" } else { "emulador sem DNS/internet" }
+            Say "  rede: $dns"
             if (-not $ia) {
                 $macro = "$env:USERPROFILE\tinker-macro-$dg.txt"
                 $job = if (Test-Path $macro) { Start-Replay $macro 180 } else { Start-Explore $dg 180 }
@@ -1381,7 +1382,8 @@ function Run-RealGame($dg) {
     $res = $script:rr
     $ok = @($res | Where-Object { $_ -like "OK *" }).Count
     # o registro do Tinker vai junto: mostra onde cada passo gastou o tempo e o que achou
-    $res += "=== registro do Tinker ===`n" + ((Sh "tail -n 80 /data/data/$app/files/tinker.log") -join "`n")
+    # 300 linhas: com 80 so sobrava o fim da rodada e nao dava para ver onde o passo 'itens' gastou 15 min
+    $res += "=== registro do Tinker ===`n" + ((Sh "tail -n 300 /data/data/$app/files/tinker.log") -join "`n")
     if ($guid) { & $adb shell cmd connectivity set-package-networking-enabled true $dg | Out-Null } else { & $adb shell cmd connectivity airplane-mode disable }
     $fails = ($res | Where-Object { $_ -like "FALHA*" -or $_ -like "parou*" }) -join "`n"
     Post-Sheet "agente PC: $nome de verdade, $ok de $(@($script:rr | Where-Object { $_ -match '^(OK|FALHA) ' }).Count) ok" $fails ($res -join "`n") $v "$nome (emulador)"
