@@ -122,6 +122,9 @@ function Post-Sheet($motivo, $problemas, $texto, $versao, $jogo = "jogo de teste
 }
 
 # print da tela do emulador, menor e em JPEG (cabe numa linha da planilha), como texto base64
+# poe o jogo na frente (o passo do Tinker abre o app por cima) e espera a tela assentar, para a foto ser do jogo
+function Show-Game($dg) { & $adb shell monkey -p $dg -c android.intent.category.LAUNCHER 1 | Out-Null; Start-Sleep 3 }
+
 function Shot($name) {
     $png = "$env:TEMP\tinker-$name.png"; $jpg = "$env:TEMP\tinker-$name.jpg"
     cmd /c "`"$adb`" exec-out screencap -p > `"$png`""  # o > do PowerShell 5 estraga arquivo binario
@@ -1306,6 +1309,8 @@ function Run-RealGame($dg) {
         foreach ($i in ($script:it | Where-Object { $_.v -match '^\d+$' -and [double]$_.v -ge 2 } | Sort-Object { [double]$_.v } -Descending | Select-Object -First 4)) {
             $alvo = if ([double]$i.v -lt 999) { "999" } else { "$([long]$i.v + 1000)" }
             T "2 pedido $($i.nome) = $alvo (era $($i.v))" {
+                # foto da tela do jogo antes e depois: o usuario quer ver no celular a mudanca feita no jogo
+                $fotoAntes = $null; try { Show-Game $dg; $fotoAntes = Shot "jogo-antes" } catch { }
                 Step "sozinho $($i.nome)=$alvo auto" 420 | Out-Null  # o sozinho tenta ate 5 min; com 340 s o passo estourava antes dele terminar
                 $msg = ($script:last -split "`n")[0]
                 # logo depois do pedido (a lista de resultados ainda e a dele; o "itens" busca de novo e troca a lista)
@@ -1318,6 +1323,11 @@ function Run-RealGame($dg) {
                 # pedido do usuario (30/10): o valor certo fica no jogo, para a rodada seguinte ter de achar com numeros diferentes
                 # (999 vira 1999, depois 2999...); so volta o de antes quando o pedido nao deu certo
                 if ($tela -ne $alvo) { Step "escrever $($i.v)" | Out-Null; throw "a tela mostrou $tela ($msg)" }
+                try {
+                    if ($fotoAntes) { Post-Sheet "agente PC: foto do jogo ANTES ($($i.nome) = $($i.v))" "" ("jpeg base64`n" + $fotoAntes) $v "$nome (emulador)" }
+                    Show-Game $dg
+                    Post-Sheet "agente PC: foto do jogo DEPOIS ($($i.nome) = $alvo)" "" ("jpeg base64`n" + (Shot "jogo-depois")) $v "$nome (emulador)"
+                } catch { Say "  nao consegui mandar a foto do jogo: $($_.Exception.Message)" }
                 Add-Content "$env:USERPROFILE\tinker-mantidos-$dg.txt" "$(Get-Date -Format 'dd/MM HH:mm') $($i.nome) $($i.v) -> $alvo"
                 "a tela mostrou $alvo e ficou assim (a proxima rodada procura com o numero novo)"
             }
