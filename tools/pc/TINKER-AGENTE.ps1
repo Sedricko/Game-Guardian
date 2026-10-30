@@ -1452,7 +1452,7 @@ function Run-RealGame($dg) {
 # jogo de verdade: fica ligado como o agente de sempre; a cada versao nova do Tinker roda uma rodada sozinho no jogo
 if ($Jogo) {
     $doneJ = "$env:USERPROFILE\tinker-agente-testado-$Jogo.txt"
-    Say "agente do $($realGames[$Jogo].nome) ligado: a cada versao nova do Tinker e sem parar, uma rodada atras da outra) faco as rodadas sozinho. Deixe esta janela aberta; Ctrl+C para sair."
+    Say "agente do $($realGames[$Jogo].nome) ligado: a cada versao nova do Tinker e sem parar, uma rodada atras da outra, faco as rodadas sozinho. Deixe esta janela aberta; Ctrl+C para sair."
     while ($true) {
         Update-Self
         try {
