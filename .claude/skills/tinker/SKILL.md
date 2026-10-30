@@ -68,6 +68,7 @@ O texto completo de cada opção está em `docs/tutorial/ajuda.py` (fonte única
   (Play Store + Magisk, gpu host). Roda a cada Tinker novo ou 3 h (arquivo `%USERPROFILE%\tinker-agente-testado-<pkg>.txt`;
   apagar força a rodada). Corta a rede só do jogo (`cmd connectivity set-package-networking-enabled false`). Espera o
   INICIAR aparecer (até ~2 min). Testes: 1 lista de itens, 2 pedido (maiores valores primeiro; <999 → 999, senão +1000),
+  (o valor certo FICA no jogo, anotado em `%USERPROFILE%\tinker-mantidos-<pkg>.txt`: a rodada seguinte acha com outro número),
   3 irmãos, 4 velocidade, 5 IA joga 3 min + monitor (sem IA: explorador que só toca com o jogo na frente), 6 cronômetros,
   7 reabrir (salvo volta), 8 trocar a regra (`metodo ShopRouletteController.GetSpinGemsPrice 1`, confere 15 s e desfaz).
   Cada teste vai "ao vivo" para Relatórios; o resumo "agente PC: Orecraft de verdade, X de Y ok" leva 300 linhas do registro.

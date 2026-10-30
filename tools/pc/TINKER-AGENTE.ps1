@@ -1296,7 +1296,8 @@ function Run-RealGame($dg) {
             $script:it = Items
             $com = @($script:it | Where-Object { $_.addr -ne "-" }).Count
             if (-not $script:it.Count) { throw "nenhum item" }
-            "$($script:it.Count) itens, $com com endereco: " + (($script:it | Select-Object -First 30 | ForEach-Object { "$($_.nome)=$($_.v)" }) -join ", ")
+            $antes = Get-Content "$env:USERPROFILE\tinker-mantidos-$dg.txt" -Tail 3 -ErrorAction SilentlyContinue
+            $(if ($antes) { "mantidos antes: $($antes -join '; ') | " } else { "" }) + "$($script:it.Count) itens, $com com endereco: " + (($script:it | Select-Object -First 30 | ForEach-Object { "$($_.nome)=$($_.v)" }) -join ", ")
         }
         # 2. pedido "Item = 999" em ate 4 itens: o Tinker prova sozinho (escreve e le a tela); o agente le a tela de novo e
         # volta o valor de antes. O primeiro provado fica salvo para os testes 3 (irmaos) e 7 (reabrir o jogo)
@@ -1314,10 +1315,11 @@ function Run-RealGame($dg) {
                     $script:irmaos = (($script:last -split "`n") | Where-Object { $_ -like "irmao *" }).Count
                 }
                 $tela = (Items | Where-Object nome -eq $i.nome | Select-Object -First 1).v
-                Step "escrever $($i.v)" | Out-Null
-                $volta = (Items | Where-Object nome -eq $i.nome | Select-Object -First 1).v
-                if ($tela -ne $alvo) { throw "a tela mostrou $tela ($msg)" }
-                "a tela mostrou $alvo; voltei para $($i.v), a tela mostra $volta"
+                # pedido do usuario (30/10): o valor certo fica no jogo, para a rodada seguinte ter de achar com numeros diferentes
+                # (999 vira 1999, depois 2999...); so volta o de antes quando o pedido nao deu certo
+                if ($tela -ne $alvo) { Step "escrever $($i.v)" | Out-Null; throw "a tela mostrou $tela ($msg)" }
+                Add-Content "$env:USERPROFILE\tinker-mantidos-$dg.txt" "$(Get-Date -Format 'dd/MM HH:mm') $($i.nome) $($i.v) -> $alvo"
+                "a tela mostrou $alvo e ficou assim (a proxima rodada procura com o numero novo)"
             }
         }
         # 3. achou um, acha todos: vizinhos com o mesmo formato do primeiro provado (outros recursos do mesmo objeto)
