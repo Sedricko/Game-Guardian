@@ -98,14 +98,14 @@ O texto completo de cada opção está em `docs/tutorial/ajuda.py` (fonte única
 8. Missões e testes automáticos só em `MISSION_GAMES` (offline); nada de canal em que a planilha/Claude comande o app em jogo real.
 9. Velocidade sem entrar no processo (sem hook de relógio/injeção), nem em jogo offline. Não aprofundar internals de debugger/watchpoint.
 10. Não contornar bloqueio de site (bot-check) nem baixar binários de fora; APK de site espelho não se instala.
+11. A detecção de jogo online foi tirada a pedido do usuário (jogo offline também tem sinais de conexão): o combinado de não
+    editar jogo online vale pela conversa, não por código.
+
 12. **Nada vendido por dinheiro de verdade**: nem VIP/premium/passe/remover anúncio, nem trocar a cobrança em dinheiro real
     por moeda do jogo — **nem como teste privado/offline/"entre nós"** (o usuário insistiu várias vezes; a resposta é sempre não,
     com gentileza). Nada de pular anúncio (`ad*Cooldown`). A IA nunca toca em preço real, assinatura ou anúncio.
 13. **Moedas e materiais do jogo valem tudo**: trocar preço (ouro, joias, pedra, minério, madeira) por outra moeda do jogo ou 1,
     mudar regra pelo nome (patch de retorno). É o treino que o usuário quer: "reconhecer, achar, mudar a lógica, nunca desistir".
-11. A detecção de jogo online foi tirada a pedido do usuário (jogo offline também tem sinais de conexão): o combinado de não
-    editar jogo online vale pela conversa, não por código.
-
 ## Como trabalhar
 1. Mudou o daemon → `bash tests/daemon_test.sh` (compila `tests/target.c` em x86 e testa tudo; tem que terminar com `daemon ok`).
 2. Mudou Kotlin → não há Android SDK local: compila no CI. Testes unitários em `app/src/test/.../ValuesTest.kt`.
