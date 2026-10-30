@@ -1392,24 +1392,24 @@ function Run-RealGame($dg) {
         # 8. trocar a regra pelo nome (mapa do jogo): a roleta paga em joias (moeda do jogo) passa a custar 1; confere que o
         # jogo segue aberto e desfaz. shortcut: ainda nao abre a roleta para ler o preco na tela; quando a IA souber chegar la
         if ($dg -eq "com.evrika.miner.camp") {
-            T "8 trocar a regra (GetSpinGemsPrice = 1)" {
+            T "8 trocar a regra (GetSpinGemsPrice = 0, de graca)" {
                 try {
-                    Step "metodo ShopRouletteController.GetSpinGemsPrice 1" | Out-Null
+                    Step "metodo ShopRouletteController.GetSpinGemsPrice 0" | Out-Null
                     $msg = ($script:last -split "`n")[0]
                     if ($msg -notmatch "ligad|liguei") { throw "a troca nao ligou: $msg" }
                     Start-Sleep 15
                     if (-not (& $adb shell pidof $dg)) { throw "o jogo fechou depois da troca: $msg" }
-                    # pedido do usuario (30/10): a troca FICA ligada para ele conferir no emulador (a roleta custa 1 joia ate o
+                    # pedido do usuario (30/10): a troca FICA ligada para ele conferir no emulador (a roleta fica de graca ate o
                     # jogo reabrir no teste 7 da proxima rodada). Tenta abrir a loja e a roleta e manda a foto; nunca toca em Girar
                     $foto = ""
                     try {
                         Step "tocar ^(LOJA|Loja|SHOP|Shop)$" | Out-Null; Start-Sleep 3
                         Step "tocar ^(ROLETA|Roleta|ROULETTE|Roulette)$" | Out-Null; Start-Sleep 3
                         Show-Game $dg
-                        Post-Sheet "agente PC: foto do jogo DEPOIS (roleta GetSpinGemsPrice = 1)" "" ("jpeg base64`n" + (Shot "jogo-roleta")) $v "$nome (emulador)"
+                        Post-Sheet "agente PC: foto do jogo DEPOIS (roleta GetSpinGemsPrice = 0, de graca)" "" ("jpeg base64`n" + (Shot "jogo-roleta")) $v "$nome (emulador)"
                         $foto = " | foto da roleta na planilha"
                     } catch { $foto = " | nao achei a loja/roleta para a foto: $($_.Exception.Message)" }
-                    Say "  a roleta ficou custando 1 joia: abra a roleta no emulador para conferir (volta ao normal quando o jogo reabrir)"
+                    Say "  a roleta ficou de graca (0 joias): abra a roleta no emulador para conferir (volta ao normal quando o jogo reabrir)"
                     "$msg | o jogo seguiu aberto 15 s; a troca ficou ligada$foto"
                 } catch { Step "despatch" | Out-Null; throw }
             }
