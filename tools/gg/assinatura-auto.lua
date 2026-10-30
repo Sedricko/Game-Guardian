@@ -1,13 +1,15 @@
--- Assinatura automática completa para o GameGuardian (Tinker, 30/10/2026)
+-- Biblioteca de valores para o GameGuardian (Tinker, 30/10/2026): painel para mudar e congelar, assinaturas por jogo
+-- Painel: acha todos os valores deste jogo pela assinatura e deixa mudar ou congelar cada um.
 -- Roda sempre o mesmo script: ele mesmo busca, pede para você mudar o valor no jogo, refina até sobrar 1, guarda os vizinhos
 -- e, nas próximas aberturas do jogo, monta a assinatura e acha o endereço sozinho (com o nome, na lista salva).
 -- Só lê a memória; quem escreve um valor novo é você, na lista do GG.
 
 local JANELA = 64                                   -- bytes para cima e para baixo do valor
-local INDICE = gg.EXT_STORAGE .. "/tinker-assinaturas.txt"   -- nomes dos valores (o GG não lista pastas)
+local JOGO = (gg.getTargetPackage and gg.getTargetPackage() or "jogo"):gsub("[^%w%.]", "_")
+local INDICE = gg.EXT_STORAGE .. "/tinker-assinaturas-" .. JOGO .. ".txt"   -- nomes dos valores deste jogo
 local TIPOS = { { "Inteiro (Dword)", gg.TYPE_DWORD }, { "Com vírgula (Float)", gg.TYPE_FLOAT }, { "Grande com vírgula (Double)", gg.TYPE_DOUBLE } }
 
-local function arq(nome) return gg.EXT_STORAGE .. "/tinker-assin-" .. nome:gsub("[^%w]", "_") .. ".txt" end
+local function arq(nome) return gg.EXT_STORAGE .. "/tinker-assin-" .. JOGO .. "-" .. nome:gsub("[^%w]", "_") .. ".txt" end
 
 local function ler(alvo)  -- Dwords em volta: { [deslocamento] = valor }
   local t = {}
@@ -144,22 +146,64 @@ local function entregar(nome, tipo, alvo, msg)
   gg.alert(msg .. "\n" .. nome .. " está na lista salva: edite ou congele por lá.")
 end
 
+-- painel: acha cada valor pronto (assinatura firme) e deixa mudar, congelar ou soltar; volta ao painel até você sair
+local function painel(lista)
+  local itens = {}
+  for _, n in ipairs(lista) do
+    local tipo, fase, viz = carregar(n)
+    if fase and fase >= 2 then
+      local a = achar_por_assinatura(n, tipo, viz)
+      itens[#itens + 1] = { nome = n, tipo = tipo, addr = #a == 1 and a[1].address or nil }
+    end
+  end
+  if #itens == 0 then gg.alert("Ainda não há valor com assinatura pronta neste jogo. Refine um valor e guarde (3 testes).") return end
+  local congelados = {}
+  for _, l in ipairs(gg.getListItems()) do if l.freeze then congelados[l.address] = true end end
+  while true do
+    local nomesTela = {}
+    for i, it in ipairs(itens) do
+      if it.addr then
+        local v = gg.getValues({ { address = it.addr, flags = it.tipo } })[1].value
+        nomesTela[i] = it.nome .. " = " .. tostring(v) .. (congelados[it.addr] and "  ❄" or "")
+      else nomesTela[i] = it.nome .. " (não achei agora: abra a tela dele)" end
+    end
+    local i = gg.choice(nomesTela, nil, "📋 Painel de " .. JOGO)
+    if not i then return end
+    local it = itens[i]
+    if it.addr then
+      local acao = gg.choice({ "✏️ Mudar valor", "❄ Congelar (no valor que eu digitar)", "🔓 Soltar (descongelar)" }, nil, it.nome)
+      if acao == 1 or acao == 2 then
+        local r = gg.prompt({ "Novo valor de " .. it.nome }, { "" }, { "number" })
+        if r and r[1] ~= "" then
+          local item = { address = it.addr, flags = it.tipo, value = r[1], name = it.nome, freeze = acao == 2 }
+          gg.setValues({ item })
+          if acao == 2 then gg.addListItems({ item }); congelados[it.addr] = true end
+        end
+      elseif acao == 3 then
+        gg.addListItems({ { address = it.addr, flags = it.tipo, name = it.nome, freeze = false } })
+        congelados[it.addr] = nil
+      end
+    end
+  end
+end
+
 -- escolher o valor; com 1 resultado já refinado no GG, a 1ª opção é ele (o tipo vem do próprio resultado)
 local lista = nomes()
 local um = gg.getResultsCount() == 1 and gg.getResults(1)[1] or nil
 local varios = gg.getResultsCount() >= 2 and gg.getResultsCount() <= 50 and gg.getResults(50) or nil
 local NOMETIPO = { [gg.TYPE_DWORD] = "Dword", [gg.TYPE_FLOAT] = "Float", [gg.TYPE_DOUBLE] = "Double" }
-local opcoes, base = {}, 1
-if um then opcoes[1] = "✔ Assinatura do resultado que filtrei (valor " .. tostring(um.value) .. ", " .. (NOMETIPO[um.flags] or "tipo " .. um.flags) .. ")"; base = 2 end
-if varios then opcoes[1] = "💾 Guardar os " .. #varios .. " resultados (na próxima abertura eu descubro qual é o certo)"; base = 2 end
+local opcoes, base = { "📋 Painel: mudar e congelar os valores deste jogo" }, 2
+if um then opcoes[2] = "✔ Assinatura do resultado que filtrei (valor " .. tostring(um.value) .. ", " .. (NOMETIPO[um.flags] or "tipo " .. um.flags) .. ")"; base = 3 end
+if varios then opcoes[2] = "💾 Guardar os " .. #varios .. " resultados (na próxima abertura eu descubro qual é o certo)"; base = 3 end
 opcoes[base] = "➕ Novo valor"
 for _, n in ipairs(lista) do opcoes[#opcoes + 1] = n end
-local c = gg.choice(opcoes, nil, "Assinatura automática")
+local c = gg.choice(opcoes, nil, "Biblioteca de " .. JOGO)
 if not c then return end
+if c == 1 then painel(lista) return end
 local nome = lista[c - base]
 local tipo, fase, viz
-local direto = um and c == 1
-if varios and c == 1 then
+local direto = um and c == 2
+if varios and c == 2 then
   local r = gg.prompt({ "Nome deste valor (ex.: Barra de Cobre)" }, { "" }, { "text" })
   if not r or r[1] == "" then return end
   local lista = {}
