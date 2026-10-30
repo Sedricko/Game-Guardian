@@ -2229,6 +2229,8 @@ class Engine private constructor(private val app: Context) {
                 while (true) {
                     delay(8000)
                     round++
+                    // no Orecraft entravam ~20 mil novos por rodada e o Tinker sumia na rodada 7 (memória): guarda só os 30 mil mais fortes
+                    if (hist.size > 60_000) hist.keys.sortedBy { score(it) }.take(hist.size - 30_000).forEach { hist.remove(it); obs.remove(it); region.remove(it) }
                     val now = (System.currentTimeMillis() - t0) / 1000
                     val got = call { d ->
                         d.send("photostep 20000", quiet = true).lines.mapNotNull { l ->
@@ -2264,7 +2266,9 @@ class Engine private constructor(private val app: Context) {
                             "mudou ${h.size - 1}×" + (onScreen[a]?.let { " · na tela ${it}×" } ?: "") + ": " + h.takeLast(6).joinToString(" → "))
                     }
                     withContext(Dispatchers.Main) { Session.items = Session.items.filter { it.icon != "📈" } + items; Session.itemsReady = Session.items.count { it.hit != null } }
+                    val rt = Runtime.getRuntime()
                     itemLog("👁 Rodada $round: ${got.size} mudaram em degrau · $structuralN são relógio/contador (estrutura) · ${cands.size} mudaram por evento" +
+                        " · memória ${(rt.totalMemory() - rt.freeMemory()) shr 20}/${rt.maxMemory() shr 20} MB" +
                         (cands.firstOrNull()?.let { " · o mais forte: ${hist[it]!!.takeLast(4).joinToString(" → ")}" + (onScreen[it]?.let { n -> " (na tela ${n}×)" } ?: "") } ?: ""))
                     empty = if (cands.isEmpty()) empty + 1 else 0
                     if (level > 0 && empty >= 3) {  // a área ficou sem nada: volta a olhar tudo
