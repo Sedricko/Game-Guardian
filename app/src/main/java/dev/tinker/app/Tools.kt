@@ -224,7 +224,7 @@ private fun GameSpeed(engine: Engine, enabled: Boolean, run: (suspend () -> Stri
                 run { engine.findGameSpeed().let { addrs = it; if (it.isEmpty()) "Não achei a velocidade (jogo não é Unity, ou o relógio fica em outro formato)." else "Achei ${it.size} lugar(es) da velocidade. ${engine.speedNote}".trim() } }
             }) { Text("Achar a velocidade") }
         } else if (a.isEmpty()) {
-            Text("Não achei. Abra uma fase e tente de novo.", style = MaterialTheme.typography.bodySmall)
+            Text(engine.speedNote.ifBlank { "Não achei. Abra uma fase e tente de novo." }, style = MaterialTheme.typography.bodySmall)
             OutlinedButton(shape = MaterialTheme.shapes.medium, enabled = enabled, onClick = { addrs = null }) { Text("Tentar de novo") }
         } else {
             Text("${a.size} lugar(es). Escolha a velocidade (1x volta ao normal):", style = MaterialTheme.typography.bodySmall)
