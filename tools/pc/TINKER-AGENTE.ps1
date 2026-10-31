@@ -35,7 +35,9 @@ function Sh($c) { if ($script:su) { & $adb shell "su -c '$($c -replace "'", "'\'
 # fica curta na janela (o detalhe inteiro vai para o log e para a planilha)
 function Say($t) {
     $l = "$(Get-Date -Format 'HH:mm:ss') $t"
-    Add-Content $log $l
+    # UTF-8 e dividindo o arquivo: o Add-Content gravava acentos quebrados e falhava calado com o painel ou outro agente
+    # lendo o log (o log do painel parou em 30/10 19:25 com o bot rodando)
+    try { $fs = [IO.File]::Open($log, "Append", "Write", "ReadWrite"); $b = [Text.Encoding]::UTF8.GetBytes($l + "`r`n"); $fs.Write($b, 0, $b.Length); $fs.Close() } catch { }
     $c = if ($t -match '^\s*OK ') { 'Green' } elseif ($t -match '^\s*(FALHA|parou)') { 'Red' } elseif ($t -match '^\s*>>|^=+') { 'Cyan' } elseif ($t -match 'falhou|nao respondeu|nao ligou|erro|travou|lento') { 'Yellow' } else { 'Gray' }
     $w = 200; try { $w = [Math]::Max(80, 2 * $Host.UI.RawUI.WindowSize.Width - 2) } catch { }
     if ($l.Length -gt $w) { $l = $l.Substring(0, $w - 12) + " ...(no log)" }
