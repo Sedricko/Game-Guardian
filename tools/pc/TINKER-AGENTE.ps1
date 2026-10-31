@@ -1479,6 +1479,16 @@ function Run-RealGame($dg) {
             Add-Content "$env:USERPROFILE\tinker-mantidos-$dg.txt" "$(Get-Date -Format 'dd/MM HH:mm') $($i.nome) $($i.v) -> $novo (juiz: $($linhas[0]))"
             "JUIZ: $r"
         }
+        # 2h. scripts Lua do GameGuardian no Tinker (31/10): um script curto pelo mesmo caminho do 📜 Scripts - busca o numero
+        # da tela, le o vizinho e acha a libil2cpp (base do patch da roleta). So le
+        T "2h script Lua (gg.* no Tinker)" {
+            $i = @($script:it | Where-Object { $_.v -match '^\d{2,6}$' } | Select-Object -First 1)[0]
+            if (-not $i) { throw "nenhum numero na tela" }
+            Step "luateste $($i.v)" 300 | Out-Null
+            $r = ($script:last -split "`n")[0]
+            if ($r -notmatch "achados [1-9]" -or $r -notmatch "libil2cpp [0-9a-f]") { throw $r }
+            "$($i.nome) = $($i.v): $r"
+        }
         # 2c. pedido pelo dicionario do jogo (revisao 30/10): busca o numero e pergunta ao mapa IL2CPP de quem e cada lugar
         # (Classe.campo). Nao precisa o numero mudar. Escreve nos candidatos com nome de moeda primeiro e confere na tela
         T "2c pedido pelo dicionario do jogo" {

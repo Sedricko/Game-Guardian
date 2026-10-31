@@ -162,6 +162,15 @@ O texto completo de cada opção está em `docs/tutorial/ajuda.py` (fonte única
 - Nota (`routeScore`, Values.kt): muda a tela 2 + segura 5 s 1 + dura ao reabrir 2. Vence a maior; empate = a testada
   antes. Ao vivo que venceu mas se perdeu ao reabrir é aplicada de novo. Ainda não faz "de graça/sem espera" (patch).
 
+## 📜 Scripts Lua do GameGuardian (2.96.0, 31/10)
+- `GgLua.kt`: LuaJ 3.0.1 (Lua 5.2, a do GG) com os gg.* do nosso `assinatura-auto.lua` (busca/refino/resultados,
+  getValues em lote por `dump`, setValues, lista salva, alert/choice/prompt/toast/copyText, setRanges, getRangesList só
+  pelo nome da lib, makeRequest). Função que falta dá "gg.X ainda não existe no Tinker". Trancado: io/os só na pasta
+  `files/scripts-dados` (o gg.EXT_STORAGE), sem os.execute/luajava/dofile/require/debug; internet só script.google.com
+  e com a pessoa permitindo. `GgHost` separa o daemon e a tela: `GgLuaTest` roda o assinatura-auto.lua inteiro num jogo
+  de mentira (3 testes + gerar). Ferramentas → 📜 Scripts (`ScriptsTool.kt`): importar/colar, rodar, perguntas dentro
+  do painel, "Abrir menu" (gg.isVisible = true uma vez, para scripts em laço), Parar. Missão `luateste <n>` = teste 2h.
+
 ## Próximos passos
 - Orecraft: achar o ouro (pedido 3999 → 4999), depois a missão "trocar a moeda de um preço" (só moedas do jogo) e ler o
   preço novo na tela; memória de estratégia por motor (ordem de métodos que funcionou em cada engine).

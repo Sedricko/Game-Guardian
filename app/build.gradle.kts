@@ -10,8 +10,8 @@ android {
         applicationId = "dev.tinker.app"
         minSdk = 26
         targetSdk = 37
-        versionCode = 295
-        versionName = "2.95.0"
+        versionCode = 296
+        versionName = "2.96.0"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
     // chave fixa: sem ela cada build do CI assina diferente e o Android não deixa atualizar por cima
@@ -50,5 +50,7 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.13.0")
     // 🎯 Achar sozinho: lê os números da tela no próprio aparelho (modelo embutido, sem internet)
     implementation("com.google.mlkit:text-recognition:16.0.1")
+    // 📜 Scripts do GameGuardian: o mesmo Lua 5.2 em Java que o GG usa
+    implementation("org.luaj:luaj-jse:3.0.1")
     testImplementation("junit:junit:4.13.2")
 }

@@ -1690,6 +1690,37 @@ class Engine private constructor(private val app: Context) {
                 val (trocados, achados) = swapJsonText(old, new)
                 return "ok ${trocados.size} texto(s) \"$old\" do JSON viraram \"$new\" (de $achados achados)\ncount ${trocados.size}\n" + trocados.joinToString("\n") { "texto $it" }
             }
+            // "luateste 80": um script Lua curto (busca, lê o vizinho, acha a libil2cpp) pelo mesmo caminho do 📜 Scripts
+            "luateste" -> {
+                val out = mutableListOf<String>()
+                val host = object : GgHost {
+                    override val pkg = missionGame
+                    override val dataDir = File(app.filesDir, "scripts-dados")
+                    override fun send(cmd: String) = luaSend(cmd)
+                    override fun ask(q: LuaAsk): Any? = null
+                    override fun toast(text: String) {}
+                    override fun copy(text: String) {}
+                    override fun listItems() = luaItems()
+                    override fun addItems(items: List<LuaItem>) {}
+                    override fun removeItems(items: List<LuaItem>) {}
+                    override fun http(url: String, headers: Map<String, String>, body: String?) = throw IOException("sem internet no teste")
+                    override fun log(line: String) { out += line }
+                }
+                val code = """
+                    gg.searchNumber("${arg.filter { it.isDigit() }}", gg.TYPE_DWORD)
+                    local n = gg.getResultsCount()
+                    print("achados " .. n)
+                    if n > 0 then
+                      local r = gg.getResults(1)[1]
+                      local v = gg.getValues({ { address = r.address, flags = gg.TYPE_DWORD }, { address = r.address + 4, flags = gg.TYPE_DWORD } })
+                      print(string.format("primeiro %x = %s, vizinho %s", r.address, tostring(v[1].value), tostring(v[2].value)))
+                    end
+                    local l = gg.getRangesList("libil2cpp.so")
+                    print("libil2cpp " .. (l[1] and string.format("%x", l[1].start) or "nao achei"))
+                """.trimIndent()
+                val err = withContext(Dispatchers.IO) { GgLua(host).run(code, "luateste.lua") }
+                return (if (err == null) "ok " else "err $err | ") + out.joinToString(" | ") + "\ncount ${out.size}\n" + out.joinToString("\n")
+            }
             // "juiz 80 99 Joias": testa as formas de mudar o número da tela (texto JSON, número na memória, save), confere
             // na tela e se dura depois de reabrir o jogo; a que mais pontua vence e fica aplicada
             "juiz" -> {
@@ -4634,6 +4665,31 @@ class Engine private constructor(private val app: Context) {
             done += (s0 + 0x14).toString(16)
         }
         return done to strs.size
+    }
+
+    // ---- 📜 scripts Lua do GameGuardian (GgLua): chamados na thread do script ----
+
+    fun luaSend(cmd: String): Pair<String, List<String>> =
+        kotlinx.coroutines.runBlocking { call { d -> d.send(cmd, quiet = true).let { it.status to it.lines } } }
+
+    fun luaItems(): List<LuaItem> = Session.saved.toList().filter { it.pid == currentPid }
+        .map { LuaItem(it.addr.toLong(16), GgLua.flagsOf(it.type), it.name, it.frozen, it.value) }
+
+    /** gg.addListItems: novo vira salvo (com nome, congelado se pedir); o que já está salvo só congela ou solta. */
+    fun luaAdd(items: List<LuaItem>) {
+        val now = items.map { i -> i to (i.value.ifEmpty { runCatching { luaSend("read ${i.address.toString(16)} ${GgLua.typeOf(i.flags)}").first }.getOrDefault("0") }) }
+        kotlinx.coroutines.runBlocking(Dispatchers.Main) {
+            now.forEach { (i, v) ->
+                val hex = i.address.toString(16)
+                val old = Session.saved.firstOrNull { it.addr == hex && it.pid == currentPid }
+                if (old == null) addSaved(listOf(Hit(hex, GgLua.typeOf(i.flags), "A", v)), frozen = i.freeze, name = i.name.ifBlank { "script" })
+                else if (old.frozen != i.freeze) setFrozen(listOf(old), i.freeze)
+            }
+        }
+    }
+
+    fun luaRemove(items: List<LuaItem>) = kotlinx.coroutines.runBlocking(Dispatchers.Main) {
+        removeSaved(Session.saved.filter { s -> s.pid == currentPid && items.any { it.address.toString(16) == s.addr } })
     }
 
     /** 🧠 Quero mudar (Ferramentas): o juiz no jogo escolhido; o jogo vai para a frente e reabre pelo Tinker. */

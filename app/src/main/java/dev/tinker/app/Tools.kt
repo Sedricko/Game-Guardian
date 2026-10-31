@@ -43,6 +43,7 @@ internal fun Toolbox(engine: Engine, enabled: Boolean, run: (suspend () -> Strin
     val tools = buildList {
         add("facil" to "🧭 Fácil")
         add("juiz" to "🧠 Quero mudar")
+        add("scripts" to "📜 Scripts")
         add("velocidade" to "⏩ Velocidade")
         add("cronometros" to "⏱️ Cronômetros")
         add("loja" to "🛒 Loja")
@@ -57,6 +58,7 @@ internal fun Toolbox(engine: Engine, enabled: Boolean, run: (suspend () -> Strin
         when (tool) {
             "facil" -> EasyMode(engine, enabled, run)
             "juiz" -> WantChange(engine, enabled, run)
+            "scripts" -> ScriptsTool(engine, enabled)
             "velocidade" -> GameSpeed(engine, enabled, run)
             "cronometros" -> Timers(engine, enabled, run)
             "loja" -> ShopPrices(engine, enabled, run)

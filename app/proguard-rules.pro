@@ -9,3 +9,6 @@
 # O vigia da tela registra onde ela travou: com os nomes e as linhas do Tinker, dá para achar o código culpado
 -keepnames class dev.tinker.** { *; }
 -keepattributes SourceFile,LineNumberTable
+# 📜 Scripts Lua (LuaJ): as bibliotecas da linguagem são achadas pelo nome da classe
+-keep class org.luaj.vm2.** { *; }
+-dontwarn org.luaj.vm2.**
