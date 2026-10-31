@@ -1575,7 +1575,8 @@ class Engine private constructor(private val app: Context) {
                 // "Item 1" (sem nome na tela) virava o número 1 do próprio rótulo: vai pelo valor mostrado, como o 🎯 da lista
                 val asked = w[1].replace('_', ' ').let { a -> Regex("""^(Item \d+)(=.*)?$""").find(a)?.let { m ->
                     Session.items.firstOrNull { it.label == m.groupValues[1] }?.value?.let { it + m.groupValues[2] } } ?: a }
-                autoFindStart(asked, w.getOrElse(2) { "i32" }.let { if (it == "auto") emptySet() else setOf(it) }, waitMs = 2500)
+                // sem tipo: todos (no Orecraft o minério é Vírgula/f32; só Dword nunca achava, provado pelo usuário no Unit em 31/10)
+                autoFindStart(asked, w.getOrElse(2) { "auto" }.let { if (it == "auto") emptySet() else setOf(it) }, waitMs = 2500)
                 val end = System.currentTimeMillis() + 300_000  // disfarçado e calculado levam mais: testa ×1, ×10, cifrado, pela mudança… até um segurar
                 while (autoJob?.isActive == true && System.currentTimeMillis() < end) delay(500)
                 delay(300)  // a última frase chega pela thread da tela
