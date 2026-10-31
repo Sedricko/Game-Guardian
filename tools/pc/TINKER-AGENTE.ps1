@@ -141,7 +141,16 @@ function Post-Sheet($motivo, $problemas, $texto, $versao, $jogo = "jogo de teste
             Invoke-WebRequest $url -Method Post -Body ([IO.File]::ReadAllBytes($f.FullName)) -ContentType "application/json; charset=utf-8" -UseBasicParsing | Out-Null
             Remove-Item $f.FullName
             Say "resultado enviado para a planilha"
-        } catch { Say "sem internet para a planilha: guardei e mando depois ($($_.Exception.Message))"; break }
+        } catch {
+            # so guarda para mandar de novo se nem chegou na internet; erro depois de enviar (a planilha demorou a responder)
+            # quase sempre ja gravou a linha: mandar de novo duplicava (31/10: cada linha e cada foto 2x na planilha)
+            $st = "$($_.Exception.Status)"
+            if ($st -in @("ConnectFailure", "NameResolutionFailure", "ProxyNameResolutionFailure", "SendFailure") -or $_.Exception.Message -match "resolv|connect|conectar") {
+                Say "sem internet para a planilha: guardei e mando depois ($($_.Exception.Message))"; break
+            }
+            Remove-Item $f.FullName -ErrorAction SilentlyContinue
+            Say "a planilha demorou a responder ($st); a linha ja deve estar la, nao mando de novo"
+        }
     }
 }
 
