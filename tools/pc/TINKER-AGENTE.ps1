@@ -1491,6 +1491,14 @@ function Run-RealGame($dg) {
                 if (-not $n) { continue }
                 Start-Sleep 3
                 $tela = (Items | Where-Object nome -eq $i.nome | Select-Object -First 1).v
+                # "ficou" so vale lido de novo com o jogo na frente depois de 5 s: em 31/10 a 1a leitura deu 999 e a foto
+                # logo depois mostrava 116 (o jogo repos o numero)
+                if ($tela -eq $novo) {
+                    try { Show-Game $dg } catch { }
+                    Start-Sleep 5
+                    $tela = (Items | Where-Object nome -eq $i.nome | Select-Object -First 1).v
+                    if ($tela -ne $novo) { Say "  2f: a tela mostrou $novo e voltou para $tela (nao ficou)" }
+                }
                 if ($tela -eq $novo) {
                     try {
                         if ($fotoAntes) { Post-Sheet "agente PC: foto do jogo ANTES (texto JSON $($i.v))" "" ("jpeg base64`n" + $fotoAntes) $v "$nome (emulador)" }
