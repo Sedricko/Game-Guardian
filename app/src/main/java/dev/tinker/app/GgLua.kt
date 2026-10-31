@@ -74,6 +74,11 @@ class GgLua(private val host: GgHost) {
         scriptName = name
         return try {
             globals().load(code, "@$name").call()
+            // o GG deixa o gg.loadResults na tela de resultados; no Tinker eles vão para Salvos (lá dá para editar e congelar)
+            loaded?.takeIf { it.size in 1..100 }?.let { l ->
+                val have = host.listItems().map { it.address }.toSet()
+                l.filter { it.first !in have }.takeIf { it.isNotEmpty() }?.let { n -> host.addItems(n.map { LuaItem(it.first, it.second, "resultado de $name", false, "") }) }
+            }
             null
         } catch (e: LuaStop) {
             null
@@ -199,9 +204,8 @@ class GgLua(private val host: GgHost) {
             cleared = false
             if (';' in text) {
                 val dist = text.substringAfter("::", text.substringAfter(':', "")).trim().ifEmpty { "512" }
-                val values = text.substringBefore(':').split(';').map { it.trim().trimEnd('D', 'F', 'Q', 'E', 'W', 'B', 'd', 'f', 'q', 'e', 'w', 'b') }
-                host.send("group $types ${values.joinToString(";")} $dist")
-            } else host.send("search $types ${text.trimEnd('D', 'F', 'Q', 'E', 'W', 'B', 'd', 'f', 'q', 'e', 'w', 'b')}")
+                host.send("group $types ${text.substringBefore(':').split(';').joinToString(";") { ggNumber(it) }} $dist")
+            } else host.send("search $types ${ggNumber(text)}")
             LuaValue.TRUE
         })
         gg.set("refineNumber", fn { a ->
@@ -210,9 +214,9 @@ class GgLua(private val host: GgHost) {
             val l = loaded
             if (l != null) {
                 val now = readValues(l.map { Pair(it.first, it.second) })
-                val want = text.toDoubleOrNull()
+                val want = ggNumber(text).toDoubleOrNull()
                 loaded = l.filterIndexed { i, _ -> now[i]?.toDoubleOrNull() == want }
-            } else if (!cleared) host.send("refine $text")
+            } else if (!cleared) host.send("refine ${ggNumber(text)}")
             LuaValue.TRUE
         })
         gg.set("getResultsCount", fn {
@@ -386,4 +390,16 @@ class GgLua(private val host: GgHost) {
         fun flagsOf(type: String): Int = FLAG_TYPE.entries.firstOrNull { it.value == type.substringBefore('@').removeSuffix("x2") }?.key
             ?: FLAG_TYPE.entries.firstOrNull { it.value == type.substringBefore('@').removePrefix("x").removeSuffix("x2") }?.key ?: TYPE_DWORD
     }
+}
+
+/** Número escrito como no GG para o daemon: "3F7FFFFEh" (hexa) vira decimal (Dword acima de 7FFFFFFF vira negativo, como
+ * o GG mostra); "100D" ou "1.5F" perde a letra do tipo. */
+internal fun ggNumber(text: String): String {
+    val s = text.trim()
+    Regex("^(-?)([0-9A-Fa-f]{1,16})[hH][A-Za-z]?$").matchEntire(s)?.let { m ->
+        val v = m.groupValues[2].toULong(16).toLong()
+        val n = if (m.groupValues[2].length <= 8 && v >= 0x8000_0000L) v - 0x1_0000_0000L else v
+        return (if (m.groupValues[1] == "-") -n else n).toString()
+    }
+    return Regex("^(-?[0-9.~]+)[A-Za-z]$").matchEntire(s)?.groupValues?.get(1) ?: s
 }

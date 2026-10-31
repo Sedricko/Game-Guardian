@@ -53,7 +53,7 @@ internal object Scripts {
     fun stop() { lua?.stopped = true; answer(null) }
     fun openMenu() { lua?.menuTap = true }
 
-    private fun say(line: String) = main.post { log += line; while (log.size > 200) log.removeAt(0) }
+    private fun say(line: String) { main.post { log += line; while (log.size > 200) log.removeAt(0) } }
 
     fun start(engine: Engine, ctx: Context, file: File) {
         if (running != null) return
@@ -85,7 +85,7 @@ internal object Scripts {
                     code to ((if (code < 400) c.inputStream else c.errorStream)?.bufferedReader()?.readText().orEmpty())
                 } finally { c.disconnect() }
             }
-            override fun log(line: String) = say(line)
+            override fun log(line: String) { say(line) }
         }
         val l = GgLua(host)
         lua = l

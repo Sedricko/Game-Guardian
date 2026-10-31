@@ -32,13 +32,21 @@ private class FakeGame(val dir: File) : GgHost {
     override fun send(cmd: String): Pair<String, List<String>> {
         sent += cmd
         val w = cmd.split(' ')
-        fun line(a: Long) = "${a.toString(16)} i32 A ${mem[a] ?: 0}"
+        fun read(a: Long, t: String): String {
+            val lo = mem[a] ?: 0
+            return when (t) {
+                "f32" -> java.lang.Float.intBitsToFloat(lo.toInt()).toString()
+                "i64" -> ((lo and 0xffffffffL) or ((mem[a + 4] ?: 0) shl 32)).toString()
+                else -> lo.toString()
+            }
+        }
+        fun line(a: Long) = "${a.toString(16)} i32 A ${read(a, "i32")}"
         return when (w[0]) {
             "list" -> results.size.toString() to results.take(w[1].toInt()).map(::line)
             "search" -> { results = mem.filterValues { it == w[2].toLong() }.keys.sorted(); results.size.toString() to emptyList() }
             "refine" -> { results = results.filter { mem[it] == w[1].toLong() }; results.size.toString() to emptyList() }
-            "read" -> (mem[w[1].toLong(16)] ?: 0).toString() to emptyList()
-            "dump" -> "" to (0 until w[3].toInt()).map { i -> w[1].toLong(16) + 4 * i }.map { "${it.toString(16)} ${mem[it] ?: 0}" }
+            "read" -> read(w[1].toLong(16), w[2]) to emptyList()
+            "dump" -> "" to (0 until w[3].toInt()).map { i -> w[1].toLong(16) + (if (w[2] == "i64") 8 else 4) * i }.map { "${it.toString(16)} ${read(it, w[2])}" }
             "write" -> { mem[w[1].toLong(16)] = w[3].toLong(); "" to emptyList() }
             "ranges" -> "" to emptyList()
             else -> throw java.io.IOException("comando desconhecido: $cmd")
@@ -116,5 +124,64 @@ class GgLuaTest {
         assertNull(g.asked.joinToString("\n"), GgLua(g).run(code, "assinatura-auto.lua"))
         assertEquals(g.asked.joinToString("\n"), listOf("Joias" to at), g.saved.map { it.name to it.address })
         assertTrue(g.asked.last(), g.asked.last().contains("valor achado"))
+    }
+
+    @Test
+    fun numeroDoJeitoDoGg() {
+        assertEquals("1065353214", ggNumber("3F7FFFFEh"))
+        assertEquals("-1", ggNumber("FFFFFFFFh"))
+        assertEquals("100", ggNumber("100D"))
+        assertEquals("1.5", ggNumber("1.5F"))
+        assertEquals("10~20", ggNumber("10~20"))
+    }
+
+    /** Script colado pelo usuário (31/10): o SpeedHackFinder, com goto, número em hexa e loadResults. */
+    @Test
+    fun scriptDeVelocidadeComGotoEHexa() {
+        val g = game()
+        g.mem.clear()
+        val a = 0x7200_0000L
+        g.mem[a] = 1065353214  // 0.99999994 do relógio do Unity
+        g.mem[a + 20] = 500; g.mem[a + 24] = 0   // tempo 1 (Qword pequeno)
+        g.mem[a + 28] = 600; g.mem[a + 32] = 0   // tempo 2, logo depois
+        g.mem[a + 20 + 4 * 7] = java.lang.Float.floatToIntBits(1f).toLong()  // timeScale = 1.0
+        val code = """
+            REG=1
+            ::XREGION::
+            if REG==1 then gg.setRanges(gg.REGION_ANONYMOUS) end
+            if REG==2 then gg.setRanges(gg.REGION_C_ALLOC) end
+            gg.clearResults() t1={} t2={} TRY=1 SPEED={}
+            gg.searchNumber("3F7FFFFEh",4)
+            if gg.getResultsCount()==0 and REG<2 then REG=REG+1 goto XREGION return end
+            local res=gg.getResults(gg.getResultsCount())
+            gg.clearResults() O1=20 O2=28
+            ::TRYAGAIN::
+            for i, v in ipairs(res) do
+              t1[i]={} t2[i]={}
+              t1[i].address=v.address+O1 t1[i].flags=32
+              t2[i].address=v.address+O2 t2[i].flags=32
+            end
+            t3={} x=0
+            t1=gg.getValues(t1) gg.sleep(150) t2=gg.getValues(t2)
+            for i, v in ipairs(t1) do
+              if #(tostring(v.value))<7 and v.value>100 and t2[i].value<v.value+250 and t2[i].value>v.value then
+                x=x+1 t3[x]={} t3[x].address=v.address t3[x].flags=16
+              end
+            end
+            if x==0 and TRY==1 then O1=16 O2=24 TRY=TRY+1 goto TRYAGAIN return end
+            x=0
+            for z=1,35 do
+              for i, v in ipairs(t3) do v.address=v.address+4 v.flags=16 end
+              t3=gg.getValues(t3)
+              for i, v in ipairs(t3) do
+                if v.value==1 then x=x+1 SPEED[x]={} SPEED[x].address=v.address SPEED[x].flags=16 end
+              end
+            end
+            if x==0 then gg.alert("No Speed Value Found","EXIT",nil, xTAGx) gg.setVisible(true) os.exit() return end
+            gg.loadResults(SPEED)
+        """.trimIndent()
+        assertNull(g.asked.joinToString("\n"), GgLua(g).run(code, "velocidade.lua"))
+        assertEquals(listOf(a + 48), g.saved.map { it.address })
+        assertEquals(GgLua.TYPE_FLAGS["TYPE_FLOAT"], g.saved[0].flags)
     }
 }
