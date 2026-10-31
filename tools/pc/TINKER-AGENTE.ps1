@@ -79,6 +79,8 @@ function Update-Self {
             if ($errs) { Say "versao nova do agente com erro (linha $($errs[0].Extent.StartLineNumber): $($errs[0].Message)); continuo com a atual"; return }
             [IO.File]::WriteAllText($self, ((Norm $new) -replace "`n", "`r`n"), (New-Object Text.UTF8Encoding $true))
             Say "agente atualizado, reiniciando..."
+            # solta a trava de "um agente so" para a versao nova conseguir pegar
+            if ($script:trava) { try { $script:trava.ReleaseMutex(); $script:trava.Dispose() } catch { }; $script:trava = $null }
             if ($Jogo) { & powershell -NoProfile -ExecutionPolicy Bypass -File $self -Jogo $Jogo } else { & powershell -NoProfile -ExecutionPolicy Bypass -File $self }
             exit
         }
@@ -1524,6 +1526,12 @@ function Run-RealGame($dg) {
             $linhas = ($script:last -split "`n")
             $r = "$($linhas[0]) | " + (($linhas | Where-Object { $_ -like "rota *" -or $_ -like "nota *" }) -join " / ")
             if (-not $n) { throw $r }
+            # o juiz diz ok, mas so vale se a tela mostrar o numero novo 5 s depois com o jogo na frente (31/10: disse ok e a
+            # foto DEPOIS era a tela preta do jogo fechado)
+            try { Show-Game $dg } catch { }
+            Start-Sleep 5
+            $tela = (Items | Where-Object nome -eq $i.nome | Select-Object -First 1).v
+            if ($tela -ne $novo) { throw "o juiz disse ok, mas a tela mostra '$tela' e nao $novo | $r" }
             try {
                 if ($fotoAntes) { Post-Sheet "agente PC: foto do jogo ANTES (juiz: $($i.nome) = $($i.v))" "" ("jpeg base64`n" + $fotoAntes) $v "$nome (emulador)" }
                 Show-Game $dg
@@ -1690,6 +1698,11 @@ function Run-RealGame($dg) {
 # jogo de verdade: fica ligado como o agente de sempre; a cada versao nova do Tinker roda uma rodada sozinho no jogo
 if ($Jogo) {
     $doneJ = "$env:USERPROFILE\tinker-agente-testado-$Jogo.txt"
+    # um agente so por jogo: em 31/10 dois rodavam juntos (o do atalho e o do painel), cada linha ia 2x para a planilha e um
+    # mexia no jogo no meio do teste do outro (buscas com 0, jogo fechado, tela preta)
+    $novo = $false
+    $script:trava = New-Object System.Threading.Mutex($true, "Local\TinkerAgente-$Jogo", [ref]$novo)
+    if (-not $novo) { Say "ja tem um agente do $($realGames[$Jogo].nome) rodando neste PC: fecho esta janela para nao brigarem pelo jogo"; Start-Sleep 8; exit }
     Say "agente do $($realGames[$Jogo].nome) ligado: a cada versao nova do Tinker e sem parar, uma rodada atras da outra, faco as rodadas sozinho. Deixe esta janela aberta; Ctrl+C para sair."
     while ($true) {
         Update-Self
