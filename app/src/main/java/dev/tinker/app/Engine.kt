@@ -1562,7 +1562,7 @@ class Engine private constructor(private val app: Context) {
             "fixar" -> clearMissionPatches().let { nativeFunctions(w[1]) }.second.firstOrNull { it.name == w[1] }?.let { patchNative(it, w.getOrElse(2) { "" }, apply = true, prefix = "missão ") }
                 ?: error("não achei a função ${w[1]}")
             "velocidade" -> if (arg.isEmpty()) return findGameSpeed().also { speedAddrs = it }.let { "ok ${it.size} $speedNote\ncount ${it.size}\n" + it.joinToString("\n") }
-                else setGameSpeed(speedAddrs, arg)
+                else return "ok " + setGameSpeed(speedAddrs, arg) + "\ncount ${speedAddrs.size}"  // sem a lista da última busca (eram os relógios, não a velocidade)
             // 🎯 Achar sozinho no Jogo de Teste: põe o jogo na frente, lê a tela e refina sozinho (até 2 minutos)
             "sozinho" -> {
                 soloRan = true
@@ -4317,6 +4317,7 @@ class Engine private constructor(private val app: Context) {
         // (lugar do 1.0, os dois tempos do mesmo relógio)
         val cands = call { d ->
             val n = d.send("search i32 1065353214").status.toLongOrNull() ?: 0
+            speedClocks = n
             if (n == 0L || n > 50_000) return@call emptyList()
             val out = LinkedHashMap<String, List<Long>>()
             sample.clear()
@@ -4343,7 +4344,7 @@ class Engine private constructor(private val app: Context) {
             Diag.add("Velocidade: nenhum relógio com os dois tempos; amostra dos Dwords depois do 0.99999994: ${sample.joinToString(" | ")}")
             // o jeito do Tinker não achou: roda o SpeedHackFinder do GG (o script que achou no celular do usuário), tal qual
             val gg = withContext(Dispatchers.IO) { speedByGgScript() }
-            speedNote = if (gg.isEmpty()) "Nem o meu jeito nem o script do GG (SpeedHackFinder) acharam: abra uma fase com o jogo andando e tente de novo."
+            speedNote = if (gg.isEmpty()) "Nem o meu jeito nem o script do GG (SpeedHackFinder) acharam. $speedClocks relógios; o que há depois de 2 deles: ${sample.take(2).joinToString(" | ")}"
                 else "Achado pelo script do GG (SpeedHackFinder), sem a conferência em 2x."
             Diag.add("Velocidade pelo script do GG: ${gg.size} lugares (${gg.joinToString { "0x$it" }})")
             return gg
@@ -4390,7 +4391,8 @@ class Engine private constructor(private val app: Context) {
     }
 
     var speedNote = ""
-    private val sample = mutableListOf<String>()  // o que havia depois dos relógios quando nenhum serviu (para achar o formato)
+    private val sample = mutableListOf<String>()
+    private var speedClocks = 0L  // o que havia depois dos relógios quando nenhum serviu (para achar o formato)
 
     /**
      * ⏱️ Cronômetros (construção, espera, energia que volta): jogos offline guardam a hora de terminar como número de
