@@ -73,7 +73,8 @@ class GgLua(private val host: GgHost) {
     fun run(code: String, name: String): String? {
         scriptName = name
         return try {
-            globals().load(code, "@$name").call()
+            val g = globals()
+            g.loader.load(noJumpClose(g.compilePrototype(java.io.StringReader(code), "@$name")), "@$name", g).call()
             // o GG deixa o gg.loadResults na tela de resultados; no Tinker eles vão para Salvos (lá dá para editar e congelar)
             loaded?.takeIf { it.size in 1..100 }?.let { l ->
                 val have = host.listItems().map { it.address }.toSet()
@@ -90,6 +91,17 @@ class GgLua(private val host: GgHost) {
     }
 
     private fun check() { if (stopped) throw LuaStop() }
+
+    /**
+     * LuaJ 3.0.1 quebra (NullPointerException) num goto para trás que passa por um local ("goto XREGION" do SpeedHackFinder):
+     * o JMP pede para fechar upvalues e a função sem funções internas não tem a lista deles. Sem funções internas não há
+     * upvalue para fechar, então tirar esse pedido não muda nada no script.
+     */
+    private fun noJumpClose(p: org.luaj.vm2.Prototype): org.luaj.vm2.Prototype {
+        if (p.p.isEmpty()) p.code.forEachIndexed { i, c -> if (c and 0x3f == org.luaj.vm2.Lua.OP_JMP) p.code[i] = c and (0xff shl 6).inv() }
+        p.p.forEach(::noJumpClose)
+        return p
+    }
 
     private fun globals(): Globals {
         val g = Globals()

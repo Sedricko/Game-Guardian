@@ -4245,9 +4245,15 @@ class Engine private constructor(private val app: Context) {
     suspend fun saveFiles(): List<Pair<String, Long>> = call { d ->
         d.send("savefiles ${gamePkg()}", quiet = true).lines.filter { it.startsWith("file ") }.map { it.split(' ') }.filter { it.size == 3 }
             .map { it[1] to (it[2].toLongOrNull() ?: 0) }
+            .filterNot { (f, _) -> isSdkFile(f) }
             // os que dá para editar primeiro: preferências (PlayerPrefs do Unity) e JSON
             .sortedBy { (f, _) -> if (f.endsWith(".xml") || f.endsWith(".json")) 0 else 1 }
     }
+
+    /** Arquivos das bibliotecas do app (estatística, anúncios, tarefas do Android), não o progresso do jogo: o juiz mexia neles (31/10, appmetrica_vital.dat). */
+    private fun isSdkFile(f: String) = f.startsWith("no_backup/") ||
+        listOf("appmetrica", "androidx.work", "firebase", "crashlytics", "com.google.android.gms", "facebook", "applovin", "unity3d.ads", "ironsource", "appsflyer")
+            .any { f.contains(it, ignoreCase = true) }
 
     /** O texto do arquivo, ou erro se for binário/cifrado (aí o editor não ajuda). */
     suspend fun readSave(rel: String): String {

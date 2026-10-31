@@ -199,4 +199,20 @@ class GgLuaTest {
         assertNull(err)
         assertEquals(3L, g.mem[0x7010L])
     }
+
+    /** O SpeedHackFinder volta com "goto XREGION" por cima de um local: o LuaJ 3.0.1 dava NullPointerException (31/10, celular). */
+    @Test
+    fun gotoParaTrasPorCimaDeLocal() {
+        val g = game()
+        val code = """
+            REG=1
+            ::XREGION::
+            local res={1}
+            for i, v in ipairs(res) do x=v end
+            if REG<4 then REG=REG+1 goto XREGION return end
+            print("REG " .. REG)
+        """.trimIndent()
+        assertNull(GgLua(g).run(code, "goto.lua"))
+        assertEquals(listOf("print: REG 4"), g.asked)
+    }
 }
