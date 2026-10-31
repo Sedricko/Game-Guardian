@@ -1355,6 +1355,8 @@ function Run-RealGame($dg) {
         # 1. lista de itens: os numeros da tela e o mapa do jogo (Unity), com endereco quando sobrou 1
         T "1 lista de itens (tela + mapa do jogo)" {
             $script:it = Items
+            # vazia logo depois de o Tinker reiniciar (31/10 13:49): espera o jogo assentar e le de novo antes de desistir
+            if (-not @($script:it).Count) { Say "  lista vazia: espero 20 s e leio de novo"; try { Show-Game $dg } catch { }; Start-Sleep 20; $script:it = Items }
             $com = @($script:it | Where-Object { $_.addr -ne "-" }).Count
             if (-not $script:it.Count) { throw "nenhum item" }
             $antes = Get-Content "$env:USERPROFILE\tinker-mantidos-$dg.txt" -Tail 3 -ErrorAction SilentlyContinue
