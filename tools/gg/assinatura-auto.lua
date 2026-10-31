@@ -142,10 +142,55 @@ end
 -- separa pelo valor que a tela mostra agora
 -- a posição do certo entre os parecidos (em ordem de endereço) costuma ser a mesma a cada abertura (são listas do jogo):
 -- guardada na 1ª vez que você diz o valor, depois o script escolhe sozinho
+-- o que diferencia o certo dos parecidos (ex.: o "id" da barra): um campo, até 512 bytes em volta, em que o certo tem um
+-- valor que nenhum dos outros tem. Achado na vez em que você diz o valor; depois a escolha é sozinha
+local function distarq(nome) return gg.EXT_STORAGE .. "/tinker-dif-" .. JOGO .. "-" .. nome:gsub("[^%w]", "_") .. ".txt" end
+local function lerLonge(a)
+  local t = {}
+  for d = -512, 512, 4 do t[#t + 1] = { address = a + d, flags = gg.TYPE_DWORD } end
+  local out = {}
+  for i, v in ipairs(gg.getValues(t)) do out[-512 + (i - 1) * 4] = v.value end
+  return out
+end
+local function aprenderDiferenca(nome, certo, todos)
+  local meu, outros = lerLonge(certo), {}
+  for _, a in ipairs(todos) do if a.address ~= certo then outros[#outros + 1] = lerLonge(a.address) end end
+  local achou = {}
+  for d = -512, 512, 4 do
+    local v = meu[d]
+    if d ~= 0 and v ~= 0 and not ponteiro(v) then
+      local unico = true
+      for _, o in ipairs(outros) do if o[d] == v then unico = false break end end
+      if unico then achou[#achou + 1] = { d = d, v = v } end
+    end
+  end
+  table.sort(achou, function(x, y) return math.abs(x.d) < math.abs(y.d) end)  -- os mais perto do valor
+  local f = io.open(distarq(nome), "w")
+  for i = 1, math.min(#achou, 6) do f:write(string.format("%d %d\n", achou[i].d, achou[i].v)) end
+  f:close()
+end
+local function porDiferenca(nome, achados)
+  local f = io.open(distarq(nome), "r"); if not f then return nil end
+  local dif = {}
+  for l in f:lines() do local d, v = l:match("^(-?%d+) (-?%d+)$"); if d then dif[#dif + 1] = { tonumber(d), tonumber(v) } end end
+  f:close()
+  if #dif == 0 then return nil end
+  local melhor, mp = nil, 0
+  for _, a in ipairs(achados) do
+    local t = {}
+    for i, x in ipairs(dif) do t[i] = { address = a.address + x[1], flags = gg.TYPE_DWORD } end
+    local pts = 0
+    for i, v in ipairs(gg.getValues(t)) do if v.value == dif[i][2] then pts = pts + 1 end end
+    if pts > mp then melhor, mp = a, pts end
+  end
+  return mp * 2 > #dif and melhor or nil  -- mais da metade dos campos que diferenciam bateram
+end
+
 local function rankarq(nome) return gg.EXT_STORAGE .. "/tinker-rank-" .. JOGO .. "-" .. nome:gsub("[^%w]", "_") .. ".txt" end
 local function desempatar(nome, tipo, achados, perguntar)
   if #achados <= 1 then return achados end
   table.sort(achados, function(x, y) return x.address < y.address end)
+  if not perguntar then local d = porDiferenca(nome, achados); if d then return { d } end end
   local f = io.open(rankarq(nome), "r")
   if f and not perguntar then
     local pos, total = f:read("*n"), f:read("*n"); f:close()
@@ -158,7 +203,10 @@ local function desempatar(nome, tipo, achados, perguntar)
   for i, a in ipairs(achados) do vals[i] = { address = a.address, flags = tipo } end
   local pos
   for i, v in ipairs(gg.getValues(vals)) do if math.abs(v.value - want) < 0.5 then out[#out + 1] = achados[i]; pos = i end end
-  if #out == 1 then local w = io.open(rankarq(nome), "w"); w:write(pos, " ", #achados); w:close() end
+  if #out == 1 then
+    local w = io.open(rankarq(nome), "w"); w:write(pos, " ", #achados); w:close()
+    aprenderDiferenca(nome, out[1].address, achados)
+  end
   return out
 end
 
