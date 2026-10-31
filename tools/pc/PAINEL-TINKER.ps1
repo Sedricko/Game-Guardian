@@ -28,13 +28,52 @@ $raw = "https://raw.githubusercontent.com/Sedricko/Game-Guardian/ccr-92c99132-2n
 $script:job = $null
 $script:ultimo = ""
 
-function Serial {
+# o painel responde uma coisa por vez: o que e lento (adb, lista de processos do Windows) fica guardado uns segundos
+$script:cache = @{}
+function Lembrar($k, $secs, [scriptblock]$f) {
+    $c = $script:cache[$k]
+    if ($c -and ((Get-Date) - $c.t).TotalSeconds -lt $secs) { return $c.v }
+    $v = & $f; $script:cache[$k] = @{ t = Get-Date; v = $v }; $v
+}
+function Serial { Lembrar "serial" 10 { SerialAgora } }
+function SerialAgora {
     $ds = @((& $adb devices) | Select-String "^(emulator-\d+)\s+device" | ForEach-Object { $_.Matches.Groups[1].Value })
     foreach ($d in $ds) { if (((& $adb -s $d emu avd name) | Select-Object -First 1) -like "*Dysmantle_Play*") { return $d } }
     $ds | Select-Object -First 1
 }
 
-function Agentes { @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | Where-Object { $_.CommandLine -like "*TINKER-AGENTE.ps1*" }) }
+function Agentes { @(Lembrar "agentes" 5 { @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | Where-Object { $_.CommandLine -like "*TINKER-AGENTE.ps1*" }) }) }
+
+# tela ao vivo: um job tira prints sem parar (~2 por segundo) enquanto alguem olha; o painel so entrega o ultimo
+$telaF = "$env:TEMP\painel-tela.jpg"; $olhoF = "$env:TEMP\painel-tela-olho.txt"
+$telaJob = {
+    param($adb, $ser, $telaF, $olhoF)
+    Add-Type -AssemblyName System.Drawing
+    $codec = [Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object MimeType -eq "image/jpeg"
+    $p = New-Object Drawing.Imaging.EncoderParameters 1
+    $p.Param[0] = New-Object Drawing.Imaging.EncoderParameter ([Drawing.Imaging.Encoder]::Quality, [long]55)
+    while (((Get-Date) - (Get-Item $olhoF).LastWriteTime).TotalSeconds -lt 15) {  # ninguem olhando ha 15 s: para
+        $png = "$telaF.png"
+        cmd /c "`"$adb`" -s $ser exec-out screencap -p > `"$png`""
+        try {
+            $img = [Drawing.Image]::FromFile($png)
+            $w = $(if ($img.Width -gt $img.Height) { 900 } else { 420 }); $h = [int]($img.Height * $w / $img.Width)
+            $bmp = New-Object Drawing.Bitmap $img, $w, $h
+            $bmp.Save("$telaF.tmp", $codec, $p); $bmp.Dispose(); $img.Dispose()
+            Move-Item -Force "$telaF.tmp" $telaF
+        } catch { Start-Sleep -Milliseconds 500 }
+    }
+}
+function Tela {
+    Set-Content $olhoF "olhando"
+    if (-not $script:telaJ -or $script:telaJ.State -ne "Running") {
+        if ($script:telaJ) { Remove-Job $script:telaJ -Force -ErrorAction SilentlyContinue }
+        $ser = Serial
+        if ($ser) { $script:telaJ = Start-Job -ScriptBlock $telaJob -ArgumentList $adb, $ser, $telaF, $olhoF }
+    }
+    if (Test-Path $telaF) { try { return [IO.File]::ReadAllBytes($telaF) } catch { } }
+    $null
+}
 
 function Foto($ser) {
     $png = "$env:TEMP\painel-tinker.png"; $jpg = "$env:TEMP\painel-tinker.jpg"
@@ -242,7 +281,8 @@ function Planilha($motivo, $texto) {
     "enviado para a planilha: o Claude le na proxima passada"
 }
 
-function Estado {
+function Estado { Lembrar "estado" 3 { EstadoAgora } }
+function EstadoAgora {
     $ser = Serial
     $ag = Agentes
     $rod = $null
@@ -374,6 +414,11 @@ function Vigiar {
     try { [void](Acao @{ acao = "ligar" }); $script:vigia = "religuei o bot $(Get-Date -Format 'HH:mm:ss')" } catch { $script:vigia = "nao consegui ligar o bot: $($_.Exception.Message)" }
 }
 
+function SendBytes($res, $type, $b) {
+    $res.StatusCode = 200; $res.ContentType = $type; $res.ContentLength64 = $b.Length
+    $res.Headers["Cache-Control"] = "no-store"; $res.OutputStream.Write($b, 0, $b.Length); $res.OutputStream.Close()
+}
+
 function Send($res, $code, $type, $text) {
     $b = [Text.Encoding]::UTF8.GetBytes($text)
     $res.StatusCode = $code; $res.ContentType = "$type; charset=utf-8"; $res.ContentLength64 = $b.Length
@@ -412,6 +457,7 @@ while ($h.IsListening -and -not $script:sair -and -not $script:reiniciar) {
         if ($req.HasEntityBody) { $r = New-Object IO.StreamReader($req.InputStream, [Text.Encoding]::UTF8); $body = $r.ReadToEnd(); $r.Close() }
         switch ($req.Url.AbsolutePath) {
             "/" { Send $res 200 "text/html" ((Get-Content "$dir\painel-tinker.html" -Raw -Encoding UTF8).Replace("__TOKEN__", $token)) }
+            "/api/tela" { $b = Tela; if ($b) { SendBytes $res "image/jpeg" $b } else { Send $res 404 "text/plain" "sem tela ainda" } }
             "/api/estado" { Send $res 200 "application/json" ((Estado) | ConvertTo-Json -Depth 6 -Compress) }
             "/api/log" {
                 $n = [int]("0" + $req.QueryString["n"]) + 1

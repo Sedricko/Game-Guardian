@@ -139,7 +139,7 @@
         <h2>Tela do emulador</h2>
         <img class="shot" id="shot" alt="tela do emulador">
         <div class="btns">
-          <button class="chip on" id="bAuto" onclick="autoFoto = !autoFoto; this.classList.toggle('on', autoFoto)">atualizar sozinho (5 s)</button>
+          <button class="chip on" id="bAuto" onclick="autoFoto = !autoFoto; this.classList.toggle('on', autoFoto)">ao vivo</button>
           <button class="chip" onclick="foto()">foto agora</button>
           <button class="chip" onclick="acao('reabrir')">reabrir o jogo</button>
         </div>
@@ -453,15 +453,25 @@ document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
   document.querySelectorAll("section").forEach(s => s.classList.toggle("hide", s.dataset.s !== pagina));
   $("titulo").textContent = b.textContent.replace(/^\S+\s/, "");
   if (pagina === "logs") carregaLog();
-  if (pagina === "vivo") foto();
+  if (pagina === "vivo" && !autoFoto) foto();
 });
 $("filtros").innerHTML = FILTROS.map(f => `<button class="chip" onclick="filtroChip = filtroChip === '${f}' ? '' : '${f}'; document.querySelectorAll('#filtros .chip').forEach(c => c.classList.toggle('on', c.textContent === filtroChip)); mostraLog()">${esc(f)}</button>`).join("");
 montaCenarios();
 $("regrasFixas").innerHTML = REGRAS.map(r => `<div class="t" style="cursor:default"><span>🔒</span><span>${esc(r)}</span><span></span></div>`).join("");
 estado();
-setInterval(estado, 4000);
-setInterval(() => { if (pagina === "logs" && !$("filtro").value) carregaLog(); }, 5000);
-setInterval(() => { if (pagina === "vivo" && autoFoto) foto(); }, 5000);
+// estado: um pedido de cada vez (se o painel demorar, não empilha) e só com a janela à vista
+let ocupado = false;
+setInterval(async () => { if (ocupado || document.hidden) return; ocupado = true; try { await estado(); } finally { ocupado = false; } }, 4000);
+setInterval(() => { if (pagina === "logs" && !$("filtro").value && !document.hidden) carregaLog(); }, 8000);
+// tela ao vivo: a próxima imagem só é pedida quando a anterior chegou (o job do painel tira as fotos sem parar)
+function proximaTela() {
+  if (pagina !== "vivo" || !autoFoto || document.hidden) { setTimeout(proximaTela, 1000); return; }
+  const img = new Image();
+  img.onload = () => { $("shot").src = img.src; $("shotHora").textContent = "ao vivo · " + new Date().toLocaleTimeString(); setTimeout(proximaTela, 300); };
+  img.onerror = () => setTimeout(proximaTela, 1500);
+  img.src = "/api/tela?t=" + T + "&n=" + Date.now();
+}
+proximaTela();
 </script>
 </body>
 </html>
