@@ -184,4 +184,19 @@ class GgLuaTest {
         assertEquals(listOf(a + 48), g.saved.map { it.address })
         assertEquals(GgLua.TYPE_FLAGS["TYPE_FLOAT"], g.saved[0].flags)
     }
+
+    /** O "aplicar" do SpeedHackFinder: loadResults com os achados e editAll com a velocidade escrevem em cada um. */
+    @Test
+    fun editAllNosResultadosCarregados() {
+        val g = game()
+        g.mem.clear()
+        val err = GgLua(g).run("""
+            gg.loadResults({ { address = 0x7000, flags = gg.TYPE_DWORD }, { address = 0x7010, flags = gg.TYPE_DWORD } })
+            assert(gg.editAll("3", gg.TYPE_DWORD) == 2)
+            local r = gg.getResults(10)
+            assert(#r == 2 and r[1].value == 3 and r[2].value == 3, "editAll nao escreveu")
+        """.trimIndent(), "aplicar.lua")
+        assertNull(err)
+        assertEquals(3L, g.mem[0x7010L])
+    }
 }

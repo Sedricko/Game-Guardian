@@ -175,6 +175,16 @@ class GgLua(private val host: GgHost) {
             check()
             if (i == null || i !in 1..keys.size) LuaValue.NIL else keys[i - 1]
         })
+        // varias opcoes de uma vez: as mesmas caixinhas do prompt; devolve {[chave]=true} das marcadas
+        gg.set("multiChoice", fn { a ->
+            val t = a.checktable(1)
+            val sel = a.opttable(2, LuaTable())
+            val keys = keysOf(t)
+            @Suppress("UNCHECKED_CAST")
+            val r = host.ask(LuaAsk.Prompt(keys.map { t.get(it).tojstring() }, keys.map { sel.get(it).toboolean().toString() }, keys.map { "checkbox" })) as? List<String>
+            check()
+            if (r == null) LuaValue.NIL else LuaTable().apply { keys.forEachIndexed { i, k -> if (r.getOrNull(i) == "true") set(k, LuaValue.TRUE) } }
+        })
         gg.set("prompt", fn { a ->
             val p = a.checktable(1)
             val d = a.opttable(2, LuaTable())
@@ -246,10 +256,16 @@ class GgLua(private val host: GgHost) {
             cleared = false
             LuaValue.TRUE
         })
+        // o "aplicar" dos scripts de menu (SpeedHackFinder: loadResults e depois editAll com a velocidade): escreve em cada
+        // resultado carregado; sem loadResults, nos resultados da busca do daemon
         gg.set("editAll", fn { a ->
-            if (cleared || loaded != null) throw LuaError("gg.editAll: no Tinker só depois de uma busca")
-            host.send("writeall ${a.checkjstring(1)}")
-            LuaValue.TRUE
+            val v = ggNumber(a.checkjstring(1))
+            val l = loaded
+            if (cleared) return@fn LuaValue.valueOf(0)
+            if (l == null) { host.send("writeall $v"); return@fn LuaValue.TRUE }
+            val t = a.optint(2, 0)
+            l.forEach { (addr, flags, _) -> host.send("write ${addr.toString(16)} ${typeOf(if (t != 0) t else flags)} $v") }
+            LuaValue.valueOf(l.size)
         })
 
         // ---- memória ----
