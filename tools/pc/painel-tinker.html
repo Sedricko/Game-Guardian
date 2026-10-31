@@ -104,6 +104,7 @@
           <button class="btn" onclick="emu('tinker')">Instalar / atualizar o Tinker</button>
           <button class="btn" onclick="emu('jogo')">Abrir o Orecraft</button>
           <button class="btn" onclick="emu('abrirtinker')">Abrir o Tinker</button>
+          <button class="btn" onclick="emu('configurar')">Configurar para o bot</button>
         </div>
         <div class="msg" id="msgEmu"></div>
       </div>
@@ -111,6 +112,15 @@
         <h2>Resultado</h2>
         <pre id="resultadoEmu">nenhum ainda</pre>
         <p class="dim">Ordem da 1ª vez: Ligar → Fazer o root (abre uma janela: se perguntar a versão do Magisk, digite 2 e Enter; o emulador desliga no fim) → Ligar de novo → toque em Permitir no pedido de Superusuário → Instalar o Tinker. Depois é só Ligar o bot no Início.</p>
+      </div>
+    </section>
+
+    <section data-s="emulador" class="hide" style="margin-top:-2px">
+      <div class="card">
+        <h2>Preparar um emulador novo</h2>
+        <p class="dim">Lista as versões do Android (API) e diz quais servem para o Tinker e o Orecraft. ✅ ótimo · 🟢 bom · ⚠️ funciona com ressalva · ❌ não serve. O criado se chama Dysmantle_Play (o nome que o bot usa).</p>
+        <div class="btns"><button class="btn pri" onclick="emu('imagens')">Ver as APIs compatíveis</button></div>
+        <div class="tests" id="imagens"></div>
       </div>
     </section>
 
@@ -274,13 +284,25 @@ async function estado() {
       <span>${t.ok ? "✅" : "❌"}</span><span>${esc(t.nome)}</span><span class="dim">${t.seg} s</span><div class="d">${esc(t.det)}</div></div>`).join("")
     + (rod.atual ? `<div class="t"><span>⏳</span><span>${esc(rod.atual)}</span><span class="dim">agora</span></div>` : "");
   $("mantidos").textContent = arr(est.mantidos).slice().reverse().join("\n") || "nenhum ainda";
-  ["resultado", "resultado2", "resultadoEmu"].forEach(id => { if (est.resultado) $(id).textContent = est.resultado; else if (est.cenario) $(id).textContent = "rodando…"; });
+  if (est.resultado && est.resultado.startsWith("IMAGENS:")) { if (est.resultado !== ultImg) { ultImg = est.resultado; imagens(JSON.parse(est.resultado.slice(8))); } }
+  else ["resultado", "resultado2", "resultadoEmu"].forEach(id => { if (est.resultado) $(id).textContent = est.resultado; else if (est.cenario) $(id).textContent = "rodando…"; });
   const ck = [[!!est.emulador, est.emulador ? "ligado (" + est.emulador + ")" : "desligado"], [est.root, est.root ? "root funcionando (Magisk)" : "sem root"],
     [!!est.tinkerVer, est.tinkerVer ? "Tinker " + est.tinkerVer + " instalado" : "Tinker não instalado"], [est.jogoInstalado, est.jogoInstalado ? "Orecraft instalado" : "Orecraft não instalado (instale pela Play Store do emulador)"]];
   $("emuChecks").innerHTML = ck.map(([ok, t]) => `<div class="t"><span>${ok ? "✅" : "⚪"}</span><span>${esc(t)}</span><span></span></div>`).join("");
   if (!$("rotLista").dataset.feito) montaRoteiro(arr(est.roteiro));
   $("optEstado").textContent = (est.planilha ? "✅ link da planilha guardado" : "⚠️ falta o link da planilha (o bot precisa dele)") + " · " + (est.token ? "token do GitHub guardado" : "sem token do GitHub");
 }
+let ultImg = "";
+function imagens(l) {
+  l = arr(l);
+  const ic = { otimo: "✅", bom: "🟢", aviso: "⚠️", ruim: "❌" };
+  $("imagens").innerHTML = l.length ? l.map(i => `<div class="t" style="cursor:default"><span>${ic[i.nivel]}</span>
+      <span><b>API ${i.api}</b> · ${esc(i.tag)} · ${esc(i.abi)}${i.instalada ? " · <i>já baixada</i>" : ""}<br><span class="dim">${esc(i.por)}</span></span>
+      <span>${i.nivel === "ruim" ? "" : `<button class="chip" onclick="criar('${esc(i.id)}')">Criar com esta</button>`}</span></div>`).join("")
+    : "<div class='dim'>nenhuma imagem listada (veja o Resultado)</div>";
+  $("resultadoEmu").textContent = l.length + " imagens do Android listadas";
+}
+function criar(id) { if (confirm("Criar um emulador com " + id + "? Baixa alguns GB na primeira vez.")) { $("resultadoEmu").textContent = "começando…"; acao("emu", { op: "criar", arg: id }, "msgEmu"); } }
 function emu(op) { $("resultadoEmu").textContent = "começando…"; acao("emu", { op }, "msgEmu"); }
 function pausa() { acao(est.pausado ? "continuar" : "pausar"); }
 

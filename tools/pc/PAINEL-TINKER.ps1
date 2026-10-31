@@ -68,8 +68,12 @@ $missao = {
 
 # emulador pelo painel: ligar, desligar, root (Magisk pelo rootAVD), Tinker novo, abrir o jogo. Roda em segundo plano
 $emuOp = {
-    param($op, $sdk, $app, $jogo, $tok)
+    param($op, $sdk, $app, $jogo, $tok, $arg)
     $adb = "$sdk\platform-tools\adb.exe"; $emu = "$sdk\emulator\emulator.exe"
+    # sdkmanager/avdmanager (Android SDK Command-line Tools) precisam de Java: o do Android Studio serve
+    if (-not $env:JAVA_HOME) { $env:JAVA_HOME = @("$env:ProgramFiles\Android\Android Studio\jbr", "$env:ProgramFiles\Android\Android Studio\jre") | Where-Object { Test-Path $_ } | Select-Object -First 1 }
+    $tools = @("$sdk\cmdline-tools\latest\bin") + @(Get-ChildItem "$sdk\cmdline-tools" -Directory -ErrorAction SilentlyContinue | ForEach-Object { "$($_.FullName)\bin" }) | Where-Object { Test-Path "$_\sdkmanager.bat" } | Select-Object -First 1
+    function Sdk() { if (-not $tools) { throw "falta o 'Android SDK Command-line Tools': no Android Studio, More Actions > SDK Manager > SDK Tools, marque e toque em OK" }; & "$tools\sdkmanager.bat" @args }
     $ser = @((& $adb devices) | Select-String "^(emulator-\d+)\s+device" | ForEach-Object { $_.Matches.Groups[1].Value }) | Select-Object -First 1
     function Su($c) { & $adb -s $ser shell "su -c '$($c -replace "'", "'\''")'" }
     switch ($op) {
@@ -115,6 +119,52 @@ $emuOp = {
             $uid = ((& $adb -s $ser shell dumpsys package $app) | Select-String "(?:userId|appId)=(\d+)" | Select-Object -First 1).Matches.Groups[1].Value
             if ($uid) { Su "magisk --sqlite 'REPLACE INTO policies (uid,policy,until,logging,notification) VALUES($uid,2,0,1,1)'" 2>$null | Out-Null }
             return "Tinker $($rel.tag_name): $inst (root para o Tinker liberado no Magisk)"
+        }
+        # imagens do Android para o emulador, com o que serve para o Tinker + Orecraft (o Orecraft e arm64: precisa da traducao
+        # ARM das imagens x86_64 do Google, API 30+; Play Store para instalar o jogo; Magisk pelo rootAVD)
+        "imagens" {
+            $inst = $true; $vistos = @{}; $out = @()
+            foreach ($l in (Sdk --list 2>$null)) {
+                if ($l -match "Available Packages") { $inst = $false }
+                if ($l -notmatch "^\s*system-images;android-(\d+)(?:-ext\d+)?;([^;|\s]+);([^\s|]+)") { continue }
+                $id = ($l.Trim() -split "\s*\|\s*")[0]
+                if ($vistos[$id]) { continue }; $vistos[$id] = 1
+                $api = [int]$Matches[1]; $tag = $Matches[2]; $abi = $Matches[3]
+                if ($api -lt 28 -or $tag -notmatch "^google_apis") { continue }
+                $nivel = "ruim"; $por = ""
+                if ($abi -ne "x86_64") { $por = "$abi fica muito lento no PC" }
+                elseif ($api -lt 30) { $por = "sem traducao ARM: o Orecraft (arm64) nao abre" }
+                elseif ($tag -like "*ps16k*") { $nivel = "aviso"; $por = "paginas de 16 KB: o Tinker ainda nao foi testado assim" }
+                elseif ($tag -eq "google_apis_playstore") { $nivel = $(if ($api -ge 33) { "otimo" } else { "bom" }); $por = "Play Store para instalar o Orecraft, root pelo Magisk" + $(if ($api -eq 36) { " (o mesmo do Dysmantle_Play de hoje)" } else { "" }) }
+                elseif ($tag -eq "google_apis") { $nivel = "aviso"; $por = "sem Play Store: o Orecraft so por APK" }
+                $out += [pscustomobject]@{ id = $id; api = $api; tag = $tag; abi = $abi; instalada = $inst; nivel = $nivel; por = $por }
+            }
+            return "IMAGENS:" + (@($out | Sort-Object @{ e = { @{ otimo = 0; bom = 1; aviso = 2; ruim = 3 }[$_.nivel] } }, @{ e = { $_.api }; Descending = $true }) | ConvertTo-Json -Compress)
+        }
+        "criar" {
+            if ($arg -notmatch "^system-images;android-(\d+)[^;]*;google_apis[^;]*;x86_64$") { return "imagem invalida: $arg" }
+            $api = $Matches[1]
+            Write-Output "baixando a imagem $arg (pode levar varios minutos)..."
+            "y`ny`ny`ny`ny`ny`n" | Sdk --install $arg "platform-tools" "emulator" | Out-Null
+            $nome = $(if ((& $emu -list-avds) -contains "Dysmantle_Play") { "Dysmantle_Play_API$api" } else { "Dysmantle_Play" })  # o agente usa o *Dysmantle_Play*
+            "no" | & "$tools\avdmanager.bat" create avd -n $nome -k $arg -d pixel_6_pro --force | Out-Null
+            $ini = "$env:USERPROFILE\.android\avd\$nome.avd\config.ini"
+            if (-not (Test-Path $ini)) { return "o avdmanager nao criou o $nome" }
+            # o que o Orecraft e o Tinker precisam: memoria, espaco, placa de video do PC, teclado do PC
+            $c = (Get-Content $ini) | Where-Object { $_ -notmatch "^(hw\.ramSize|disk\.dataPartition\.size|hw\.gpu\.enabled|hw\.gpu\.mode|hw\.keyboard|vm\.heapSize)\s*=" }
+            $c += "hw.ramSize=4096", "vm.heapSize=512", "disk.dataPartition.size=16G", "hw.gpu.enabled=yes", "hw.gpu.mode=host", "hw.keyboard=yes"
+            Set-Content $ini $c
+            return "emulador $nome criado (API $api, 4 GB de RAM, 16 GB de espaco). Agora: Ligar, entrar na conta Google, instalar o Orecraft pela Play Store e Fazer o root"
+        }
+        # ajustes do Android para o bot: nao congelar o Tinker em segundo plano, tela sempre ligada, sem animacoes
+        "configurar" {
+            if (-not $ser) { return "ligue o emulador antes" }
+            & $adb -s $ser shell settings put global cached_apps_freezer disabled
+            & $adb -s $ser shell settings put global stay_on_while_plugged_in 7
+            & $adb -s $ser shell settings put system screen_off_timeout 2147483647
+            foreach ($k in "window_animation_scale", "transition_animation_scale", "animator_duration_scale") { & $adb -s $ser shell settings put global $k 0 }
+            & $adb -s $ser shell cmd connectivity set-package-networking-enabled true $jogo 2>&1 | Out-Null
+            return "configurado: o Tinker nao e congelado em segundo plano, a tela nao apaga, sem animacoes, internet do jogo ligada (o congelamento so vale depois de Reiniciar)"
         }
         "jogo" { if (-not $ser) { return "ligue o emulador antes" }; & $adb -s $ser shell monkey -p $jogo -c android.intent.category.LAUNCHER 1 | Out-Null; return "Orecraft aberto" }
         "abrirtinker" { if (-not $ser) { return "ligue o emulador antes" }; & $adb -s $ser shell am start -n "$app/.MainActivity" | Out-Null; return "Tinker aberto" }
@@ -201,7 +251,7 @@ function Acao($a) {
         "emu" {
             if ($script:job) { throw "ja tem uma tarefa rodando: espere ela acabar" }
             $script:ultimo = ""; $script:emuInfo = $null
-            $script:job = Start-Job -ScriptBlock $emuOp -ArgumentList $a.op, $sdk, $app, $jogo, $tok
+            $script:job = Start-Job -ScriptBlock $emuOp -ArgumentList $a.op, $sdk, $app, $jogo, $tok, ([string]$a.arg)
             return "comecei: $($a.op) (o resultado aparece aqui embaixo)"
         }
         "config" {
