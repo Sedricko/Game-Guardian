@@ -22,6 +22,8 @@ $done = "$env:USERPROFILE\tinker-agente-testado.txt" # ultima versao testada
 $roteiroF = "$env:USERPROFILE\tinker-agente-roteiro.txt"
 $pausaF = "$env:USERPROFILE\tinker-agente-pausa.txt"
 $estadoF = "$env:USERPROFILE\tinker-agente-estado.json"
+$meusF = "$env:USERPROFILE\tinker-agente-meus-roteiros.json"   # roteiros escritos pela pessoa no painel (passos do Tinker)
+$ajustesF = "$env:USERPROFILE\tinker-agente-ajustes.json"     # o que da para ajustar (as regras de seguranca nao: ficam no app)
 $script:estado = @{ versao = ""; jogo = ""; inicio = ""; atual = ""; fim = ""; testes = @() }
 function Save-State { try { [IO.File]::WriteAllText($estadoF, ($script:estado | ConvertTo-Json -Depth 4 -Compress), (New-Object Text.UTF8Encoding $false)) } catch { } }
 $log = "$env:USERPROFILE\tinker-agente-log.txt"
@@ -1306,7 +1308,7 @@ function Run-RealGame($dg) {
     function T($name, [scriptblock]$b) {
         $id = ($name -split ' ')[0]
         $rot = @(Get-Content $roteiroF -ErrorAction SilentlyContinue | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-        if ($rot.Count -and $id -ne "1" -and $rot -notcontains $id) { Say "-- pulei $name (fora do roteiro do painel)"; return }
+        if ($rot.Count -and $id -ne "1" -and $id -notlike "R-*" -and $rot -notcontains $id) { Say "-- pulei $name (fora do roteiro do painel)"; return }
         $script:estado.atual = $name; Save-State
         $okN = @($script:rr | Where-Object { $_ -like "OK *" }).Count
         $faN = @($script:rr | Where-Object { $_ -like "FALHA *" }).Count
@@ -1628,6 +1630,21 @@ function Run-RealGame($dg) {
                 } catch { Step "despatch" | Out-Null; throw }
             }
         }
+        # meus roteiros (painel): cada passo e uma missao do Tinker, "esperar N" espera N s. O Tinker so aceita os jogos
+        # offline liberados e recusa tocar em preco de dinheiro de verdade ou anuncio: o roteiro nao passa disso
+        foreach ($m in @(try { Get-Content $meusF -Raw -Encoding UTF8 | ConvertFrom-Json } catch { })) {
+            if (-not $m -or -not $m.ativo) { continue }
+            T "R-$($m.nome)" {
+                $out = @()
+                foreach ($p in @($m.passos)) {
+                    $p = "$p".Trim(); if (-not $p -or $p.StartsWith("#")) { continue }
+                    if ($p -match '^esperar (\d+)$') { Start-Sleep ([int]$Matches[1]); continue }
+                    $n = Step $p 600
+                    $out += "$p -> " + (($script:last -split "`n")[0]) + " ($n)"
+                }
+                $out -join " | "
+            }
+        }
     } catch { $script:rr += "parou: $($_.Exception.Message)"; Say $script:rr[-1] }
     $res = $script:rr
     $ok = @($res | Where-Object { $_ -like "OK *" }).Count
@@ -1663,7 +1680,9 @@ if ($Jogo) {
         try {
             $v = (Get-Release).tag_name.TrimStart("v")
             # pedido do usuario (30/10): acabou uma rodada, comeca a outra (2 min de folga para o emulador assentar)
-            $velha = -not (Test-Path $doneJ) -or ((Get-Date) - (Get-Item $doneJ).LastWriteTime).TotalMinutes -ge 2
+            $folga = 2; try { $folga = [double](Get-Content $ajustesF -Raw | ConvertFrom-Json).folgaMin } catch { }
+            if (-not $folga -or $folga -lt 1) { $folga = 2 }
+            $velha = -not (Test-Path $doneJ) -or ((Get-Date) - (Get-Item $doneJ).LastWriteTime).TotalMinutes -ge $folga
             if ((Get-Content $doneJ -ErrorAction SilentlyContinue) -ne $v -or $velha) { Run-RealGame $Jogo; Set-Content $doneJ $v }
         } catch { Say "erro: $($_.Exception.Message)" }
         Start-Sleep 60

@@ -17,6 +17,8 @@ $roteiroF = "$U\tinker-agente-roteiro.txt"
 $pausaF = "$U\tinker-agente-pausa.txt"
 $estadoF = "$U\tinker-agente-estado.json"
 $mantidosF = "$U\tinker-mantidos-$jogo.txt"
+$meusF = "$U\tinker-agente-meus-roteiros.json"
+$ajustesF = "$U\tinker-agente-ajustes.json"
 $port = 8766
 $tokenF = "$dir\painel-token.txt"  # o PainelTinker.exe aberto de novo reabre a janela do painel que ja esta rodando
 # o mesmo token entre um painel e o atualizado: a janela aberta segue funcionando depois da atualizacao
@@ -56,6 +58,8 @@ $missao = {
     }
     $out = @()
     foreach ($cmd in $cmds) {
+        if ($cmd -match '^esperar (\d+)$') { Start-Sleep ([int]$Matches[1]); continue }
+        if (-not "$cmd".Trim() -or "$cmd".StartsWith("#")) { continue }
         Sh "rm -f /data/data/$app/files/missao.txt" | Out-Null
         & $adb -s $ser shell am start -f 0x10008000 -n "$app/.MainActivity" --es missao "'$cmd'" | Out-Null
         $t = $null
@@ -266,6 +270,8 @@ function Estado {
         mantidos = @(Get-Content $mantidosF -Tail 15 -ErrorAction SilentlyContinue)
         planilha = [bool]((Get-Content $cfg -ErrorAction SilentlyContinue) -join "").Trim(); token = [bool]((Get-Content $tok -ErrorAction SilentlyContinue) -join "").Trim()
         cenario = $(if ($script:job) { "rodando" } else { "" }); resultado = $script:ultimo
+        meus = @(try { Get-Content $meusF -Raw -Encoding UTF8 | ConvertFrom-Json } catch { })
+        ajustes = $(try { Get-Content $ajustesF -Raw | ConvertFrom-Json } catch { $null })
         ver = [string](Get-Item "$dir\painel-tinker.html").LastWriteTimeUtc.Ticks; vigia = $script:vigia
     }
 }
@@ -318,6 +324,19 @@ function Acao($a) {
             if ($a.link) { if ($a.link -notmatch '^https://script\.google\.com/') { throw "o link precisa comecar com https://script.google.com/" }; Set-Content $cfg $a.link.Trim() }
             if ($a.token) { Set-Content $tok $a.token.Trim() }
             return "guardado neste PC"
+        }
+        "meus" {
+            # a lista inteira vem do painel; nome so com letras, numeros e espaco (vira o nome do teste na planilha)
+            $l = @($a.lista | Where-Object { $_.nome } | ForEach-Object {
+                [pscustomobject]@{ nome = ($_.nome -replace '[^\w ]', '').Trim(); ativo = [bool]$_.ativo; passos = @($_.passos | ForEach-Object { "$_" }) } })
+            [IO.File]::WriteAllText($meusF, (ConvertTo-Json @($l) -Depth 4), (New-Object Text.UTF8Encoding $false))
+            return "roteiros salvos: $($l.Count) ($(@($l | Where-Object ativo).Count) rodam em cada rodada do bot)"
+        }
+        "ajustes" {
+            $f = [double]$a.folgaMin
+            if ($f -lt 1 -or $f -gt 1440) { throw "a folga entre rodadas vai de 1 a 1440 minutos" }
+            [IO.File]::WriteAllText($ajustesF, (@{ folgaMin = $f } | ConvertTo-Json), (New-Object Text.UTF8Encoding $false))
+            return "ajustes guardados: $f min entre uma rodada e outra"
         }
         "sair" { $script:sair = $true; return "painel fechando (o bot continua)" }
         "claude" { return (Planilha "painel: recado para o Claude" ([string]$a.texto)) }

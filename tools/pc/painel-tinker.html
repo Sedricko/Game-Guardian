@@ -56,6 +56,8 @@
     <button data-p="emulador">📱 Emulador</button>
     <button data-p="vivo">📺 Jogo ao vivo</button>
     <button data-p="roteiro">🧭 Roteiro do bot</button>
+    <button data-p="meus">📝 Meus roteiros</button>
+    <button data-p="regras">🔒 Restrições</button>
     <button data-p="cenarios">▶️ Cenários</button>
     <button data-p="logs">📄 Logs</button>
     <button data-p="comandos">⌨️ Comandos</button>
@@ -167,6 +169,48 @@
       </div>
     </section>
 
+    <section data-s="meus" class="grid hide">
+      <div class="card">
+        <h2>Meus roteiros</h2>
+        <div class="tests" id="meusLista"></div>
+        <div class="btns"><button class="btn" onclick="editar(-1)">+ Novo roteiro</button></div>
+        <div class="msg" id="msgMeus"></div>
+      </div>
+      <div class="card">
+        <h2 id="edTitulo">Novo roteiro</h2>
+        <input type="text" id="edNome" placeholder="Nome (ex.: Roleta e velocidade)">
+        <textarea id="edPassos" rows="10" style="margin-top:10px;font-family:Consolas,monospace" placeholder="um passo por linha, por exemplo:
+metodo ShopRouletteController.GetSpinGemsPrice 0
+esperar 5
+velocidade
+velocidade 2
+# linha com # é comentário"></textarea>
+        <label style="display:flex;gap:8px;margin-top:10px"><input type="checkbox" id="edAtivo"> rodar em cada rodada do bot (vira o teste R-nome, depois dos testes de sempre)</label>
+        <div class="btns">
+          <button class="btn pri" onclick="salvarMeu()">Salvar</button>
+          <button class="btn" onclick="rodarMeu()">Rodar agora</button>
+          <button class="btn red" id="edApagar" onclick="apagarMeu()">Apagar</button>
+        </div>
+        <p class="dim">Passos: os mesmos de ⌨️ Comandos (itens · dono 250 · inspecionar 80 · trocartexto 80 99 · metodo Classe.Metodo 0 · despatch · velocidade · velocidade 2 · cronometros · juiz 80 99 Nome · luateste 250) e <b>esperar N</b> (segundos). As 🔒 Restrições valem para os seus roteiros também: o Tinker recusa sozinho o que passar delas.</p>
+      </div>
+    </section>
+
+    <section data-s="regras" class="grid hide">
+      <div class="card">
+        <h2>Regras fixas 🔒</h2>
+        <div class="tests" id="regrasFixas"></div>
+        <p class="dim">Estas ficam dentro do Tinker (no app), não no painel: nenhum roteiro, comando ou ajuste muda elas.</p>
+      </div>
+      <div class="card">
+        <h2>O que dá para ajustar</h2>
+        <label class="dim">Folga entre uma rodada e a próxima (minutos)</label>
+        <input type="text" id="ajFolga" placeholder="2">
+        <div class="btns"><button class="btn pri" onclick="acao('ajustes', { folgaMin: Number($('ajFolga').value) }, 'msgAj')">Salvar</button></div>
+        <div class="msg" id="msgAj"></div>
+        <p class="dim">Quais testes rodam: 🧭 Roteiro do bot. Os seus passos: 📝 Meus roteiros. Pausar/parar: 🏠 Início.</p>
+      </div>
+    </section>
+
     <section data-s="cenarios" class="hide">
       <div class="grid" id="cenarios"></div>
       <div class="card">
@@ -229,21 +273,30 @@
 <script>
 const T = "__TOKEN__";
 const TESTES = [
-  ["1", "Ler a tela e o mapa do jogo", "base de todos: os números da tela e as classes"],
-  ["2", "Pedido: mudar um número da tela", "acha pelo 🎯 sozinho e escreve"],
-  ["2b", "Pedido pelo monitor", "lugares que mudaram junto com a tela"],
-  ["2c", "Pedido pelo dicionário do jogo", "de quem é cada lugar (Classe.campo)"],
-  ["2d", "Inspecionar o número da tela", "como o Inspecionar do navegador"],
-  ["2e", "Pedido a partir da roleta", "segue os objetos da roleta"],
-  ["2f", "Trocar o texto do JSON", "recursos guardados como texto"],
-  ["2g", "🧠 Juiz", "testa texto, memória e save; aplica o melhor"],
-  ["2h", "📜 Script Lua", "gg.* do GameGuardian no Tinker"],
-  ["3", "Achou um, acha todos", "vizinhos do valor achado"],
-  ["4", "⏩ Velocidade do jogo", "acha e confere em 2x"],
-  ["5", "Jogar 3 min + monitor", "o que muda na memória jogando"],
-  ["6", "Cronômetros", "construções e esperas"],
-  ["7", "Reabrir o jogo", "o salvo volta sozinho?"],
-  ["8", "🎰 Roleta de graça", "a regra pelo nome (GetSpinGemsPrice)"],
+  ["1", "Ler a tela e o mapa do jogo", "base de todos: os números da tela e as classes", "Lê os números da tela (OCR) e o mapa IL2CPP do jogo (classes e métodos com nome de moeda, preço, espera). Mostra os valores mudados que ficaram da rodada anterior."],
+  ["2", "Pedido: mudar um número da tela", "acha pelo 🎯 sozinho e escreve", "Pega um número da tela, roda o 🎯 Achar sozinho (busca, refina pelo que muda) e escreve 999. Confere na tela; se mudou, o valor fica mudado para a próxima rodada."],
+  ["2b", "Pedido pelo monitor", "lugares que mudaram junto com a tela", "Usa os lugares que o monitor (teste 5) viu mudar com o valor da tela; escreve em cada um e confere na tela. O certo fica, os outros voltam."],
+  ["2c", "Pedido pelo dicionário do jogo", "de quem é cada lugar (Classe.campo)", "Busca o número e pergunta ao mapa IL2CPP de quem é cada lugar. Escreve primeiro nos campos com nome de moeda e confere na tela."],
+  ["2d", "Inspecionar o número da tela", "como o Inspecionar do navegador", "Acha o texto que a tela desenha, o componente que guarda o texto e o script dono dele; testa os campos do dono com o mesmo número."],
+  ["2e", "Pedido a partir da roleta", "segue os objetos da roleta", "Parte do objeto da roleta (a regra que já funciona) e segue os objetos que ele aponta atrás de um campo com o número da tela."],
+  ["2f", "Trocar o texto do JSON", "recursos guardados como texto", "O Orecraft guarda recursos como texto JSON (\"80\"). Troca o texto pelo mesmo tamanho (99) e confere na tela; se não mudou, volta."],
+  ["2g", "🧠 Juiz", "testa texto, memória e save; aplica o melhor", "Tenta texto JSON e número na memória; o primeiro que muda a tela reabre o jogo para ver se dura; senão tenta o save (com backup). Nota de 0 a 5 e aplica a vencedora."],
+  ["2h", "📜 Script Lua", "gg.* do GameGuardian no Tinker", "Roda um script Lua curto pelo mesmo caminho do 📜 Scripts: busca o número da tela, lê o vizinho e acha a libil2cpp. Só lê."],
+  ["3", "Achou um, acha todos", "vizinhos do valor achado", "Com o valor do teste 2, procura os outros valores da mesma estrutura pelos vizinhos."],
+  ["4", "⏩ Velocidade do jogo", "acha e confere em 2x", "Acha o relógio do Unity (0.99999994), os dois tempos e o 1.0 perto deles; põe 2x por 1 s e vê se o tempo do jogo acelerou; volta para 1x."],
+  ["5", "Jogar 3 min + monitor", "o que muda na memória jogando", "A IA (ou o explorador) joga 3 min enquanto o monitor fotografa a memória e vê o que muda junto com a tela."],
+  ["6", "Cronômetros", "construções e esperas", "Procura horas de terminar (construção, espera) entre agora e 7 dias. Só acha, não termina."],
+  ["7", "Reabrir o jogo", "o salvo volta sozinho?", "Fecha e abre o jogo e confere se o salvo do teste 2 voltou sozinho no endereço novo (ponteiro/assinatura)."],
+  ["8", "🎰 Roleta de graça", "a regra pelo nome (GetSpinGemsPrice)", "Troca a regra GetSpinGemsPrice para devolver 0 (giro pago em joias de graça) e guarda o patch no app para você ligar. Nunca toca em ASSISTIR (anúncio)."],
+];
+const REGRAS = [
+  "Só jogos offline liberados no app (hoje: Orecraft, DYSMANTLE e o Jogo de Teste). Outro jogo, o Tinker recusa.",
+  "Nada comprado com dinheiro de verdade: não troca item pago, preço em R$, VIP, premium nem tirar anúncio — nem como teste.",
+  "Nunca toca em anúncio (ASSISTIR) nem pula a espera de anúncio.",
+  "Moedas e materiais do próprio jogo (ouro, joias, barras) podem ser mudados.",
+  "A planilha só recebe resultados: ela nunca manda o bot fazer nada.",
+  "O app só insere na planilha; nunca apaga. A aba Chaves não é lida.",
+  "Antes de mexer no save, backup; se a tela não mudar, o backup volta.",
 ];
 const CENARIOS = [
   ["🎰 Roleta de graça", "O giro pago em joias passa a custar 0 (volta ao reabrir o jogo).", ["metodo ShopRouletteController.GetSpinGemsPrice 0"], 120],
@@ -304,9 +357,30 @@ async function estado() {
   if (!$("rotLista").dataset.feito) montaRoteiro(arr(est.roteiro));
   if (!window.verPagina) window.verPagina = est.ver; else if (est.ver && est.ver !== window.verPagina) location.reload();  // painel atualizado
   $("optVigia").textContent = est.vigia || "";
+  meus = arr(est.meus);
+  $("meusLista").innerHTML = meus.length ? meus.map((m, i) => `<div class="t" onclick="editar(${i})"><span>${m.ativo ? "🔁" : "📄"}</span><span>${esc(m.nome)}<br><span class="dim">${arr(m.passos).length} passo(s)${m.ativo ? " · roda em cada rodada (R-" + esc(m.nome) + ")" : ""}</span></span><span class="dim">editar</span></div>`).join("") : "<div class='dim'>nenhum ainda</div>";
+  if (!$("ajFolga").value && est.ajustes) $("ajFolga").value = est.ajustes.folgaMin;
   $("optEstado").textContent = (est.planilha ? "✅ link da planilha guardado" : "⚠️ falta o link da planilha (o bot precisa dele)") + " · " + (est.token ? "token do GitHub guardado" : "sem token do GitHub");
 }
-let ultImg = "";
+let ultImg = "", meus = [], edIdx = -1;
+function editar(i) {
+  edIdx = i; const m = i >= 0 ? meus[i] : { nome: "", passos: [], ativo: false };
+  $("edTitulo").textContent = i >= 0 ? "Editar: " + m.nome : "Novo roteiro";
+  $("edNome").value = m.nome; $("edPassos").value = arr(m.passos).join("\n"); $("edAtivo").checked = !!m.ativo;
+}
+function lista() { return meus.map(m => ({ nome: m.nome, ativo: !!m.ativo, passos: arr(m.passos) })); }
+function salvarMeu() {
+  const m = { nome: $("edNome").value.trim(), ativo: $("edAtivo").checked, passos: $("edPassos").value.split("\n").map(x => x.trim()).filter(x => x) };
+  if (!m.nome) { $("msgMeus").textContent = "dê um nome ao roteiro"; return; }
+  const l = lista(); if (edIdx >= 0) l[edIdx] = m; else l.push(m);
+  acao("meus", { lista: l }, "msgMeus"); edIdx = edIdx >= 0 ? edIdx : l.length - 1;
+}
+function apagarMeu() { if (edIdx < 0 || !confirm("Apagar o roteiro " + meus[edIdx].nome + "?")) return; const l = lista(); l.splice(edIdx, 1); acao("meus", { lista: l }, "msgMeus"); editar(-1); }
+function rodarMeu() {
+  const p = $("edPassos").value.split("\n").map(x => x.trim()).filter(x => x && !x.startsWith("#"));
+  if (!p.length) return;
+  $("msgMeus").textContent = "rodando… (o resultado aparece em ▶️ Cenários)"; acao("missao", { cmds: p, secs: 600 }, "msgMeus");
+}
 async function tudo() {
   if (!est.planilha) {
     const l = prompt("Cole o link da planilha (o mesmo de Tinker → Ajustes → Link do painel). Deixe vazio que eu procuro no Tinker do emulador:", "");
@@ -332,7 +406,7 @@ function pausa() { acao(est.pausado ? "continuar" : "pausar"); }
 function montaRoteiro(sel) {
   $("rotLista").dataset.feito = 1;
   $("rotLista").innerHTML = TESTES.map(([id, nome, d]) => `<label><input type="checkbox" value="${id}" ${id === "1" ? "checked disabled" : (!sel.length || sel.includes(id) ? "checked" : "")}>
-    <span><b>${id}</b> ${esc(nome)}<small>${esc(d)}</small></span></label>`).join("");
+    <span><b>${id}</b> ${esc(nome)}<small>${esc(d)}</small><details><summary class="dim" style="cursor:pointer">como funciona</summary><small>${esc(TESTES.find(t => t[0] === id)[3])}</small></details></span></label>`).join("");
 }
 function preset(ids) { document.querySelectorAll("#rotLista input").forEach(c => { if (!c.disabled) c.checked = !ids.length || ids.includes(c.value); }); }
 function salvarRoteiro() {
@@ -383,6 +457,7 @@ document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
 });
 $("filtros").innerHTML = FILTROS.map(f => `<button class="chip" onclick="filtroChip = filtroChip === '${f}' ? '' : '${f}'; document.querySelectorAll('#filtros .chip').forEach(c => c.classList.toggle('on', c.textContent === filtroChip)); mostraLog()">${esc(f)}</button>`).join("");
 montaCenarios();
+$("regrasFixas").innerHTML = REGRAS.map(r => `<div class="t" style="cursor:default"><span>🔒</span><span>${esc(r)}</span><span></span></div>`).join("");
 estado();
 setInterval(estado, 4000);
 setInterval(() => { if (pagina === "logs" && !$("filtro").value) carregaLog(); }, 5000);
