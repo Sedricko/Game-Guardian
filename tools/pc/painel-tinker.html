@@ -302,8 +302,12 @@ async function estado() {
   $("optEstado").textContent = (est.planilha ? "✅ link da planilha guardado" : "⚠️ falta o link da planilha (o bot precisa dele)") + " · " + (est.token ? "token do GitHub guardado" : "sem token do GitHub");
 }
 let ultImg = "";
-function tudo() {
-  if (!est.planilha && !confirm("Ainda falta o link da planilha (Opções): sem ele o bot não liga no fim. Preparar o emulador mesmo assim?")) return;
+async function tudo() {
+  if (!est.planilha) {
+    const l = prompt("Cole o link da planilha (o mesmo de Tinker → Ajustes → Link do painel). Deixe vazio que eu procuro no Tinker do emulador:", "");
+    if (l === null) return;
+    if (l.trim()) { const r = await acao("config", { link: l.trim() }, "msgBot"); if (!r.ok) return; }
+  }
   $("resultadoTudo").classList.remove("hide"); $("resultadoTudo").textContent = "começando… (a primeira vez baixa alguns GB e leva vários minutos)";
   acao("emu", { op: "tudo" }, "msgBot");
 }

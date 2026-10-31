@@ -206,8 +206,19 @@ $emuOp = {
         $feito += Op "root"
         return (($feito + "FALTA VOCE: na janela do rootAVD digite 2 e Enter; quando o emulador desligar, toque em Preparar tudo de novo.") -join "`n")
     }
+    # o link da planilha: sem ele no PC, pega o que o Tinker do emulador ja tem (Ajustes > Link do painel, keySource)
+    $cfgF = "$env:USERPROFILE\tinker-agente-painel.txt"
+    if (-not ((Get-Content $cfgF -ErrorAction SilentlyContinue) -join "").Trim()) {
+        $xml = (Su "cat /data/data/$app/shared_prefs/tinker.xml") -join "`n"
+        if ($xml -match '<string name="keySource">(https://script\.google\.com/[^<]+)</string>') {
+            Set-Content $cfgF ([Net.WebUtility]::HtmlDecode($Matches[1])); $feito += "link da planilha copiado do Tinker do emulador"
+        }
+    }
     $feito += Op "tinker"
     $feito += Op "jogo"
+    if (-not ((Get-Content $cfgF -ErrorAction SilentlyContinue) -join "").Trim()) {
+        return (($feito + "FALTA VOCE: cole o link da planilha em Opcoes (Tinker > Ajustes > Link do painel) e toque em Preparar tudo de novo.") -join "`n")
+    }
     "PRONTO`n" + ($feito -join "`n")
 }
 
