@@ -53,6 +53,7 @@
   <nav>
     <div class="brand"><b>T</b> Painel Tinker</div>
     <button data-p="inicio" class="on">🏠 Início</button>
+    <button data-p="emulador">📱 Emulador</button>
     <button data-p="vivo">📺 Jogo ao vivo</button>
     <button data-p="roteiro">🧭 Roteiro do bot</button>
     <button data-p="cenarios">▶️ Cenários</button>
@@ -86,6 +87,30 @@
         <h2>Rodada <span id="rodVer"></span></h2>
         <div class="dim" id="rodInfo"></div>
         <div class="tests" id="testes"></div>
+      </div>
+    </section>
+
+    <section data-s="emulador" class="grid hide">
+      <div class="card">
+        <h2>Emulador (Dysmantle_Play)</h2>
+        <div class="tests" id="emuChecks"></div>
+        <div class="btns">
+          <button class="btn pri" onclick="emu('ligar')">Ligar</button>
+          <button class="btn" onclick="emu('reiniciar')">Reiniciar</button>
+          <button class="btn red" onclick="if (confirm('Desligar o emulador? Se o bot estiver no meio de um teste, ele falha.')) emu('desligar')">Desligar</button>
+        </div>
+        <div class="btns">
+          <button class="btn" onclick="emu('root')">Fazer o root (Magisk)</button>
+          <button class="btn" onclick="emu('tinker')">Instalar / atualizar o Tinker</button>
+          <button class="btn" onclick="emu('jogo')">Abrir o Orecraft</button>
+          <button class="btn" onclick="emu('abrirtinker')">Abrir o Tinker</button>
+        </div>
+        <div class="msg" id="msgEmu"></div>
+      </div>
+      <div class="card">
+        <h2>Resultado</h2>
+        <pre id="resultadoEmu">nenhum ainda</pre>
+        <p class="dim">Ordem da 1ª vez: Ligar → Fazer o root (abre uma janela: se perguntar a versão do Magisk, digite 2 e Enter; o emulador desliga no fim) → Ligar de novo → toque em Permitir no pedido de Superusuário → Instalar o Tinker. Depois é só Ligar o bot no Início.</p>
       </div>
     </section>
 
@@ -249,11 +274,14 @@ async function estado() {
       <span>${t.ok ? "✅" : "❌"}</span><span>${esc(t.nome)}</span><span class="dim">${t.seg} s</span><div class="d">${esc(t.det)}</div></div>`).join("")
     + (rod.atual ? `<div class="t"><span>⏳</span><span>${esc(rod.atual)}</span><span class="dim">agora</span></div>` : "");
   $("mantidos").textContent = arr(est.mantidos).slice().reverse().join("\n") || "nenhum ainda";
-  if (est.resultado) { $("resultado").textContent = est.resultado; $("resultado2").textContent = est.resultado; }
-  else if (est.cenario) { $("resultado").textContent = "rodando…"; $("resultado2").textContent = "rodando…"; }
+  ["resultado", "resultado2", "resultadoEmu"].forEach(id => { if (est.resultado) $(id).textContent = est.resultado; else if (est.cenario) $(id).textContent = "rodando…"; });
+  const ck = [[!!est.emulador, est.emulador ? "ligado (" + est.emulador + ")" : "desligado"], [est.root, est.root ? "root funcionando (Magisk)" : "sem root"],
+    [!!est.tinkerVer, est.tinkerVer ? "Tinker " + est.tinkerVer + " instalado" : "Tinker não instalado"], [est.jogoInstalado, est.jogoInstalado ? "Orecraft instalado" : "Orecraft não instalado (instale pela Play Store do emulador)"]];
+  $("emuChecks").innerHTML = ck.map(([ok, t]) => `<div class="t"><span>${ok ? "✅" : "⚪"}</span><span>${esc(t)}</span><span></span></div>`).join("");
   if (!$("rotLista").dataset.feito) montaRoteiro(arr(est.roteiro));
   $("optEstado").textContent = (est.planilha ? "✅ link da planilha guardado" : "⚠️ falta o link da planilha (o bot precisa dele)") + " · " + (est.token ? "token do GitHub guardado" : "sem token do GitHub");
 }
+function emu(op) { $("resultadoEmu").textContent = "começando…"; acao("emu", { op }, "msgEmu"); }
 function pausa() { acao(est.pausado ? "continuar" : "pausar"); }
 
 function montaRoteiro(sel) {

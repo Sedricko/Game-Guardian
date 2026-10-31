@@ -66,6 +66,62 @@ $missao = {
     $out -join "`n`n"
 }
 
+# emulador pelo painel: ligar, desligar, root (Magisk pelo rootAVD), Tinker novo, abrir o jogo. Roda em segundo plano
+$emuOp = {
+    param($op, $sdk, $app, $jogo, $tok)
+    $adb = "$sdk\platform-tools\adb.exe"; $emu = "$sdk\emulator\emulator.exe"
+    $ser = @((& $adb devices) | Select-String "^(emulator-\d+)\s+device" | ForEach-Object { $_.Matches.Groups[1].Value }) | Select-Object -First 1
+    function Su($c) { & $adb -s $ser shell "su -c '$($c -replace "'", "'\''")'" }
+    switch ($op) {
+        "ligar" {
+            if ($ser) { return "o emulador ja esta ligado ($ser)" }
+            $avd = (& $emu -list-avds) | Where-Object { $_ -like "*Dysmantle_Play*" } | Select-Object -First 1
+            if (-not $avd) { return "nao achei o emulador Dysmantle_Play no Android Studio" }
+            # DNS fixo (sem ele o emulador nao resolvia nomes) e a placa do PC (o Orecraft precisa)
+            Start-Process $emu -ArgumentList "-avd $avd -no-snapshot-load -gpu host -dns-server 8.8.8.8,1.1.1.1"
+            & $adb wait-for-device
+            for ($i = 0; $i -lt 60; $i++) { if ((& $adb shell getprop sys.boot_completed 2>$null) -match "1") { return "emulador $avd ligado" }; Start-Sleep 5 }
+            return "o emulador abriu mas o Android ainda nao terminou de ligar (5 min)"
+        }
+        "desligar" { if (-not $ser) { return "ja estava desligado" }; & $adb -s $ser emu kill | Out-Null; return "emulador desligado" }
+        "reiniciar" { if (-not $ser) { return "emulador desligado" }; & $adb -s $ser reboot; & $adb -s $ser wait-for-device; return "reiniciando: em 1-2 min liga de novo" }
+        "root" {
+            if (-not $ser) { return "ligue o emulador antes" }
+            if ((Su "id") -match "uid=0") { return "o emulador ja tem root (Magisk funcionando)" }
+            $dir = "C:\rootAVD"
+            if (-not (Test-Path "$dir\rootAVD-master")) {
+                Invoke-WebRequest "https://gitlab.com/newbit/rootAVD/-/archive/master/rootAVD-master.zip" -OutFile "$env:TEMP\rootAVD.zip" -UseBasicParsing
+                Expand-Archive "$env:TEMP\rootAVD.zip" $dir -Force
+            }
+            $bat = Get-ChildItem "$dir\rootAVD-master" -Filter "rootAVD.bat" | Select-Object -First 1
+            if (-not $bat) { return "o rootAVD baixado nao tem rootAVD.bat" }
+            # janela visivel: o rootAVD pergunta a versao do Magisk (responder 2 e Enter); no fim o emulador desliga sozinho
+            Start-Process cmd -ArgumentList "/k cd /d `"$($bat.DirectoryName)`" && rootAVD.bat system-images\android-36\google_apis_playstore\x86_64\ramdisk.img"
+            return "abri a janela do root: se perguntar a versao do Magisk, digite 2 e Enter. No fim o emulador desliga; ligue de novo aqui e toque em Permitir no pedido de Superusuario"
+        }
+        "tinker" {
+            if (-not $ser) { return "ligue o emulador antes" }
+            $h = @{ "User-Agent" = "Tinker" }
+            $t = (Get-Content $tok -ErrorAction SilentlyContinue | Select-Object -First 1); if ($t -and $t.Trim()) { $h["Authorization"] = "Bearer $($t.Trim())" }
+            $rel = Invoke-RestMethod "https://api.github.com/repos/Sedricko/Game-Guardian/releases/latest" -Headers $h
+            $a = $rel.assets | Where-Object name -like "Tinker-*.apk" | Select-Object -First 1
+            $apk = "$env:TEMP\Tinker-painel.apk"
+            if ($h.ContainsKey("Authorization") -and $a.url) {
+                $r = Invoke-WebRequest $a.url -Headers ($h + @{ "Accept" = "application/octet-stream" }) -UseBasicParsing; [IO.File]::WriteAllBytes($apk, $r.Content)
+            } else { Invoke-WebRequest $a.browser_download_url -OutFile $apk -UseBasicParsing }
+            $inst = (& $adb -s $ser install -r $apk) -join " "
+            & $adb -s $ser shell appops set $app SYSTEM_ALERT_WINDOW allow | Out-Null
+            & $adb -s $ser shell pm grant $app android.permission.POST_NOTIFICATIONS 2>$null | Out-Null
+            $uid = ((& $adb -s $ser shell dumpsys package $app) | Select-String "(?:userId|appId)=(\d+)" | Select-Object -First 1).Matches.Groups[1].Value
+            if ($uid) { Su "magisk --sqlite 'REPLACE INTO policies (uid,policy,until,logging,notification) VALUES($uid,2,0,1,1)'" 2>$null | Out-Null }
+            return "Tinker $($rel.tag_name): $inst (root para o Tinker liberado no Magisk)"
+        }
+        "jogo" { if (-not $ser) { return "ligue o emulador antes" }; & $adb -s $ser shell monkey -p $jogo -c android.intent.category.LAUNCHER 1 | Out-Null; return "Orecraft aberto" }
+        "abrirtinker" { if (-not $ser) { return "ligue o emulador antes" }; & $adb -s $ser shell am start -n "$app/.MainActivity" | Out-Null; return "Tinker aberto" }
+        default { return "operacao desconhecida: $op" }
+    }
+}
+
 function Planilha($motivo, $texto) {
     $link = (Get-Content $cfg -ErrorAction SilentlyContinue | Select-Object -First 1)
     if (-not $link) { return "sem o link da planilha (rode o agente uma vez para ele pedir)" }
@@ -81,14 +137,23 @@ function Estado {
     $ag = Agentes
     $rod = $null
     if (Test-Path $estadoF) { try { $rod = Get-Content $estadoF -Raw -Encoding UTF8 | ConvertFrom-Json } catch { } }
-    $jogoAberto = $false; $tinker = $false
+    $jogoAberto = $false; $tinker = $false; $root = $false; $tinkerVer = ""; $jogoInstalado = $false
     if ($ser) {
         $jogoAberto = [bool]((& $adb -s $ser shell pidof $jogo) -join "")
         $tinker = [bool]((& $adb -s $ser shell pidof $app) -join "")
+        # o root e a versao mudam pouco: confere a cada 30 s (o painel pergunta o estado a cada 4 s)
+        if (-not $script:emuInfo -or ((Get-Date) - $script:emuInfo.quando).TotalSeconds -gt 30 -or $script:emuInfo.ser -ne $ser) {
+            $script:emuInfo = @{ quando = Get-Date; ser = $ser
+                root = (((& $adb -s $ser shell "su -c id" 2>&1) -join "") -match "uid=0")
+                ver = ((& $adb -s $ser shell dumpsys package $app) | Select-String "versionName=(\S+)" | Select-Object -First 1).Matches.Groups[1].Value
+                instalado = [bool](((& $adb -s $ser shell pm list packages $jogo) -join "") -match [regex]::Escape($jogo)) }
+        }
+        $root = $script:emuInfo.root; $tinkerVer = [string]$script:emuInfo.ver; $jogoInstalado = $script:emuInfo.instalado
     }
     if ($script:job -and $script:job.State -ne "Running") { $script:ultimo = (Receive-Job $script:job -ErrorAction SilentlyContinue) -join "`n"; Remove-Job $script:job -Force; $script:job = $null }
     @{
         agente = ($ag.Count -gt 0); pausado = (Test-Path $pausaF); emulador = [string]$ser; jogoAberto = $jogoAberto; tinker = $tinker
+        root = $root; tinkerVer = $tinkerVer; jogoInstalado = $jogoInstalado
         rodada = $rod; roteiro = @(Get-Content $roteiroF -ErrorAction SilentlyContinue | Where-Object { $_.Trim() })
         mantidos = @(Get-Content $mantidosF -Tail 15 -ErrorAction SilentlyContinue)
         planilha = [bool]((Get-Content $cfg -ErrorAction SilentlyContinue) -join "").Trim(); token = [bool]((Get-Content $tok -ErrorAction SilentlyContinue) -join "").Trim()
@@ -132,6 +197,12 @@ function Acao($a) {
             $script:ultimo = ""
             $script:job = Start-Job -ScriptBlock $missao -ArgumentList $adb, $ser, $app, $jogo, $cmds, ([int]$a.secs)
             return "rodando: $($a.cmds -join ' ; ')"
+        }
+        "emu" {
+            if ($script:job) { throw "ja tem uma tarefa rodando: espere ela acabar" }
+            $script:ultimo = ""; $script:emuInfo = $null
+            $script:job = Start-Job -ScriptBlock $emuOp -ArgumentList $a.op, $sdk, $app, $jogo, $tok
+            return "comecei: $($a.op) (o resultado aparece aqui embaixo)"
         }
         "config" {
             if ($a.link) { if ($a.link -notmatch '^https://script\.google\.com/') { throw "o link precisa comecar com https://script.google.com/" }; Set-Content $cfg $a.link.Trim() }
