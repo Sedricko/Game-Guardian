@@ -171,6 +171,16 @@ O texto completo de cada opção está em `docs/tutorial/ajuda.py` (fonte única
   de mentira (3 testes + gerar). Ferramentas → 📜 Scripts (`ScriptsTool.kt`): importar/colar, rodar, perguntas dentro
   do painel, "Abrir menu" (gg.isVisible = true uma vez, para scripts em laço), Parar. Missão `luateste <n>` = teste 2h.
 
+## 🖥️ Painel Tinker no PC (31/10)
+- `PainelTinker.exe` (release `painel-pc`, workflow `painel.yml` no Windows com csc; caminhos com `\`) tira para
+  `%LOCALAPPDATA%\TinkerPainel` o `PAINEL-TINKER.ps1` (servidor HttpListener em localhost:8766, token), o
+  `painel-tinker.html` e o `TINKER-AGENTE.ps1`, e abre a janela (Edge --app). O painel: vigia que liga/religa o bot (Parar e
+  Pausar criam `tinker-agente-pausa.txt` e seguram), se atualiza pelo GitHub a cada 15 min (**suba `$PAINEL_VERSAO`** a cada
+  mudanca no painel), Emulador (criar/ligar/root/Tinker), Preparar tudo, Roteiro, Meus roteiros, Restricoes, Cenarios,
+  Logs, tela ao vivo (job de prints). Abrir com o Windows (tarefa agendada) foi barrado: nao fazer.
+- Agente le `tinker-agente-roteiro.txt`, `-pausa.txt`, `-meus-roteiros.json`, `-ajustes.json` e grava `-estado.json`.
+- Janela da nuvem do Orecraft: o agente toca so em carregar da nuvem (nunca manter/local).
+
 ## Próximos passos
 - Orecraft: achar o ouro (pedido 3999 → 4999), depois a missão "trocar a moeda de um preço" (só moedas do jogo) e ler o
   preço novo na tela; memória de estratégia por motor (ordem de métodos que funcionou em cada engine).
