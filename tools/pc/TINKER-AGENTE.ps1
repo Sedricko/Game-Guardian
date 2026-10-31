@@ -1282,6 +1282,7 @@ function Run-RealGame($dg) {
     if ($have -ne $v) { Install-Tinker $rel }
     Set-NoOverlay
     Set-PanelLink  # as chaves da IA (painel da planilha): sem elas a IA que joga dizia "coloque uma chave do Groq"
+    & $adb logcat -c 2>$null  # so o registro desta abertura (a janela da nuvem e procurada nele)
     & $adb shell monkey -p $dg -c android.intent.category.LAUNCHER 1 | Out-Null
     # sem ninguem: espera o jogo carregar e o Tinker le a tela e toca sozinho nos botoes da entrada (INICIAR, CONTINUAR...)
     Say "abrindo o $nome; passo a tela de entrada sozinho"
@@ -1296,6 +1297,16 @@ function Run-RealGame($dg) {
         $tocou++
         Say "  $((($script:last -split "`n")[0]) -replace '^ok ', '')"
         Start-Sleep 8
+    }
+    # janela da nuvem (31/10: "GPS Newer Profile Found in Cloud" / "Owerwrite user confirmation" no logcat do jogo): ficava na
+    # frente e o Tinker so via 1 numero. Escolhe SEMPRE carregar o da nuvem (o mais novo); manter o do emulador poderia mandar o
+    # progresso velho para a nuvem e apagar o do usuario. Nunca toca em manter/local; sem botao claro, so avisa e manda a foto
+    $nuvem = 0
+    try { $nuvem = Step "tocar ^(?!.*(MANTER|LOCAL|KEEP|DISPOSITIVO|DEVICE|CANCEL)).*(NUVEM|CLOUD|CARREGAR|BAIXAR|RESTAURAR|LOAD|DOWNLOAD)" 60 } catch { }
+    if ($nuvem) { Say "  janela da nuvem: carreguei o progresso da nuvem ($((($script:last -split "`n")[0]) -replace '^ok ', ''))"; Start-Sleep 15 }
+    elseif (((& $adb logcat -d -s Unity:I 2>$null) -join "`n") -match "Owerwrite user confirmation|Newer Profile Found in Cloud") {
+        Say "  janela da nuvem na frente e nenhum botao de 'carregar da nuvem' claro: nao toquei (escolha no emulador)"
+        try { Post-Sheet "agente PC: foto do jogo ANTES (janela da nuvem sem botao claro)" "" ("jpeg base64`n" + (Shot "nuvem")) $v "$nome (emulador)" } catch { }
     }
     # pedido do usuario (30/10): nao bloqueia mais a internet do jogo. O corte do Android 16 derrubava o DNS do emulador inteiro
     # (a IA e a planilha so voltavam no fim da rodada). Garante que nada ficou cortado de rodadas antigas
