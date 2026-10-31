@@ -140,14 +140,25 @@ end
 
 -- a assinatura achou vários lugares iguais (estruturas repetidas no jogo, ex.: cada barra tem o mesmo formato):
 -- separa pelo valor que a tela mostra agora
-local function desempatar(nome, tipo, achados)
+-- a posição do certo entre os parecidos (em ordem de endereço) costuma ser a mesma a cada abertura (são listas do jogo):
+-- guardada na 1ª vez que você diz o valor, depois o script escolhe sozinho
+local function rankarq(nome) return gg.EXT_STORAGE .. "/tinker-rank-" .. JOGO .. "-" .. nome:gsub("[^%w]", "_") .. ".txt" end
+local function desempatar(nome, tipo, achados, perguntar)
   if #achados <= 1 then return achados end
+  table.sort(achados, function(x, y) return x.address < y.address end)
+  local f = io.open(rankarq(nome), "r")
+  if f and not perguntar then
+    local pos, total = f:read("*n"), f:read("*n"); f:close()
+    if pos and total == #achados and achados[pos] then return { achados[pos] } end
+  elseif f then f:close() end
   local r = gg.prompt({ "A assinatura achou " .. #achados .. " lugares parecidos. Quanto " .. nome .. " mostra na tela agora?" }, { "" }, { "number" })
   if not r or r[1] == "" then return achados end
   local want, out = tonumber(r[1]), {}
   local vals = {}
   for i, a in ipairs(achados) do vals[i] = { address = a.address, flags = tipo } end
-  for i, v in ipairs(gg.getValues(vals)) do if math.abs(v.value - want) < 0.5 then out[#out + 1] = achados[i] end end
+  local pos
+  for i, v in ipairs(gg.getValues(vals)) do if math.abs(v.value - want) < 0.5 then out[#out + 1] = achados[i]; pos = i end end
+  if #out == 1 then local w = io.open(rankarq(nome), "w"); w:write(pos, " ", #achados); w:close() end
   return out
 end
 
