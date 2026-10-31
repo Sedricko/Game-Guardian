@@ -11,12 +11,14 @@ $jogo = "com.evrika.miner.camp"
 $U = $env:USERPROFILE
 $log = "$U\tinker-agente-log.txt"
 $cfg = "$U\tinker-agente-painel.txt"     # link da planilha (o mesmo do agente)
+$tok = "$U\tinker-agente-github.txt"     # token do GitHub (so leitura), opcional
 $roteiroF = "$U\tinker-agente-roteiro.txt"
 $pausaF = "$U\tinker-agente-pausa.txt"
 $estadoF = "$U\tinker-agente-estado.json"
 $mantidosF = "$U\tinker-mantidos-$jogo.txt"
 $port = 8766
 $token = [guid]::NewGuid().ToString("N").Substring(0, 16)  # so a janela aberta por este painel fala com ele
+$tokenF = "$dir\painel-token.txt"  # o PainelTinker.exe aberto de novo reabre a janela do painel que ja esta rodando
 $script:job = $null
 $script:ultimo = ""
 
@@ -88,7 +90,8 @@ function Estado {
     @{
         agente = ($ag.Count -gt 0); pausado = (Test-Path $pausaF); emulador = [string]$ser; jogoAberto = $jogoAberto; tinker = $tinker
         rodada = $rod; roteiro = @(Get-Content $roteiroF -ErrorAction SilentlyContinue | Where-Object { $_.Trim() })
-        mantidos = @(Get-Content $mantidosF -Tail 15 -ErrorAction SilentlyContinue); planilha = (Test-Path $cfg)
+        mantidos = @(Get-Content $mantidosF -Tail 15 -ErrorAction SilentlyContinue)
+        planilha = [bool]((Get-Content $cfg -ErrorAction SilentlyContinue) -join "").Trim(); token = [bool]((Get-Content $tok -ErrorAction SilentlyContinue) -join "").Trim()
         cenario = $(if ($script:job) { "rodando" } else { "" }); resultado = $script:ultimo
     }
 }
@@ -98,8 +101,11 @@ function Acao($a) {
         "ligar" {
             Remove-Item $pausaF -ErrorAction SilentlyContinue
             if ((Agentes).Count) { return "o agente ja esta ligado" }
-            Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$dir\TINKER-AGENTE.ps1`" -Jogo $jogo" -WindowStyle Minimized
-            return "agente ligado (janela minimizada na barra de tarefas)"
+            # tudo pelo painel: sem o link o agente perguntaria numa janela escondida
+            if (-not ((Get-Content $cfg -ErrorAction SilentlyContinue) -join "").Trim()) { throw "falta o link da planilha: cole em Opcoes" }
+            if (-not (Test-Path $tok)) { Set-Content $tok "" }
+            Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$dir\TINKER-AGENTE.ps1`" -Jogo $jogo" -WindowStyle Hidden
+            return "agente ligado (roda escondido; acompanhe aqui e em Logs)"
         }
         "parar" { $n = 0; foreach ($p in Agentes) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue; $n++ }; return "agente parado ($n)" }
         "pausar" { Set-Content $pausaF "pausado pelo painel $(Get-Date)"; return "pausa marcada: o agente termina a rodada de agora e espera" }
@@ -127,6 +133,12 @@ function Acao($a) {
             $script:job = Start-Job -ScriptBlock $missao -ArgumentList $adb, $ser, $app, $jogo, $cmds, ([int]$a.secs)
             return "rodando: $($a.cmds -join ' ; ')"
         }
+        "config" {
+            if ($a.link) { if ($a.link -notmatch '^https://script\.google\.com/') { throw "o link precisa comecar com https://script.google.com/" }; Set-Content $cfg $a.link.Trim() }
+            if ($a.token) { Set-Content $tok $a.token.Trim() }
+            return "guardado neste PC"
+        }
+        "sair" { $script:sair = $true; return "painel fechando (o bot continua)" }
         "claude" { return (Planilha "painel: recado para o Claude" ([string]$a.texto)) }
         default { throw "acao desconhecida: $($a.acao)" }
     }
@@ -140,13 +152,20 @@ function Send($res, $code, $type, $text) {
 
 $h = New-Object Net.HttpListener
 $h.Prefixes.Add("http://localhost:$port/")
-try { $h.Start() } catch { Write-Host "A porta $port esta ocupada: o painel ja esta aberto? Feche a outra janela do painel." -ForegroundColor Yellow; pause; exit }
-$url = "http://localhost:$port/?t=$token"
 $edge = @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe", "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
-if ($edge) { Start-Process $edge "--app=$url --window-size=1400,900" } else { Start-Process $url }
+function Abrir($u) { if ($edge) { Start-Process $edge "--app=$u --window-size=1400,900" } else { Start-Process $u } }
+try { $h.Start() } catch {
+    # o painel ja esta rodando (escondido): so abre a janela dele de novo
+    $old = (Get-Content $tokenF -ErrorAction SilentlyContinue | Select-Object -First 1)
+    if ($old) { Abrir "http://localhost:$port/?t=$old" } else { Write-Host "A porta $port esta ocupada por outro programa." }
+    exit
+}
+Set-Content $tokenF $token
+Abrir "http://localhost:$port/?t=$token"
 Write-Host "Painel Tinker aberto ($url). Deixe esta janela aberta; fechar ela fecha o painel." -ForegroundColor Cyan
 
-while ($h.IsListening) {
+$script:sair = $false
+while ($h.IsListening -and -not $script:sair) {
     $ctx = $h.GetContext()
     $req = $ctx.Request; $res = $ctx.Response
     try {
@@ -156,7 +175,15 @@ while ($h.IsListening) {
         switch ($req.Url.AbsolutePath) {
             "/" { Send $res 200 "text/html" ((Get-Content "$dir\painel-tinker.html" -Raw -Encoding UTF8).Replace("__TOKEN__", $token)) }
             "/api/estado" { Send $res 200 "application/json" ((Estado) | ConvertTo-Json -Depth 6 -Compress) }
-            "/api/log" { Send $res 200 "text/plain" ((Get-Content $log -Tail ([int]("0" + $req.QueryString["n"]) + 1) -Encoding UTF8 -ErrorAction SilentlyContinue) -join "`n") }
+            "/api/log" {
+                $n = [int]("0" + $req.QueryString["n"]) + 1
+                $txt = switch ($req.QueryString["fonte"]) {
+                    "tinker" { $ser = Serial; if ($ser) { (& $adb -s $ser shell "su -c 'tail -n $n /data/data/$app/files/tinker.log' 2>/dev/null || tail -n $n /data/data/$app/files/tinker.log") -join "`n" } else { "emulador desligado" } }
+                    "falhas" { $ser = Serial; if ($ser) { (& $adb -s $ser logcat -b crash -d -t $n) -join "`n" } else { "emulador desligado" } }
+                    default { (Get-Content $log -Tail $n -Encoding UTF8 -ErrorAction SilentlyContinue) -join "`n" }
+                }
+                Send $res 200 "text/plain" ([string]$txt)
+            }
             "/api/acao" { Send $res 200 "application/json" (@{ ok = $true; msg = (Acao ($body | ConvertFrom-Json)) } | ConvertTo-Json -Compress) }
             default { Send $res 404 "text/plain" "nao achei" }
         }
