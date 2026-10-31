@@ -467,5 +467,8 @@ class ValuesTest {
         d[20] = 0x3f800000
         assertEquals(listOf(80), speedOffsets(d))
         assertEquals(emptyList<Int>(), speedOffsets(MutableList(48) { 0 }))
+        assertEquals(20, speedClock(w))
+        assertEquals(500.0, clockValue(500), 0.0)
+        assertEquals(1234.5, clockValue(java.lang.Double.doubleToLongBits(1234.5)), 0.0)
     }
 }

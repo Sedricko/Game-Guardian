@@ -1561,7 +1561,7 @@ class Engine private constructor(private val app: Context) {
                 ?: error("não achei a função $arg")
             "fixar" -> clearMissionPatches().let { nativeFunctions(w[1]) }.second.firstOrNull { it.name == w[1] }?.let { patchNative(it, w.getOrElse(2) { "" }, apply = true, prefix = "missão ") }
                 ?: error("não achei a função ${w[1]}")
-            "velocidade" -> if (arg.isEmpty()) return findGameSpeed().also { speedAddrs = it }.let { "ok ${it.size}\ncount ${it.size}\n" + it.joinToString("\n") }
+            "velocidade" -> if (arg.isEmpty()) return findGameSpeed().also { speedAddrs = it }.let { "ok ${it.size} $speedNote\ncount ${it.size}\n" + it.joinToString("\n") }
                 else setGameSpeed(speedAddrs, arg)
             // 🎯 Achar sozinho no Jogo de Teste: põe o jogo na frente, lê a tela e refina sozinho (até 2 minutos)
             "sozinho" -> {
@@ -4313,19 +4313,49 @@ class Engine private constructor(private val app: Context) {
      * tempos em segundos (Double) que andam juntos; a escala do tempo (timeScale = 1.0) fica logo depois. Ideia do
      * SpeedHackFinder (APEX[GG]v2). Usa a lista de resultados da busca.
      */
-    suspend fun findGameSpeed(): List<String> = call { d ->
-        val n = d.send("search i32 1065353214").status.toLongOrNull() ?: 0
-        if (n == 0L || n > 50_000) return@call emptyList()
-        val found = LinkedHashSet<String>()
-        d.send("list ${minOf(n, 20_000)}", quiet = true).lines.forEach { line ->
-            val a = line.substringBefore(' ').toLongOrNull(16) ?: return@forEach
-            val w = runCatching { d.send("dump ${a.toString(16)} i32 48", quiet = true).lines.map { it.substringAfter(' ').toLongOrNull()?.toInt() } }.getOrNull()
-            if (w == null || w.size != 48 || w.any { it == null }) return@forEach
-            speedOffsets(w.map { it!! }).forEach { found += (a + it).toString(16) }
+    suspend fun findGameSpeed(): List<String> {
+        // (lugar do 1.0, os dois tempos do mesmo relógio)
+        val cands = call { d ->
+            val n = d.send("search i32 1065353214").status.toLongOrNull() ?: 0
+            if (n == 0L || n > 50_000) return@call emptyList()
+            val out = LinkedHashMap<String, List<Long>>()
+            d.send("list ${minOf(n, 20_000)}", quiet = true).lines.forEach { line ->
+                val a = line.substringBefore(' ').toLongOrNull(16) ?: return@forEach
+                val w = runCatching { d.send("dump ${a.toString(16)} i32 48", quiet = true).lines.map { it.substringAfter(' ').toLongOrNull()?.toInt() } }.getOrNull()
+                if (w == null || w.size != 48 || w.any { it == null }) return@forEach
+                val words = w.map { it!! }
+                val o1 = speedClock(words) ?: return@forEach
+                speedOffsets(words).forEach { out.putIfAbsent((a + it).toString(16), listOf(a + o1, a + o1 + 8)) }
+            }
+            out.toList()
         }
-        Diag.add("Velocidade do jogo: ${found.size} lugares (${found.joinToString { "0x$it" }})")
-        found.toList()
+        // confere cada um como o relógio manda: em 2x, o tempo do jogo tem de andar mais rápido (pega todo 1.0 perto do relógio,
+        // e um deles pode ser outra coisa); volta para 1 logo depois
+        val checked = cands.take(8).map { (s, clocks) -> s to speedCheck(s, clocks) }
+        val sure = checked.filter { it.second == true }.map { it.first }
+        val out = sure.ifEmpty { cands.map { it.first } }
+        speedNote = when {
+            sure.isNotEmpty() -> "Conferido: em 2x o relógio do jogo andou mais rápido."
+            out.isEmpty() -> ""
+            checked.all { it.second == null } -> "Não deu para conferir (o tempo do jogo está parado: saia do menu ou da pausa)."
+            else -> "O relógio não mudou de ritmo em 2x: pode não ser a velocidade."
+        }
+        Diag.add("Velocidade do jogo: ${out.size} lugares (${out.joinToString { "0x$it" }}) · ${checked.joinToString { "0x${it.first}=${it.second}" }}")
+        return out
     }
+
+    /** true = em 2x o relógio andou pelo menos 1,5× mais; false = andou igual; null = relógio parado ou ilegível. */
+    private suspend fun speedCheck(speed: String, clocks: List<Long>): Boolean? {
+        suspend fun read() = runCatching { call { d -> clocks.map { clockValue(d.send("read ${it.toString(16)} i64", quiet = true).status.toLong()) } } }.getOrNull()
+        suspend fun rates(): List<Double>? { val a = read() ?: return null; delay(800); val b = read() ?: return null; return b.zip(a) { x, y -> x - y } }
+        val r1 = rates() ?: return null
+        if (r1.none { it > 0 }) return null
+        call { d -> d.send("write $speed f32 2", quiet = true) }
+        val r2 = try { rates() } finally { runCatching { call { d -> d.send("write $speed f32 1", quiet = true) } } }
+        return r2 != null && r1.indices.any { r1[it] > 0 && r2[it] > r1[it] * 1.5 }
+    }
+
+    var speedNote = ""
 
     /**
      * ⏱️ Cronômetros (construção, espera, energia que volta): jogos offline guardam a hora de terminar como número de

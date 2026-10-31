@@ -369,17 +369,20 @@ internal fun applySaveEdits(text: String, edits: Map<SaveField, String>): String
  * depois vêm dois tempos que andam juntos, e o 1.0 fica até 140 bytes depois do primeiro. Os tempos podem ser Double ou
  * Qword inteiro: o SpeedHackFinder do GG lê Qword, e era o que achava no Orecraft (o Tinker só lia Double e achava 0).
  */
-internal fun speedOffsets(w: List<Int>): List<Int> {
+internal fun speedOffsets(w: List<Int>): List<Int> = speedClock(w)?.let { o1 -> (1..35).map { o1 + 4 * it }.filter { it / 4 < w.size && w[it / 4] == 0x3f800000 } }.orEmpty()
+
+/** Onde fica o 1º dos dois tempos (16, 20 ou 24 bytes depois do 0.99999994), ou null se não tem cara de relógio. */
+internal fun speedClock(w: List<Int>): Int? {
     fun q(off: Int) = (w[off / 4].toLong() and 0xffffffffL) or (w[off / 4 + 1].toLong() shl 32)
     fun ok(t1: Double, t2: Double) = t1 > 100 && t1 < 1e6 && t2 > t1 && t2 < t1 + 250
     for ((o1, o2) in listOf(20 to 28, 16 to 24, 24 to 32)) {
-        val d1 = java.lang.Double.longBitsToDouble(q(o1))
-        val d2 = java.lang.Double.longBitsToDouble(q(o2))
-        if (!ok(d1, d2) && !ok(q(o1).toDouble(), q(o2).toDouble())) continue
-        return (1..35).map { o1 + 4 * it }.filter { it / 4 < w.size && w[it / 4] == 0x3f800000 }
+        if (ok(java.lang.Double.longBitsToDouble(q(o1)), java.lang.Double.longBitsToDouble(q(o2))) || ok(q(o1).toDouble(), q(o2).toDouble())) return o1
     }
-    return emptyList()
+    return null
 }
+
+/** Um tempo do relógio lido como Qword: inteiro pequeno fica como está; senão são os bits de um Double. */
+internal fun clockValue(q: Long): Double = if (q in 0..999_999_999) q.toDouble() else java.lang.Double.longBitsToDouble(q)
 
 // ---- o juiz: qual forma de mudar um número da tela é a melhor ----
 

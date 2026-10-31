@@ -221,7 +221,7 @@ private fun GameSpeed(engine: Engine, enabled: Boolean, run: (suspend () -> Stri
             Text("Acha onde o jogo guarda a velocidade do tempo. Fique no menu ou numa fase parada. Troca os resultados da busca.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Button(shape = MaterialTheme.shapes.medium, enabled = enabled, onClick = {
-                run { engine.findGameSpeed().let { addrs = it; if (it.isEmpty()) "Não achei a velocidade (jogo não é Unity, ou o relógio fica em outro formato)." else "Achei ${it.size} lugar(es) da velocidade." } }
+                run { engine.findGameSpeed().let { addrs = it; if (it.isEmpty()) "Não achei a velocidade (jogo não é Unity, ou o relógio fica em outro formato)." else "Achei ${it.size} lugar(es) da velocidade. ${engine.speedNote}".trim() } }
             }) { Text("Achar a velocidade") }
         } else if (a.isEmpty()) {
             Text("Não achei. Abra uma fase e tente de novo.", style = MaterialTheme.typography.bodySmall)
