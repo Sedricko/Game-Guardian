@@ -4319,12 +4319,17 @@ class Engine private constructor(private val app: Context) {
             val n = d.send("search i32 1065353214").status.toLongOrNull() ?: 0
             if (n == 0L || n > 50_000) return@call emptyList()
             val out = LinkedHashMap<String, List<Long>>()
+            sample.clear()
             d.send("list ${minOf(n, 20_000)}", quiet = true).lines.forEach { line ->
                 val a = line.substringBefore(' ').toLongOrNull(16) ?: return@forEach
                 val w = runCatching { d.send("dump ${a.toString(16)} i32 48", quiet = true).lines.map { it.substringAfter(' ').toLongOrNull()?.toInt() } }.getOrNull()
                 if (w == null || w.size != 48 || w.any { it == null }) return@forEach
                 val words = w.map { it!! }
-                val o1 = speedClock(words) ?: return@forEach
+                val o1 = speedClock(words)
+                if (o1 == null) {
+                    if (sample.size < 4) sample += "0x${a.toString(16)}: " + (16..36 step 4).joinToString(" ") { o -> "+$o=${words[o / 4]}" }
+                    return@forEach
+                }
                 speedOffsets(words).forEach { out.putIfAbsent((a + it).toString(16), listOf(a + o1, a + o1 + 8)) }
             }
             out.toList()
@@ -4334,9 +4339,10 @@ class Engine private constructor(private val app: Context) {
         val checked = cands.take(8).map { (s, clocks) -> s to speedCheck(s, clocks) }
         val sure = checked.filter { it.second == true }.map { it.first }
         val out = sure.ifEmpty { cands.map { it.first } }
+        if (cands.isEmpty()) Diag.add("Velocidade: nenhum relógio com os dois tempos; amostra dos Dwords depois do 0.99999994: ${sample.joinToString(" | ")}")
         speedNote = when {
             sure.isNotEmpty() -> "Conferido: em 2x o relógio do jogo andou mais rápido."
-            out.isEmpty() -> ""
+            out.isEmpty() -> "Nenhum dos relógios do Unity tem os dois tempos (o jogo está pausado ou numa janela?). A amostra ficou no Registro."
             checked.all { it.second == null } -> "Não deu para conferir (o tempo do jogo está parado: saia do menu ou da pausa)."
             else -> "O relógio não mudou de ritmo em 2x: pode não ser a velocidade."
         }
@@ -4356,6 +4362,7 @@ class Engine private constructor(private val app: Context) {
     }
 
     var speedNote = ""
+    private val sample = mutableListOf<String>()  // o que havia depois dos relógios quando nenhum serviu (para achar o formato)
 
     /**
      * ⏱️ Cronômetros (construção, espera, energia que volta): jogos offline guardam a hora de terminar como número de
@@ -4413,6 +4420,8 @@ class Engine private constructor(private val app: Context) {
     /** Muda a velocidade (1 = normal) e trava para o jogo não voltar sozinho; 1 solta. */
     suspend fun setGameSpeed(addrs: List<String>, factor: String): String {
         val f = normalizeNumbers(factor).toFloatOrNull()?.takeIf { it > 0f && it <= 100f } ?: return "Velocidade inválida: use de 0.1 a 100."
+        // sem achados não há o que mudar: antes dizia "Jogo em 2x" sem escrever em nada (cenário do painel, 31/10)
+        if (addrs.isEmpty() && f != 1f) return "Ainda não achei a velocidade deste jogo: toque em Achar a velocidade (dentro do jogo, fora do menu)."
         if (addrs.size > 4) return "Achei ${addrs.size} lugares com cara de velocidade: é demais para mudar todos sem risco. Abra uma fase e procure de novo."
         // solta a trava antes de escrever: senão ela põe a velocidade antiga de volta logo depois
         withContext(Dispatchers.Main) { removeSaved(Session.saved.filter { it.name == SPEED_NAME }) }

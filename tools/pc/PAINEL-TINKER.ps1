@@ -53,6 +53,7 @@ function Foto($ser) {
 # missao do Tinker em segundo plano (algumas levam minutos): a janela segue respondendo
 $missao = {
     param($adb, $ser, $app, $jogo, $cmds, $secs)
+    [Console]::OutputEncoding = [Text.Encoding]::UTF8  # a resposta do Tinker vem em UTF-8 (sem isto "voce" virava "vocÛ")
     function Sh($c) {
         if (((& $adb -s $ser shell id -u) -join "").Trim() -eq "0") { & $adb -s $ser shell $c } else { & $adb -s $ser shell "su -c '$($c -replace "'", "'\''")'" }
     }
@@ -77,6 +78,7 @@ $missao = {
 # emulador pelo painel: ligar, desligar, root (Magisk pelo rootAVD), Tinker novo, abrir o jogo. Roda em segundo plano
 $emuOp = {
     param($op, $sdk, $app, $jogo, $tok, $arg)
+    [Console]::OutputEncoding = [Text.Encoding]::UTF8
     $adb = "$sdk\platform-tools\adb.exe"; $emu = "$sdk\emulator\emulator.exe"
     # sdkmanager/avdmanager (Android SDK Command-line Tools) precisam de Java: o do Android Studio serve
     if (-not $env:JAVA_HOME) { $env:JAVA_HOME = @("$env:ProgramFiles\Android\Android Studio\jbr", "$env:ProgramFiles\Android\Android Studio\jre") | Where-Object { Test-Path $_ } | Select-Object -First 1 }
