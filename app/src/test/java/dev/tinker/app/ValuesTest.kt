@@ -453,4 +453,19 @@ class ValuesTest {
         assertEquals(texto, bestRoute(listOf(texto, texto.copy(name = "outro"))))  // empate: a testada antes
         assertEquals(null, bestRoute(listOf(falhou)))
     }
+
+    @Test
+    fun velocidadeComTemposQwordOuDouble() {
+        val w = MutableList(48) { 0 }
+        w[0] = 1065353214
+        w[5] = 500; w[7] = 600                 // Qword inteiro (o jeito do SpeedHackFinder)
+        w[12] = 0x3f800000                      // 1.0 em +48
+        assertEquals(listOf(48), speedOffsets(w))
+        val d = MutableList(48) { 0 }
+        fun dbl(i: Int, v: Double) { val b = java.lang.Double.doubleToLongBits(v); d[i] = b.toInt(); d[i + 1] = (b ushr 32).toInt() }
+        dbl(5, 1234.5); dbl(7, 1300.0)         // Double (o que o Tinker já lia)
+        d[20] = 0x3f800000
+        assertEquals(listOf(80), speedOffsets(d))
+        assertEquals(emptyList<Int>(), speedOffsets(MutableList(48) { 0 }))
+    }
 }

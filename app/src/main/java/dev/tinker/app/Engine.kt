@@ -4321,14 +4321,7 @@ class Engine private constructor(private val app: Context) {
             val a = line.substringBefore(' ').toLongOrNull(16) ?: return@forEach
             val w = runCatching { d.send("dump ${a.toString(16)} i32 48", quiet = true).lines.map { it.substringAfter(' ').toLongOrNull()?.toInt() } }.getOrNull()
             if (w == null || w.size != 48 || w.any { it == null }) return@forEach
-            fun dbl(off: Int) = java.lang.Double.longBitsToDouble((w[off / 4]!!.toLong() and 0xffffffffL) or (w[off / 4 + 1]!!.toLong() shl 32))
-            for ((o1, o2) in listOf(20 to 28, 16 to 24, 24 to 32)) {
-                val t1 = dbl(o1)
-                val t2 = dbl(o2)
-                if (!(t1 > 100 && t1 < 1e6 && t2 > t1 && t2 < t1 + 250)) continue
-                (1..35).map { o1 + 4 * it }.filter { w[it / 4] == 0x3f800000 }.forEach { found += (a + it).toString(16) }
-                break
-            }
+            speedOffsets(w.map { it!! }).forEach { found += (a + it).toString(16) }
         }
         Diag.add("Velocidade do jogo: ${found.size} lugares (${found.joinToString { "0x$it" }})")
         found.toList()

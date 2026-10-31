@@ -364,6 +364,23 @@ internal fun applySaveEdits(text: String, edits: Map<SaveField, String>): String
     return out
 }
 
+/**
+ * Onde está o timeScale (1.0) a partir do 0.99999994 do relógio do Unity (`w` = 48 Dwords a partir dele): 16 a 32 bytes
+ * depois vêm dois tempos que andam juntos, e o 1.0 fica até 140 bytes depois do primeiro. Os tempos podem ser Double ou
+ * Qword inteiro: o SpeedHackFinder do GG lê Qword, e era o que achava no Orecraft (o Tinker só lia Double e achava 0).
+ */
+internal fun speedOffsets(w: List<Int>): List<Int> {
+    fun q(off: Int) = (w[off / 4].toLong() and 0xffffffffL) or (w[off / 4 + 1].toLong() shl 32)
+    fun ok(t1: Double, t2: Double) = t1 > 100 && t1 < 1e6 && t2 > t1 && t2 < t1 + 250
+    for ((o1, o2) in listOf(20 to 28, 16 to 24, 24 to 32)) {
+        val d1 = java.lang.Double.longBitsToDouble(q(o1))
+        val d2 = java.lang.Double.longBitsToDouble(q(o2))
+        if (!ok(d1, d2) && !ok(q(o1).toDouble(), q(o2).toDouble())) continue
+        return (1..35).map { o1 + 4 * it }.filter { it / 4 < w.size && w[it / 4] == 0x3f800000 }
+    }
+    return emptyList()
+}
+
 // ---- o juiz: qual forma de mudar um número da tela é a melhor ----
 
 /** Nomes de campo com cara de moeda/recurso do jogo: vão primeiro na fila de candidatos. */
