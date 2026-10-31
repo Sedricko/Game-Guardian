@@ -15,7 +15,7 @@ class PainelTinker
         foreach (string n in new[] { "PAINEL-TINKER.ps1", "painel-tinker.html", "TINKER-AGENTE.ps1" })
         {
             string f = Path.Combine(dir, n);
-            if (n == "TINKER-AGENTE.ps1" && File.Exists(f)) continue;  // o agente se atualiza sozinho pelo GitHub
+            if (File.Exists(f) && n != "painel-tinker.html") continue;  // o agente e o painel se atualizam sozinhos pelo GitHub
             try
             {
                 using (Stream s = a.GetManifestResourceStream(n))

@@ -1,6 +1,7 @@
 ﻿# Painel Tinker: uma janela (pagina local, so neste PC) para acompanhar e controlar o agente do Orecraft. Mostra a rodada
 # ao vivo, a tela do emulador, o roteiro (quais testes rodam), cenarios prontos (missoes do Tinker), os logs e manda recado
 # para o Claude pela planilha. Conversa com o agente pelos arquivos tinker-agente-* da pasta do usuario.
+param([switch]$SemJanela)  # reiniciado pela atualizacao: a janela do painel ja esta aberta
 $ErrorActionPreference = "Continue"
 $ProgressPreference = "SilentlyContinue"
 $dir = $PSScriptRoot
@@ -17,8 +18,11 @@ $pausaF = "$U\tinker-agente-pausa.txt"
 $estadoF = "$U\tinker-agente-estado.json"
 $mantidosF = "$U\tinker-mantidos-$jogo.txt"
 $port = 8766
-$token = [guid]::NewGuid().ToString("N").Substring(0, 16)  # so a janela aberta por este painel fala com ele
 $tokenF = "$dir\painel-token.txt"  # o PainelTinker.exe aberto de novo reabre a janela do painel que ja esta rodando
+# o mesmo token entre um painel e o atualizado: a janela aberta segue funcionando depois da atualizacao
+$token = (Get-Content $tokenF -ErrorAction SilentlyContinue | Select-Object -First 1)
+if (-not $token) { $token = [guid]::NewGuid().ToString("N").Substring(0, 16) }  # so a janela aberta por este painel fala com ele
+$raw = "https://raw.githubusercontent.com/Sedricko/Game-Guardian/ccr-92c99132-2ne91y/tools/pc"
 $script:job = $null
 $script:ultimo = ""
 
@@ -262,6 +266,7 @@ function Estado {
         mantidos = @(Get-Content $mantidosF -Tail 15 -ErrorAction SilentlyContinue)
         planilha = [bool]((Get-Content $cfg -ErrorAction SilentlyContinue) -join "").Trim(); token = [bool]((Get-Content $tok -ErrorAction SilentlyContinue) -join "").Trim()
         cenario = $(if ($script:job) { "rodando" } else { "" }); resultado = $script:ultimo
+        ver = [string](Get-Item "$dir\painel-tinker.html").LastWriteTimeUtc.Ticks; vigia = $script:vigia
     }
 }
 
@@ -276,7 +281,8 @@ function Acao($a) {
             Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$dir\TINKER-AGENTE.ps1`" -Jogo $jogo" -WindowStyle Hidden
             return "agente ligado (roda escondido; acompanhe aqui e em Logs)"
         }
-        "parar" { $n = 0; foreach ($p in Agentes) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue; $n++ }; return "agente parado ($n)" }
+        # parar marca a pausa: senao o vigia do painel religava o bot em 1 min
+        "parar" { Set-Content $pausaF "parado pelo painel $(Get-Date)"; $n = 0; foreach ($p in Agentes) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue; $n++ }; return "agente parado ($n); so volta quando tocar em Ligar o bot" }
         "pausar" { Set-Content $pausaF "pausado pelo painel $(Get-Date)"; return "pausa marcada: o agente termina a rodada de agora e espera" }
         "continuar" { Remove-Item $pausaF -ErrorAction SilentlyContinue; return "continuando: a proxima rodada comeca em ate 1 min" }
         "roteiro" {
@@ -319,6 +325,33 @@ function Acao($a) {
     }
 }
 
+# atualiza o painel pelo GitHub (como o agente faz): a pagina nova vale ao recarregar; o script novo reinicia o painel
+function Atualizar {
+    try {
+        $html = (Invoke-WebRequest "$raw/painel-tinker.html" -UseBasicParsing -Headers @{ "Cache-Control" = "no-cache" }).Content
+        if ($html -is [byte[]]) { $html = [Text.Encoding]::UTF8.GetString($html) }
+        if ($html -and $html.Contains("__TOKEN__") -and $html -ne (Get-Content "$dir\painel-tinker.html" -Raw -Encoding UTF8)) {
+            [IO.File]::WriteAllText("$dir\painel-tinker.html", $html, (New-Object Text.UTF8Encoding $false))
+        }
+        $ps = (Invoke-WebRequest "$raw/PAINEL-TINKER.ps1" -UseBasicParsing -Headers @{ "Cache-Control" = "no-cache" }).Content
+        if ($ps -is [byte[]]) { $ps = [Text.Encoding]::UTF8.GetString($ps) }
+        $ps = $ps.TrimStart([char]0xFEFF)
+        if ($ps -and $ps.Contains("function Atualizar") -and $ps -ne (Get-Content $PSCommandPath -Raw -Encoding UTF8).TrimStart([char]0xFEFF)) {
+            $e = $null; [void][System.Management.Automation.Language.Parser]::ParseInput($ps, [ref]$null, [ref]$e)
+            if (-not $e) { [IO.File]::WriteAllText($PSCommandPath, $ps, (New-Object Text.UTF8Encoding $true)); $script:reiniciar = $true }
+        }
+    } catch { }
+}
+
+# vigia (a cada 5 s): sem pausa e com o link da planilha, o bot fica sempre ligado; se cair, volta em ate 1 min
+function Vigiar {
+    if ((Test-Path $pausaF) -or -not ((Get-Content $cfg -ErrorAction SilentlyContinue) -join "").Trim()) { return }
+    if ((Agentes).Count) { return }
+    if ($script:ultimoLigar -and ((Get-Date) - $script:ultimoLigar).TotalSeconds -lt 60) { return }
+    $script:ultimoLigar = Get-Date
+    try { [void](Acao @{ acao = "ligar" }); $script:vigia = "religuei o bot $(Get-Date -Format 'HH:mm:ss')" } catch { $script:vigia = "nao consegui ligar o bot: $($_.Exception.Message)" }
+}
+
 function Send($res, $code, $type, $text) {
     $b = [Text.Encoding]::UTF8.GetBytes($text)
     $res.StatusCode = $code; $res.ContentType = "$type; charset=utf-8"; $res.ContentLength64 = $b.Length
@@ -336,12 +369,20 @@ try { $h.Start() } catch {
     exit
 }
 Set-Content $tokenF $token
-Abrir "http://localhost:$port/?t=$token"
+$script:vigia = ""; $script:reiniciar = $false; $script:proximaAtualizacao = Get-Date
+if (-not $SemJanela) { Abrir "http://localhost:$port/?t=$token" }
 Write-Host "Painel Tinker aberto ($url). Deixe esta janela aberta; fechar ela fecha o painel." -ForegroundColor Cyan
 
 $script:sair = $false
-while ($h.IsListening -and -not $script:sair) {
-    $ctx = $h.GetContext()
+while ($h.IsListening -and -not $script:sair -and -not $script:reiniciar) {
+    $ar = $h.BeginGetContext($null, $null)
+    while (-not $ar.AsyncWaitHandle.WaitOne(5000)) {
+        Vigiar
+        if ((Get-Date) -ge $script:proximaAtualizacao) { $script:proximaAtualizacao = (Get-Date).AddMinutes(15); Atualizar }
+        if ($script:reiniciar) { break }
+    }
+    if ($script:reiniciar) { break }
+    $ctx = $h.EndGetContext($ar)
     $req = $ctx.Request; $res = $ctx.Response
     try {
         if ($req.QueryString["t"] -ne $token) { Send $res 403 "text/plain" "abra pelo atalho Painel Tinker"; continue }
@@ -365,4 +406,9 @@ while ($h.IsListening -and -not $script:sair) {
     } catch {
         try { Send $res 200 "application/json" (@{ ok = $false; msg = $_.Exception.Message } | ConvertTo-Json -Compress) } catch { }
     }
+}
+# script novo baixado: solta a porta e abre o novo no lugar, sem abrir outra janela (a aberta segue: o token e o mesmo)
+if ($script:reiniciar) {
+    $h.Stop()
+    Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$PSCommandPath`" -SemJanela" -WindowStyle Hidden
 }

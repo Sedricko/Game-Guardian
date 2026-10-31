@@ -216,7 +216,10 @@
         <div class="dim" id="optEstado"></div>
       </div>
       <div class="card">
-        <h2>Painel</h2>
+        <h2>Sozinho</h2>
+        <p class="dim">Com o painel aberto, o bot se cuida sozinho: liga, religa se cair (em até 1 min) e o painel e o bot se atualizam pelo GitHub (o painel a cada 15 min). Você só interfere se quiser: Parar agora ou Pausar seguram até você tocar em Ligar/Continuar.</p>
+        <div class="dim" id="optVigia"></div>
+        <h2 style="margin-top:18px">Painel</h2>
         <p class="dim">Fechar o painel não para o bot: ele segue rodando escondido. Para abrir de novo, use o PainelTinker.exe.</p>
         <div class="btns"><button class="btn red" onclick="if (confirm('Fechar o painel? O bot continua.')) acao('sair', null, 'msgOpt')">Fechar o painel</button></div>
       </div>
@@ -299,6 +302,8 @@ async function estado() {
     [!!est.tinkerVer, est.tinkerVer ? "Tinker " + est.tinkerVer + " instalado" : "Tinker não instalado"], [est.jogoInstalado, est.jogoInstalado ? "Orecraft instalado" : "Orecraft não instalado (instale pela Play Store do emulador)"]];
   $("emuChecks").innerHTML = ck.map(([ok, t]) => `<div class="t"><span>${ok ? "✅" : "⚪"}</span><span>${esc(t)}</span><span></span></div>`).join("");
   if (!$("rotLista").dataset.feito) montaRoteiro(arr(est.roteiro));
+  if (!window.verPagina) window.verPagina = est.ver; else if (est.ver && est.ver !== window.verPagina) location.reload();  // painel atualizado
+  $("optVigia").textContent = est.vigia || "";
   $("optEstado").textContent = (est.planilha ? "✅ link da planilha guardado" : "⚠️ falta o link da planilha (o bot precisa dele)") + " · " + (est.token ? "token do GitHub guardado" : "sem token do GitHub");
 }
 let ultImg = "";
