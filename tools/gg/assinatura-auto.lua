@@ -233,7 +233,7 @@ local function painel(lista)
     local tipo, fase, viz = carregar(n)
     if fase and fase >= 2 then
       local a = achar_por_assinatura(n, tipo, viz)
-      itens[#itens + 1] = { nome = n, tipo = tipo, addr = #a == 1 and a[1].address or nil, varios = #a > 1 and a or nil }
+      itens[#itens + 1] = { nome = n, tipo = tipo, addr = #a == 1 and a[1].address or nil, varios = #a > 1 and a or nil, todos = #a > 1 and a or nil }
     end
   end
   if #itens == 0 then gg.alert("Ainda não há valor com assinatura pronta neste jogo. Refine um valor e guarde (3 testes).") return end
@@ -256,7 +256,15 @@ local function painel(lista)
       if #a == 1 then it.addr, it.varios = a[1].address, nil else gg.alert("Ainda " .. #a .. " lugares com esse valor: mude o valor no jogo e tente de novo.") end
     end
     if it.addr then
-      local acao = gg.choice({ "✏️ Mudar valor", "❄ Congelar (no valor que eu digitar)", "🔓 Soltar (descongelar)" }, nil, it.nome)
+      local agora = gg.getValues({ { address = it.addr, flags = it.tipo } })[1].value
+      local ops = { "✏️ Mudar valor", "❄ Congelar (no valor que eu digitar)", "🔓 Soltar (descongelar)" }
+      if it.todos then ops[4] = "🔎 Não é esse? Separar pelo valor da tela (" .. #it.todos .. " parecidos)" end
+      local acao = gg.choice(ops, nil, it.nome .. " = " .. tostring(agora) .. "  (confira se é o que a tela mostra)")
+      if acao == 4 then
+        local a = desempatar(it.nome, it.tipo, it.todos, true)
+        if #a == 1 then it.addr = a[1].address; gg.alert("Pronto: aprendi o lugar novo de " .. it.nome .. " ✅") else it.addr = nil; gg.alert(#a .. " lugares com esse valor: mude o valor no jogo e tente de novo.") end
+        acao = nil
+      end
       if acao == 1 or acao == 2 then
         local r = gg.prompt({ "Novo valor de " .. it.nome }, { "" }, { "number" })
         if r and r[1] ~= "" then
