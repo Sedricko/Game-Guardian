@@ -22,14 +22,14 @@ jobs:
         shell: pwsh
         run: |
           $csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
-          $pc = "tools/pc"
-          # caminhos sempre entre aspas: sem elas o pwsh entregava so "PainelTinker.cs" ao csc (CS1504)
-          & $csc /nologo /target:winexe /optimize /out:PainelTinker.exe "/win32manifest:$pc/exe/app.manifest" `
-            "/resource:$pc/PAINEL-TINKER.ps1,PAINEL-TINKER.ps1" "/resource:$pc/painel-tinker.html,painel-tinker.html" `
-            "/resource:$pc/TINKER-AGENTE.ps1,TINKER-AGENTE.ps1" "$pc/exe/PainelTinker.cs"
+          $pc = "tools\pc"
+          # caminhos com \ (o csc le "/" como inicio de opcao e achava so "PainelTinker.cs": CS1504)
+          & $csc /nologo /target:winexe /optimize /out:PainelTinker.exe "/win32manifest:$pc\exe/app.manifest" `
+            "/resource:$pc\PAINEL-TINKER.ps1,PAINEL-TINKER.ps1" "/resource:$pc\painel-tinker.html,painel-tinker.html" `
+            "/resource:$pc\TINKER-AGENTE.ps1,TINKER-AGENTE.ps1" "$pc\exe/PainelTinker.cs"
           if ($LASTEXITCODE) { exit 1 }
           # os scripts precisam abrir no PowerShell 5 do Windows: erro de sintaxe aqui para o build
-          foreach ($f in "$pc/PAINEL-TINKER.ps1", "$pc/TINKER-AGENTE.ps1") {
+          foreach ($f in "$pc\PAINEL-TINKER.ps1", "$pc\TINKER-AGENTE.ps1") {
             $e = $null; [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f), [ref]$null, [ref]$e)
             if ($e) { Write-Error "$f linha $($e[0].Extent.StartLineNumber): $($e[0].Message)"; exit 1 }
           }
