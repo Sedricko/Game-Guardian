@@ -17,6 +17,13 @@ $self = $PSCommandPath
 $raw = "https://raw.githubusercontent.com/Sedricko/Game-Guardian/ccr-92c99132-2ne91y/tools/pc"
 $cfg = "$env:USERPROFILE\tinker-agente-painel.txt"   # link da planilha: fica so neste PC
 $done = "$env:USERPROFILE\tinker-agente-testado.txt" # ultima versao testada
+# o Painel Tinker (PAINEL-TINKER.bat) conversa com o agente por estes arquivos: o roteiro (um teste por linha; sem arquivo =
+# todos), a pausa (existe = nao comeca rodada nova) e o estado da rodada (o painel mostra ao vivo)
+$roteiroF = "$env:USERPROFILE\tinker-agente-roteiro.txt"
+$pausaF = "$env:USERPROFILE\tinker-agente-pausa.txt"
+$estadoF = "$env:USERPROFILE\tinker-agente-estado.json"
+$script:estado = @{ versao = ""; jogo = ""; inicio = ""; atual = ""; fim = ""; testes = @() }
+function Save-State { try { [IO.File]::WriteAllText($estadoF, ($script:estado | ConvertTo-Json -Depth 4 -Compress), (New-Object Text.UTF8Encoding $false)) } catch { } }
 $log = "$env:USERPROFILE\tinker-agente-log.txt"
 $tok = "$env:USERPROFILE\tinker-agente-github.txt"  # token so de leitura do GitHub (repositorio privado): fica so neste PC
 $app = "dev.tinker.app"
@@ -1235,6 +1242,8 @@ function Run-RealGame($dg) {
     $g = $realGames[$dg]
     if (-not $g) { Say "jogo $dg nao liberado (so os offline da lista)"; return }
     $nome = $g.nome
+    $script:estado = @{ versao = $v; jogo = $nome; inicio = (Get-Date -Format 'dd/MM HH:mm:ss'); atual = "preparando o emulador e o Tinker"; fim = ""; testes = @() }
+    Save-State
     # o emulador com Play Store (Dysmantle_Play): o DYSMANTLE confere a compra pela Play Store; video pela placa do PC
     # o Dysmantle_Play ja ligado (pode estar em emulator-5556 se o outro ocupou a 5554): usa esse
     foreach ($d in ((& $adb devices) | Select-String "^(emulator-\d+)\s+device" | ForEach-Object { $_.Matches.Groups[1].Value })) {
@@ -1295,6 +1304,10 @@ function Run-RealGame($dg) {
     function Items { Step "itens" 900 | Out-Null; @(($script:last -split "`n") | Where-Object { $_ -like "item *" } | ForEach-Object { $f = $_ -split ' '; [pscustomobject]@{ nome = $f[1]; v = $f[2]; addr = $f[4] } }) }
     # um teste da lista: falha de um nao para os outros; cada um vai para a planilha com OK/FALHA e o tempo
     function T($name, [scriptblock]$b) {
+        $id = ($name -split ' ')[0]
+        $rot = @(Get-Content $roteiroF -ErrorAction SilentlyContinue | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+        if ($rot.Count -and $id -ne "1" -and $rot -notcontains $id) { Say "-- pulei $name (fora do roteiro do painel)"; return }
+        $script:estado.atual = $name; Save-State
         $okN = @($script:rr | Where-Object { $_ -like "OK *" }).Count
         $faN = @($script:rr | Where-Object { $_ -like "FALHA *" }).Count
         Set-Title "$nome $v - teste $name - $okN ok, $faN falha(s)"
@@ -1303,6 +1316,9 @@ function Run-RealGame($dg) {
         try { $r = & $b; $script:rr += "OK $name`: $r ($([int]((Get-Date) - $t0).TotalSeconds) s)" }
         catch { $script:rr += "FALHA $name`: $($_.Exception.Message) ($([int]((Get-Date) - $t0).TotalSeconds) s)" }
         Say $script:rr[-1]
+        $script:estado.testes += @{ id = $id; nome = $name; ok = ($script:rr[-1] -like "OK *"); seg = [int]((Get-Date) - $t0).TotalSeconds
+            det = $script:rr[-1].Substring(0, [Math]::Min($script:rr[-1].Length, 3000)) }
+        $script:estado.atual = ""; Save-State
         # ao vivo: cada teste vai para a planilha assim que termina (o resumo da rodada vai no fim)
         Post-Sheet "agente PC: $nome ao vivo" "" $script:rr[-1] $v "$nome (emulador)"
     }
@@ -1629,6 +1645,7 @@ function Run-RealGame($dg) {
     }
     Say "detalhe de cada teste: planilha (aba Relatorios) e $log"
     Set-Title "$nome $v pronta: $ok ok - esperando a proxima versao"
+    $script:estado.atual = ""; $script:estado.fim = (Get-Date -Format 'dd/MM HH:mm:ss'); Save-State
     Say "rodada pronta (resultado na planilha). Espero a proxima versao do Tinker."
 }
 
@@ -1638,6 +1655,11 @@ if ($Jogo) {
     Say "agente do $($realGames[$Jogo].nome) ligado: a cada versao nova do Tinker e sem parar, uma rodada atras da outra, faco as rodadas sozinho. Deixe esta janela aberta; Ctrl+C para sair."
     while ($true) {
         Update-Self
+        if (Test-Path $pausaF) {
+            if (-not $script:pausou) { Say "pausado pelo painel: nao comeco rodada nova ate tocar em Continuar"; Set-Title "pausado pelo painel" }
+            $script:pausou = $true; Start-Sleep 10; continue
+        }
+        $script:pausou = $false
         try {
             $v = (Get-Release).tag_name.TrimStart("v")
             # pedido do usuario (30/10): acabou uma rodada, comeca a outra (2 min de folga para o emulador assentar)
