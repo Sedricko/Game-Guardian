@@ -3,7 +3,7 @@
 # para o Claude pela planilha. Conversa com o agente pelos arquivos tinker-agente-* da pasta do usuario.
 param([switch]$SemJanela)  # reiniciado pela atualizacao: a janela do painel ja esta aberta
 $ErrorActionPreference = "Continue"
-$PAINEL_VERSAO = "1.6"  # suba a cada mudanca no painel (aqui ou no painel-tinker.html): e o que a pessoa ve no topo
+$PAINEL_VERSAO = "1.7"  # suba a cada mudanca no painel (aqui ou no painel-tinker.html): e o que a pessoa ve no topo
 $ProgressPreference = "SilentlyContinue"
 $dir = $PSScriptRoot
 $sdk = "$env:LOCALAPPDATA\Android\Sdk"
@@ -314,8 +314,9 @@ function EstadoAgora {
         mantidos = @(Get-Content $mantidosF -Tail 15 -Encoding UTF8 -ErrorAction SilentlyContinue | ForEach-Object { [string]$_ })
         planilha = [bool]((Get-Content $cfg -ErrorAction SilentlyContinue) -join "").Trim(); token = [bool]((Get-Content $tok -ErrorAction SilentlyContinue) -join "").Trim()
         cenario = $(if ($script:job) { "rodando" } else { "" }); resultado = $script:ultimo
-        meus = @(try { Get-Content $meusF -Raw -Encoding UTF8 | ConvertFrom-Json } catch { })
-        ajustes = $(try { Get-Content $ajustesF -Raw | ConvertFrom-Json } catch { $null })
+        # sem o arquivo ainda (antes de o bot rodar a 1a vez): vazio, sem a tela vermelha de erro a cada leitura
+        meus = @(if (Test-Path $meusF) { try { Get-Content $meusF -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json } catch { } })
+        ajustes = $(if (Test-Path $ajustesF) { try { Get-Content $ajustesF -Raw -ErrorAction Stop | ConvertFrom-Json } catch { $null } } else { $null })
         painelVersao = $PAINEL_VERSAO; conferido = $script:conferido; novaVersao = $script:novaVersao
         ver = [string](Get-Item "$dir\painel-tinker.html").LastWriteTimeUtc.Ticks; vigia = $script:vigia
     }
