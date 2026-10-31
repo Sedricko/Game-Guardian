@@ -4255,7 +4255,7 @@ class Engine private constructor(private val app: Context) {
     private fun isSdkFile(f: String) = f.startsWith("no_backup/") ||
         listOf("appmetrica", "androidx.work", "firebase", "crashlytics", "com.google.android.gms", "facebook", "applovin", "unity3d.ads", "ironsource", "appsflyer",
             // anúncios e métricas que o Orecraft traz (31/10: o juiz leu "aria valuemax" do mraid_js.txt do mbridge)
-            "mraid", "mbridge", "/mb/", "inmobi", "tt_", "pag_", "bigo", "moloco", "supersonic", "singular", "devtodev", "metrics", "ads.db", "google_app_measurement", "datatransport", "AppEventsLogger", "oat/")
+            "mraid", "mbridge", "/mb/", "inmobi", "tt_", "pag_", "bigo", "moloco", "supersonic", "singular", "devtodev", "metrics", "ads.db", "google_app_measurement", "datatransport", "AppEventsLogger", "oat/", "files/al/", ".js")
             .any { f.contains(it, ignoreCase = true) }
 
     /** O texto do arquivo, ou erro se for binário/cifrado (aí o editor não ajuda). */
