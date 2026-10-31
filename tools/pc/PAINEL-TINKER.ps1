@@ -268,8 +268,9 @@ function Estado {
     @{
         agente = ($ag.Count -gt 0); pausado = (Test-Path $pausaF); emulador = [string]$ser; jogoAberto = $jogoAberto; tinker = $tinker
         root = $root; tinkerVer = $tinkerVer; jogoInstalado = $jogoInstalado
-        rodada = $rod; roteiro = @(Get-Content $roteiroF -ErrorAction SilentlyContinue | Where-Object { $_.Trim() })
-        mantidos = @(Get-Content $mantidosF -Tail 15 -ErrorAction SilentlyContinue)
+        # [string]: no PowerShell 5 a linha do Get-Content vira objeto no JSON (o painel mostrava [object Object])
+        rodada = $rod; roteiro = @(Get-Content $roteiroF -ErrorAction SilentlyContinue | Where-Object { $_.Trim() } | ForEach-Object { [string]$_ })
+        mantidos = @(Get-Content $mantidosF -Tail 15 -Encoding UTF8 -ErrorAction SilentlyContinue | ForEach-Object { [string]$_ })
         planilha = [bool]((Get-Content $cfg -ErrorAction SilentlyContinue) -join "").Trim(); token = [bool]((Get-Content $tok -ErrorAction SilentlyContinue) -join "").Trim()
         cenario = $(if ($script:job) { "rodando" } else { "" }); resultado = $script:ultimo
         meus = @(try { Get-Content $meusF -Raw -Encoding UTF8 | ConvertFrom-Json } catch { })

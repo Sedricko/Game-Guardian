@@ -313,7 +313,7 @@ let est = {}, logTxt = "", autoFoto = true, pagina = "inicio", filtroChip = "", 
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? "" : s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
-const arr = x => Array.isArray(x) ? x : (x == null ? [] : [x]);
+const arr = x => (Array.isArray(x) ? x : (x == null ? [] : [x])).map(v => v && typeof v === "object" && "value" in v ? v.value : v);  // linha do PowerShell 5 vem como {value: …}
 
 async function api(path, body) {
   const r = await fetch(path + (path.includes("?") ? "&" : "?") + "t=" + T, body ? { method: "POST", body: JSON.stringify(body) } : {});
