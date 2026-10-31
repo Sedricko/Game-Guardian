@@ -440,4 +440,17 @@ class ValuesTest {
         assertEquals(listOf("10", "2.5"), g.map { it.value })
         assertEquals("""{"hp": 77, "xp":3}""", applySaveEdits(js, mapOf(g[0] to "77", g[1] to "3")))
     }
+
+    @Test
+    fun juizEscolheAFormaQueDuraMais() {
+        val texto = Route("texto", worked = true, held = true, survives = false)
+        val save = Route("save", worked = true, held = true, survives = true)
+        val falhou = Route("número", worked = false, held = true, survives = true)
+        assertEquals(0, routeScore(falhou))  // não mudou a tela: não conta o resto
+        assertEquals(3, routeScore(texto))
+        assertEquals(5, routeScore(save))
+        assertEquals(save, bestRoute(listOf(texto, falhou, save)))
+        assertEquals(texto, bestRoute(listOf(texto, texto.copy(name = "outro"))))  // empate: a testada antes
+        assertEquals(null, bestRoute(listOf(falhou)))
+    }
 }

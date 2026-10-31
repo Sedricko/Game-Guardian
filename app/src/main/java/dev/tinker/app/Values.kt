@@ -364,6 +364,20 @@ internal fun applySaveEdits(text: String, edits: Map<SaveField, String>): String
     return out
 }
 
+// ---- o juiz: qual forma de mudar um número da tela é a melhor ----
+
+/** Nomes de campo com cara de moeda/recurso do jogo: vão primeiro na fila de candidatos. */
+internal val COIN = Regex("gold|coin|gem|crystal|diamond|currenc|resource|money|soft|hard|amount|balance|ouro|joia", RegexOption.IGNORE_CASE)
+
+/** Uma forma testada pelo juiz: mudou a tela, o jogo não voltou sozinho em 5 s, continuou depois de reabrir o jogo. */
+data class Route(val name: String, val worked: Boolean, val held: Boolean, val survives: Boolean)
+
+/** Nota de 0 a 5: mudar a tela vale 2, segurar 1, durar ao reabrir 2 (o que não muda a tela não pontua). */
+internal fun routeScore(r: Route) = if (!r.worked) 0 else 2 + (if (r.held) 1 else 0) + (if (r.survives) 2 else 0)
+
+/** A de maior nota; no empate, a testada antes (a mais simples). */
+internal fun bestRoute(rs: List<Route>) = rs.filter { it.worked }.maxByOrNull(::routeScore)
+
 /** "50;75" ou "100~200" ou misturado ("50;100~200"); cada item vira uma faixa (um número é a faixa dele mesmo). */
 internal fun parseValues(values: String): List<ClosedFloatingPointRange<Double>> =
     normalizeNumbers(values).split(';').mapNotNull { part ->

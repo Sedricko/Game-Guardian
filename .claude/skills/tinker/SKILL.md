@@ -154,6 +154,14 @@ O texto completo de cada opção está em `docs/tutorial/ajuda.py` (fonte única
   disabled` e reinicia o emulador. O próprio emulador está sem DNS (ping api.groq.com falha): a IA não joga lá;
   emulador já caiu com driver NVIDIA (`nvoglv64.dll`/gfxstream) após 3h40.
 
+## 🧠 Juiz (2.95.0, 31/10): "qual a melhor forma de mudar este número"
+- Ferramentas → 🧠 Quero mudar (número da tela, número novo, nome opcional) e a missão `juiz <tela> <novo> [nome]`
+  (teste 2g do agente). `Engine.judge` tenta ao vivo texto JSON (`swapJsonText`, mesmo nº de dígitos) e depois número na
+  memória (`dono`: campos com nome, moeda primeiro, até 6); a 1ª que muda a tela (OCR) reabre o jogo para ver se dura;
+  se não durou, tenta o save (campos de texto com o número, até 3, um arquivo; backup e volta se a tela não mudar).
+- Nota (`routeScore`, Values.kt): muda a tela 2 + segura 5 s 1 + dura ao reabrir 2. Vence a maior; empate = a testada
+  antes. Ao vivo que venceu mas se perdeu ao reabrir é aplicada de novo. Ainda não faz "de graça/sem espera" (patch).
+
 ## Próximos passos
 - Orecraft: achar o ouro (pedido 3999 → 4999), depois a missão "trocar a moeda de um preço" (só moedas do jogo) e ler o
   preço novo na tela; memória de estratégia por motor (ordem de métodos que funcionou em cada engine).

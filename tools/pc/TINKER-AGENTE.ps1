@@ -1460,6 +1460,25 @@ function Run-RealGame($dg) {
             }
             throw "nenhuma troca de texto mudou a tela | " + ($vistos -join ' / ')
         }
+        # 2g. o juiz (31/10): o app testa sozinho texto JSON, numero na memoria e save, confere na tela e reabrindo o jogo,
+        # e deixa aplicada a forma de maior nota (0 a 5). Mesmo numero de digitos: assim a forma do texto tambem entra
+        T "2g juiz (qual forma muda melhor)" {
+            $i = @($script:it | Where-Object { $_.v -match '^\d{2,4}$' -and $_.nome -notmatch '\(' } | Select-Object -First 1)[0]
+            if (-not $i) { throw "nenhum numero de 2 a 4 digitos na tela" }
+            $novo = if ($i.v -match '^9+$') { "8" * $i.v.Length } else { "9" * $i.v.Length }
+            $fotoAntes = $null; try { Show-Game $dg; $fotoAntes = Shot "jogo-antes" } catch { }
+            $n = Step "juiz $($i.v) $novo $(if ($i.nome -notmatch '^Item') { $i.nome })" 900
+            $linhas = ($script:last -split "`n")
+            $r = "$($linhas[0]) | " + (($linhas | Where-Object { $_ -like "rota *" -or $_ -like "nota *" }) -join " / ")
+            if (-not $n) { throw $r }
+            try {
+                if ($fotoAntes) { Post-Sheet "agente PC: foto do jogo ANTES (juiz: $($i.nome) = $($i.v))" "" ("jpeg base64`n" + $fotoAntes) $v "$nome (emulador)" }
+                Show-Game $dg
+                Post-Sheet "agente PC: foto do jogo DEPOIS (juiz: $($i.nome) = $novo)" "" ("jpeg base64`n" + (Shot "jogo-depois")) $v "$nome (emulador)"
+            } catch { }
+            Add-Content "$env:USERPROFILE\tinker-mantidos-$dg.txt" "$(Get-Date -Format 'dd/MM HH:mm') $($i.nome) $($i.v) -> $novo (juiz: $($linhas[0]))"
+            "JUIZ: $r"
+        }
         # 2c. pedido pelo dicionario do jogo (revisao 30/10): busca o numero e pergunta ao mapa IL2CPP de quem e cada lugar
         # (Classe.campo). Nao precisa o numero mudar. Escreve nos candidatos com nome de moeda primeiro e confere na tela
         T "2c pedido pelo dicionario do jogo" {

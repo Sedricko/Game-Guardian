@@ -42,6 +42,7 @@ internal fun Toolbox(engine: Engine, enabled: Boolean, run: (suspend () -> Strin
     var tool by remember { mutableStateOf(if (s.count == null && s.history.isEmpty()) "facil" else "") }
     val tools = buildList {
         add("facil" to "🧭 Fácil")
+        add("juiz" to "🧠 Quero mudar")
         add("velocidade" to "⏩ Velocidade")
         add("cronometros" to "⏱️ Cronômetros")
         add("loja" to "🛒 Loja")
@@ -55,6 +56,7 @@ internal fun Toolbox(engine: Engine, enabled: Boolean, run: (suspend () -> Strin
         }
         when (tool) {
             "facil" -> EasyMode(engine, enabled, run)
+            "juiz" -> WantChange(engine, enabled, run)
             "velocidade" -> GameSpeed(engine, enabled, run)
             "cronometros" -> Timers(engine, enabled, run)
             "loja" -> ShopPrices(engine, enabled, run)
@@ -162,6 +164,30 @@ private fun Timers(engine: Engine, enabled: Boolean, run: (suspend () -> String)
             }
             if (list.size > 1) OutlinedButton(shape = MaterialTheme.shapes.medium, enabled = enabled, onClick = { run { engine.finishTimers(list) } }) { Text("Terminar todos") }
         }
+    }
+}
+
+/**
+ * 🧠 Quero mudar isto: o número da tela e o novo; o juiz testa texto do JSON, número na memória e save, confere na tela
+ * e reabrindo o jogo, e deixa aplicada a forma de maior nota. Leva de 1 a 4 minutos (reabre o jogo até 3 vezes).
+ */
+@Composable
+private fun WantChange(engine: Engine, enabled: Boolean, run: (suspend () -> String) -> Unit) {
+    var now by remember { mutableStateOf("") }
+    var want by remember { mutableStateOf("") }
+    var name by remember { mutableStateOf("") }
+    Panel {
+        Text("🧠 Quero mudar isto", style = MaterialTheme.typography.titleMedium)
+        Text("Deixe o número aparecendo no jogo. O Tinker testa cada forma (texto, memória, save), confere na tela e reabre o jogo para ver se dura. A melhor fica aplicada. Leva até 4 minutos.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        ValueField(now, "Número na tela agora", { now = it }, Modifier.fillMaxWidth(), keyboard = KeyboardType.Number)
+        ValueField(want, "Número que você quer", { want = it }, Modifier.fillMaxWidth(), keyboard = KeyboardType.Number)
+        TinkerTextField(name, { name = it }, "Nome (opcional, ex.: Joias)", Modifier.fillMaxWidth())
+        val a = normalizeNumbers(now).toLongOrNull()
+        val b = normalizeNumbers(want).toLongOrNull()
+        Button(shape = MaterialTheme.shapes.medium, enabled = enabled && a != null && b != null && a != b, onClick = {
+            run { engine.wantChange(a!!, b!!, name.trim()) }
+        }) { Text("Testar e aplicar") }
     }
 }
 

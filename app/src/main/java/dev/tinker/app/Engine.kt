@@ -1633,8 +1633,7 @@ class Engine private constructor(private val app: Context) {
                 search(setOf("i32"), arg)
                 val addrs = call { d -> d.send("list 4000", quiet = true).lines.map { it.substringBefore(' ') } }
                 val names = addrs.chunked(200).flatMap { il2Names(it).entries }.filterNot { it.value.startsWith("cópia") }
-                val coin = Regex("gold|coin|gem|crystal|diamond|currenc|resource|money|soft|hard|amount|balance|ouro|joia", RegexOption.IGNORE_CASE)
-                val ranked = names.sortedByDescending { coin.containsMatchIn(it.value) }
+                val ranked = names.sortedByDescending { COIN.containsMatchIn(it.value) }
                 return "ok ${ranked.size} de ${addrs.size}\ncount ${ranked.size}\n" + ranked.take(40).joinToString("\n") { "dono ${it.key} ${it.value}" }
             }
             // "inspecionar 180": como o Inspecionar elemento do navegador. Acha o texto "180" que a tela desenha (string do C#:
@@ -1688,17 +1687,23 @@ class Engine private constructor(private val app: Context) {
             "trocartexto" -> {
                 val old = w.getOrNull(1) ?: return "err use trocartexto <antes> <depois>"
                 val new = w.getOrNull(2)?.takeIf { it.length == old.length } ?: return "err o texto novo precisa ter ${old.length} caracteres"
-                val hex = "%02x000000".format(old.length) + old.map { "%02x00".format(it.code) }.joinToString("") + "0000"
-                val strs = call { d -> d.send("aobfind $hex data", quiet = true).lines }.mapNotNull { it.trim().toLongOrNull(16) }.map { it - 0x10 }.take(30)
-                val trocados = mutableListOf<String>()
-                for (s0 in strs) {
-                    search(setOf("i64"), s0.toString())
-                    val refs = call { d -> d.send("list 50", quiet = true).lines.map { it.substringBefore(' ') } }
-                    if (il2Names(refs).values.none { it.endsWith("JSONString.m_Data") }) continue
-                    call { d -> new.forEachIndexed { i, ch -> d.send("write ${(s0 + 0x14 + 2 * i).toString(16)} i16 ${ch.code}", quiet = true) } }
-                    trocados += (s0 + 0x14).toString(16)
+                val (trocados, achados) = swapJsonText(old, new)
+                return "ok ${trocados.size} texto(s) \"$old\" do JSON viraram \"$new\" (de $achados achados)\ncount ${trocados.size}\n" + trocados.joinToString("\n") { "texto $it" }
+            }
+            // "juiz 80 99 Joias": testa as formas de mudar o número da tela (texto JSON, número na memória, save), confere
+            // na tela e se dura depois de reabrir o jogo; a que mais pontua vence e fica aplicada
+            "juiz" -> {
+                val tela = w.getOrNull(1)?.toLongOrNull() ?: return "err use juiz <numero da tela> <novo> [nome]"
+                val novo = w.getOrNull(2)?.toLongOrNull()?.takeIf { it != tela } ?: return "err use juiz <numero da tela> <novo> [nome]"
+                front()
+                return judge(tela, novo, w.drop(3).joinToString(" ")) { kill ->
+                    if (kill) runCatching { killGame() }
+                    delay(2000)
+                    front()
+                    delay(35_000)  // o Orecraft leva uns 30 s até o HUD
+                    pickTestGame()
+                    delay(10_000)
                 }
-                return "ok ${trocados.size} texto(s) \"$old\" do JSON viraram \"$new\" (de ${strs.size} achados)\ncount ${trocados.size}\n" + trocados.joinToString("\n") { "texto $it" }
             }
             "despatch" -> "desfeitos ${clearMissionPatches()}"
             "desconhecido" -> startUnknown(setOf(w.getOrElse(1) { "i32" }))
@@ -4616,6 +4621,117 @@ class Engine private constructor(private val app: Context) {
     private var timerHits = emptyList<GameTimer>()  // achados da missão "cronometros"
 
     /** Desliga e tira os patches das missões, mesmo se desligar falhar (senão um patch velho volta ligado na próxima rodada). */
+    /** Troca o texto `old` por `new` (mesmo tamanho) nas strings do C# que um JSONString.m_Data aponta: (trocados, achados). */
+    private suspend fun swapJsonText(old: String, new: String): Pair<List<String>, Int> {
+        val hex = "%02x000000".format(old.length) + old.map { "%02x00".format(it.code) }.joinToString("") + "0000"
+        val strs = call { d -> d.send("aobfind $hex data", quiet = true).lines }.mapNotNull { it.trim().toLongOrNull(16) }.map { it - 0x10 }.take(30)
+        val done = mutableListOf<String>()
+        for (s0 in strs) {
+            search(setOf("i64"), s0.toString())
+            val refs = call { d -> d.send("list 50", quiet = true).lines.map { it.substringBefore(' ') } }
+            if (il2Names(refs).values.none { it.endsWith("JSONString.m_Data") }) continue
+            call { d -> new.forEachIndexed { i, ch -> d.send("write ${(s0 + 0x14 + 2 * i).toString(16)} i16 ${ch.code}", quiet = true) } }
+            done += (s0 + 0x14).toString(16)
+        }
+        return done to strs.size
+    }
+
+    /** 🧠 Quero mudar (Ferramentas): o juiz no jogo escolhido; o jogo vai para a frente e reabre pelo Tinker. */
+    suspend fun wantChange(tela: Long, novo: Long, name: String): String {
+        val show: suspend () -> Unit = { withContext(Dispatchers.Main) { relaunch() }; delay(2500) }  // relaunch traz o jogo aberto para a frente
+        show()
+        val r = judge(tela, novo, name) { kill ->
+            if (kill) runCatching { killGame() }
+            delay(2000)
+            show()
+            delay(45_000)  // o laço de 3 s se liga ao jogo de novo
+        }
+        return r.lines().filterNot { it.startsWith("count ") }.joinToString("\n") { it.removePrefix("nota ").removePrefix("rota ") }.removePrefix("ok ").removePrefix("err ")
+    }
+
+    /** O número aparece na tela (lê o print até `tries` vezes, 3 s entre elas: o jogo demora a redesenhar). */
+    private suspend fun onScreen(n: Long, tries: Int = 3): Boolean {
+        repeat(tries) { i ->
+            if (i > 0) delay(3000)
+            if (runCatching { screenNumbers() }.getOrDefault(emptyList()).any { it.first == n }) return true
+        }
+        return false
+    }
+
+    /**
+     * 🧠 O juiz: leva o número da tela de `tela` a `novo` testando cada forma (texto JSON e número na memória ao vivo,
+     * depois o save), confere na tela e se dura depois de reabrir o jogo. Nota em [routeScore]; a vencedora fica aplicada.
+     */
+    private suspend fun judge(tela: Long, novo: Long, name: String, reopen: suspend (kill: Boolean) -> Unit): String {
+        if (onScreen(novo, 1)) return "err o $novo já aparece na tela: escolha outro número novo"
+        if (!onScreen(tela)) return "err não vejo o $tela na tela: abra a tela onde ele aparece"
+        val notes = mutableListOf<String>()
+        suspend fun viaText(): Route? {
+            if (novo.toString().length != tela.toString().length) { notes += "texto: o novo precisa ter ${tela.toString().length} dígito(s)"; return null }
+            val (done, found) = swapJsonText(tela.toString(), novo.toString())
+            if (done.isEmpty()) { notes += "texto: $found texto(s) \"$tela\", nenhum do JSON"; return null }
+            delay(3000)
+            if (onScreen(novo)) { delay(5000); return Route("texto JSON (${done.size} lugar(es))", true, onScreen(novo, 1), false) }
+            swapJsonText(novo.toString(), tela.toString())
+            notes += "texto: troquei ${done.size}, a tela não mudou (voltei)"
+            return null
+        }
+        suspend fun viaNumber(): Route? {
+            search(setOf("i32"), tela.toString())
+            val addrs = call { d -> d.send("list 4000", quiet = true).lines.map { it.substringBefore(' ') } }
+            val named = addrs.chunked(200).flatMap { il2Names(it).entries }.filterNot { it.value.startsWith("cópia") }
+                .sortedByDescending { COIN.containsMatchIn(it.value) }.take(6)
+            for ((a, f) in named) {
+                write(a, "i32", novo.toString())
+                delay(3000)
+                if (onScreen(novo)) {
+                    delay(5000)
+                    val held = call { d -> d.send("read $a i32", quiet = true).status } == novo.toString()
+                    if (name.isNotBlank()) learnResult(name, "i32", true, 0, from = "juiz", tips = "campo $f")
+                    return Route("número $f (0x$a)", true, held, false)
+                }
+                write(a, "i32", tela.toString())  // não era esse: volta
+            }
+            notes += "número: ${addrs.size} lugar(es), ${named.size} com nome, nenhum mudou a tela"
+            return null
+        }
+        suspend fun viaSave(): Route? {
+            // shortcut: só os campos de um arquivo (o 1º com o número); o backup de cada writeSave é do arquivo de antes
+            val hits = saveFiles().filter { it.second < 2_000_000 }.firstNotNullOfOrNull { (rel, _) ->
+                val t = runCatching { readSave(rel) }.getOrNull() ?: return@firstNotNullOfOrNull null
+                saveFields(t).filter { it.value == tela.toString() }.takeIf { it.isNotEmpty() }?.let { Triple(rel, t, it) }
+            } ?: run { notes += "save: nenhum campo com $tela nos arquivos de texto"; return null }
+            val (rel, text, fields) = hits
+            val keys = fields.joinToString { it.key }
+            if (fields.size > 3) { notes += "save: ${fields.size} campos com $tela em $rel, demais para mudar sem risco ($keys)"; return null }
+            writeSave(rel, text, fields.associateWith { novo.toString() })
+            reopen(false)
+            if (onScreen(novo, 5)) return Route("save $rel: $keys", true, true, true)
+            runCatching { killGame() }
+            listBackups().firstOrNull()?.let { restoreSave(it) }
+            fields.forEach { learnResult(it.key, "save", false, 0, from = "juiz") }
+            reopen(false)
+            notes += "save: mudei $keys em $rel, a tela não mudou (voltei o backup)"
+            return null
+        }
+        val live = listOf<suspend () -> Route?>({ viaText() }, { viaNumber() })
+        val routes = mutableListOf<Route>()
+        val k = live.indexOfFirst { f -> f()?.also { routes += it } != null }
+        if (k >= 0) {
+            reopen(true)
+            val survives = onScreen(novo, 5)
+            routes[0] = routes[0].copy(survives = survives)
+            notes += if (survives) "reabri o jogo: continuou $novo" else "reabri o jogo: voltou (só vale enquanto joga)"
+        }
+        if (routes.none { it.survives }) viaSave()?.let { routes += it }
+        // ao vivo era a melhor e se perdeu ao reabrir: aplica de novo, para ficar como o pedido
+        if (k >= 0 && bestRoute(routes) == routes[0] && !routes[0].survives) live[k]()
+        val win = bestRoute(routes) ?: return "err nenhuma forma mudou a tela de $tela para $novo\ncount 0\n" + notes.joinToString("\n") { "nota $it" }
+        Diag.add("Juiz: $tela → $novo venceu ${win.name} (nota ${routeScore(win)})")
+        return "ok vencedor: ${win.name} (nota ${routeScore(win)} de 5)\ncount ${routeScore(win)}\n" +
+            (routes.map { "rota ${it.name} nota ${routeScore(it)} tela=${it.worked} segura=${it.held} reabrir=${it.survives}" } + notes.map { "nota $it" }).joinToString("\n")
+    }
+
     private suspend fun clearMissionPatches(): Int = Session.patches.filter { it.name.startsWith("missão ") }.onEach {
         runCatching { setPatch(it, false) }
         withContext(Dispatchers.Main) { removePatch(it) }
