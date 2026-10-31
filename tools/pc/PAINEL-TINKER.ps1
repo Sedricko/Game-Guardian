@@ -76,6 +76,14 @@ $emuOp = {
     function Sdk() { if (-not $tools) { throw "falta o 'Android SDK Command-line Tools': no Android Studio, More Actions > SDK Manager > SDK Tools, marque e toque em OK" }; & "$tools\sdkmanager.bat" @args }
     $ser = @((& $adb devices) | Select-String "^(emulator-\d+)\s+device" | ForEach-Object { $_.Matches.Groups[1].Value }) | Select-Object -First 1
     function Su($c) { & $adb -s $ser shell "su -c '$($c -replace "'", "'\''")'" }
+    # o ramdisk que o rootAVD corrige e o da imagem do emulador (config.ini do AVD)
+    function Ramdisk {
+        $avd = ((& $adb -s $ser emu avd name) | Select-Object -First 1).Trim()
+        $ini = "$env:USERPROFILE\.android\avd\$avd.avd\config.ini"
+        $d = ((Get-Content $ini -ErrorAction SilentlyContinue) | Where-Object { $_ -like "image.sysdir.1*" } | Select-Object -First 1) -replace "^[^=]*=\s*", ""
+        $(if ($d) { ($d.TrimEnd("\", "/") -replace "/", "\") + "\ramdisk.img" } else { "system-images\android-36\google_apis_playstore\x86_64\ramdisk.img" })
+    }
+    function Op($op, $arg) {
     switch ($op) {
         "ligar" {
             if ($ser) { return "o emulador ja esta ligado ($ser)" }
@@ -100,7 +108,7 @@ $emuOp = {
             $bat = Get-ChildItem "$dir\rootAVD-master" -Filter "rootAVD.bat" | Select-Object -First 1
             if (-not $bat) { return "o rootAVD baixado nao tem rootAVD.bat" }
             # janela visivel: o rootAVD pergunta a versao do Magisk (responder 2 e Enter); no fim o emulador desliga sozinho
-            Start-Process cmd -ArgumentList "/k cd /d `"$($bat.DirectoryName)`" && rootAVD.bat system-images\android-36\google_apis_playstore\x86_64\ramdisk.img"
+            Start-Process cmd -ArgumentList "/k cd /d `"$($bat.DirectoryName)`" && rootAVD.bat $(Ramdisk)"
             return "abri a janela do root: se perguntar a versao do Magisk, digite 2 e Enter. No fim o emulador desliga; ligue de novo aqui e toque em Permitir no pedido de Superusuario"
         }
         "tinker" {
@@ -170,6 +178,37 @@ $emuOp = {
         "abrirtinker" { if (-not $ser) { return "ligue o emulador antes" }; & $adb -s $ser shell am start -n "$app/.MainActivity" | Out-Null; return "Tinker aberto" }
         default { return "operacao desconhecida: $op" }
     }
+    }
+    if ($op -ne "tudo") { return (Op $op $arg) }
+
+    # 🚀 Preparar tudo: cada toque segue de onde parou; o que so a pessoa pode fazer (conta Google, responder o rootAVD,
+    # Permitir o root) para com o que fazer. No fim devolve PRONTO e o painel liga o bot
+    $feito = @()
+    if (-not ((& $emu -list-avds) -like "*Dysmantle_Play*")) {
+        $feito += Op "criar" "system-images;android-36;google_apis_playstore;x86_64"
+    }
+    if (-not $ser) {
+        $feito += Op "ligar"
+        $ser = @((& $adb devices) | Select-String "^(emulator-\d+)\s+device" | ForEach-Object { $_.Matches.Groups[1].Value }) | Select-Object -First 1
+        if (-not $ser) { return (($feito + "o emulador nao ligou: veja o Android Studio") -join "`n") }
+    }
+    $frz = ((& $adb -s $ser shell settings get global cached_apps_freezer) -join "") -match "disabled"
+    $feito += Op "configurar"
+    if (-not $frz) { $feito += Op "reiniciar"; & $adb -s $ser wait-for-device; for ($i = 0; $i -lt 60 -and -not ((& $adb -s $ser shell getprop sys.boot_completed 2>$null) -match "1"); $i++) { Start-Sleep 5 } }
+    if (-not (((& $adb -s $ser shell pm list packages $jogo) -join "") -match [regex]::Escape($jogo))) {
+        & $adb -s $ser shell am start -a android.intent.action.VIEW -d "market://details?id=$jogo" | Out-Null
+        return (($feito + "FALTA VOCE: no emulador, entre na conta Google e toque em Instalar no Orecraft (abri a pagina dele na Play Store). Depois toque em Preparar tudo de novo.") -join "`n")
+    }
+    if (-not ((Su "id") -match "uid=0")) {
+        if ((& $adb -s $ser shell "ls /debug_ramdisk/su /system/bin/su /sbin/su 2>/dev/null") -join "") {
+            return (($feito + "FALTA VOCE: o Magisk esta instalado; toque em Permitir no pedido de Superusuario do emulador (ou abra o app Magisk uma vez) e toque em Preparar tudo de novo.") -join "`n")
+        }
+        $feito += Op "root"
+        return (($feito + "FALTA VOCE: na janela do rootAVD digite 2 e Enter; quando o emulador desligar, toque em Preparar tudo de novo.") -join "`n")
+    }
+    $feito += Op "tinker"
+    $feito += Op "jogo"
+    "PRONTO`n" + ($feito -join "`n")
 }
 
 function Planilha($motivo, $texto) {
@@ -200,7 +239,11 @@ function Estado {
         }
         $root = $script:emuInfo.root; $tinkerVer = [string]$script:emuInfo.ver; $jogoInstalado = $script:emuInfo.instalado
     }
-    if ($script:job -and $script:job.State -ne "Running") { $script:ultimo = (Receive-Job $script:job -ErrorAction SilentlyContinue) -join "`n"; Remove-Job $script:job -Force; $script:job = $null }
+    if ($script:job -and $script:job.State -ne "Running") {
+        $script:ultimo = (Receive-Job $script:job -ErrorAction SilentlyContinue) -join "`n"; Remove-Job $script:job -Force; $script:job = $null
+        # Preparar tudo terminou: liga o bot (sem o link da planilha, avisa)
+        if ($script:ultimo -like "PRONTO*") { $script:ultimo += "`n" + $(try { Acao @{ acao = "ligar" } } catch { $_.Exception.Message }) + "`nTudo pronto: o bot comeca os testes." }
+    }
     @{
         agente = ($ag.Count -gt 0); pausado = (Test-Path $pausaF); emulador = [string]$ser; jogoAberto = $jogoAberto; tinker = $tinker
         root = $root; tinkerVer = $tinkerVer; jogoInstalado = $jogoInstalado
