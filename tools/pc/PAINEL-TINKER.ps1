@@ -3,7 +3,7 @@
 # para o Claude pela planilha. Conversa com o agente pelos arquivos tinker-agente-* da pasta do usuario.
 param([switch]$SemJanela)  # reiniciado pela atualizacao: a janela do painel ja esta aberta
 $ErrorActionPreference = "Continue"
-$PAINEL_VERSAO = "1.7"  # suba a cada mudanca no painel (aqui ou no painel-tinker.html): e o que a pessoa ve no topo
+$PAINEL_VERSAO = "1.8"  # suba a cada mudanca no painel (aqui ou no painel-tinker.html): e o que a pessoa ve no topo
 $ProgressPreference = "SilentlyContinue"
 $dir = $PSScriptRoot
 $sdk = "$env:LOCALAPPDATA\Android\Sdk"
@@ -43,7 +43,7 @@ function SerialAgora {
     $ds | Select-Object -First 1
 }
 
-function Agentes { @(Lembrar "agentes" 5 { @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | Where-Object { $_.CommandLine -like "*TINKER-AGENTE.ps1*" }) }) }
+function Agentes { @(Lembrar "agentes" 20 { @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | Where-Object { $_.CommandLine -like "*TINKER-AGENTE.ps1*" }) }) }
 
 # tela ao vivo: um job tira prints sem parar (~2 por segundo) enquanto alguem olha; o painel so entrega o ultimo
 $telaF = "$env:TEMP\painel-tela.jpg"; $olhoF = "$env:TEMP\painel-tela-olho.txt"
@@ -63,6 +63,7 @@ $telaJob = {
             $bmp.Save("$telaF.tmp", $codec, $p); $bmp.Dispose(); $img.Dispose()
             Move-Item -Force "$telaF.tmp" $telaF
         } catch { Start-Sleep -Milliseconds 500 }
+        Start-Sleep -Milliseconds 700  # ~1 foto por segundo: sem pausa o emulador e o PC ficavam ocupados so com as fotos
     }
 }
 function Tela {

@@ -464,7 +464,7 @@ $("regrasFixas").innerHTML = REGRAS.map(r => `<div class="t" style="cursor:defau
 estado();
 // estado: um pedido de cada vez (se o painel demorar, não empilha) e só com a janela à vista
 let ocupado = false;
-setInterval(async () => { if (ocupado || document.hidden) return; ocupado = true; try { await estado(); } finally { ocupado = false; } }, 4000);
+setInterval(async () => { if (ocupado || document.hidden) return; ocupado = true; try { await estado(); } finally { ocupado = false; } }, 6000);
 setInterval(() => { if (pagina === "logs" && !$("filtro").value && !document.hidden) carregaLog(); }, 8000);
 // tela ao vivo: a próxima imagem só é pedida quando a anterior chegou (o job do painel tira as fotos sem parar)
 function proximaTela() {
