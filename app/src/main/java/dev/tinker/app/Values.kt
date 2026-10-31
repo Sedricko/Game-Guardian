@@ -374,7 +374,8 @@ internal fun speedOffsets(w: List<Int>): List<Int> = speedClock(w)?.let { o1 -> 
 /** Onde fica o 1º dos dois tempos (16, 20 ou 24 bytes depois do 0.99999994), ou null se não tem cara de relógio. */
 internal fun speedClock(w: List<Int>): Int? {
     fun q(off: Int) = (w[off / 4].toLong() and 0xffffffffL) or (w[off / 4 + 1].toLong() shl 32)
-    fun ok(t1: Double, t2: Double) = t1 > 100 && t1 < 1e6 && t2 > t1 && t2 < t1 + 250
+    // >= e nao >: o GG le o 2o tempo 150 ms depois do 1o; lidos juntos, os dois tempos podem ser iguais (Orecraft: 343 relogios, 0 achados)
+    fun ok(t1: Double, t2: Double) = t1 > 100 && t1 < 1e6 && t2 >= t1 && t2 < t1 + 250
     for ((o1, o2) in listOf(20 to 28, 16 to 24, 24 to 32)) {
         if (ok(java.lang.Double.longBitsToDouble(q(o1)), java.lang.Double.longBitsToDouble(q(o2))) || ok(q(o1).toDouble(), q(o2).toDouble())) return o1
     }

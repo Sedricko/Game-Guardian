@@ -468,6 +468,8 @@ class ValuesTest {
         assertEquals(listOf(80), speedOffsets(d))
         assertEquals(emptyList<Int>(), speedOffsets(MutableList(48) { 0 }))
         assertEquals(20, speedClock(w))
+        w[7] = 500                              // os dois tempos iguais no mesmo instante: ainda é relógio
+        assertEquals(20, speedClock(w))
         assertEquals(500.0, clockValue(500), 0.0)
         assertEquals(1234.5, clockValue(java.lang.Double.doubleToLongBits(1234.5)), 0.0)
     }
