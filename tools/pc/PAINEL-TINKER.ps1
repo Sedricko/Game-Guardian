@@ -3,6 +3,7 @@
 # para o Claude pela planilha. Conversa com o agente pelos arquivos tinker-agente-* da pasta do usuario.
 param([switch]$SemJanela)  # reiniciado pela atualizacao: a janela do painel ja esta aberta
 $ErrorActionPreference = "Continue"
+$PAINEL_VERSAO = "1.6"  # suba a cada mudanca no painel (aqui ou no painel-tinker.html): e o que a pessoa ve no topo
 $ProgressPreference = "SilentlyContinue"
 $dir = $PSScriptRoot
 $sdk = "$env:LOCALAPPDATA\Android\Sdk"
@@ -315,6 +316,7 @@ function EstadoAgora {
         cenario = $(if ($script:job) { "rodando" } else { "" }); resultado = $script:ultimo
         meus = @(try { Get-Content $meusF -Raw -Encoding UTF8 | ConvertFrom-Json } catch { })
         ajustes = $(try { Get-Content $ajustesF -Raw | ConvertFrom-Json } catch { $null })
+        painelVersao = $PAINEL_VERSAO; conferido = $script:conferido; novaVersao = $script:novaVersao
         ver = [string](Get-Item "$dir\painel-tinker.html").LastWriteTimeUtc.Ticks; vigia = $script:vigia
     }
 }
@@ -398,6 +400,8 @@ function Atualizar {
         $ps = (Invoke-WebRequest "$raw/PAINEL-TINKER.ps1" -UseBasicParsing -Headers @{ "Cache-Control" = "no-cache" }).Content
         if ($ps -is [byte[]]) { $ps = [Text.Encoding]::UTF8.GetString($ps) }
         $ps = $ps.TrimStart([char]0xFEFF)
+        $script:conferido = Get-Date -Format "HH:mm"
+        $script:novaVersao = $(if ($ps -match '\$PAINEL_VERSAO = "([^"]+)"') { $Matches[1] } else { "" })
         if ($ps -and $ps.Contains("function Atualizar") -and $ps -ne (Get-Content $PSCommandPath -Raw -Encoding UTF8).TrimStart([char]0xFEFF)) {
             $e = $null; [void][System.Management.Automation.Language.Parser]::ParseInput($ps, [ref]$null, [ref]$e)
             if (-not $e) { [IO.File]::WriteAllText($PSCommandPath, $ps, (New-Object Text.UTF8Encoding $true)); $script:reiniciar = $true }
@@ -436,7 +440,7 @@ try { $h.Start() } catch {
     exit
 }
 Set-Content $tokenF $token
-$script:vigia = ""; $script:reiniciar = $false; $script:proximaAtualizacao = Get-Date
+$script:vigia = ""; $script:conferido = ""; $script:novaVersao = ""; $script:reiniciar = $false; $script:proximaAtualizacao = Get-Date
 if (-not $SemJanela) { Abrir "http://localhost:$port/?t=$token" }
 Write-Host "Painel Tinker aberto ($url). Deixe esta janela aberta; fechar ela fecha o painel." -ForegroundColor Cyan
 

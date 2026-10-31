@@ -70,6 +70,7 @@
       <span class="pill" id="pEmu"><i></i>emulador</span>
       <span class="pill" id="pJogo"><i></i>Orecraft</span>
       <span class="pill" id="pVer"><i></i>versão</span>
+      <span class="pill" id="pPainel" title="versão do painel e a última conferência no GitHub"><i></i>painel</span>
     </header>
 
     <section data-s="inicio" class="grid">
@@ -336,6 +337,8 @@ async function estado() {
   pill("pAgente", est.agente ? (est.pausado ? "warn" : "ok") : "bad", est.agente ? (est.pausado ? "agente pausado" : "agente ligado") : "agente parado");
   pill("pEmu", est.emulador ? "ok" : "bad", est.emulador ? est.emulador : "emulador desligado");
   pill("pJogo", est.jogoAberto ? "ok" : "warn", est.jogoAberto ? "Orecraft aberto" : "Orecraft fechado");
+  const novo = est.novaVersao && est.novaVersao !== est.painelVersao;
+  pill("pPainel", novo ? "warn" : (est.conferido ? "ok" : ""), "Painel " + (est.painelVersao || "?") + (novo ? " → " + est.novaVersao + " chegando" : est.conferido ? " · conferido " + est.conferido : " · conferindo…"));
   pill("pVer", rod.versao ? "ok" : "", rod.versao ? "Tinker " + rod.versao : "versão ?");
   $("bPausa").textContent = est.pausado ? "Continuar" : "Pausar depois da rodada";
   $("botEstado").textContent = !est.agente ? "bot parado" : est.pausado ? (rod.atual ? "pausa marcada: terminando a rodada" : "bot pausado") : rod.atual ? "rodando" : "esperando a próxima rodada";
