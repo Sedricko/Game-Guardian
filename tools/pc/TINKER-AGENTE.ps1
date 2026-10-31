@@ -22,7 +22,17 @@ $tok = "$env:USERPROFILE\tinker-agente-github.txt"  # token so de leitura do Git
 $app = "dev.tinker.app"
 # comando com root: no emulador de sempre o adb ja e root; no de Play Store (adbd sem root) vai pelo su do Magisk
 function Sh($c) { if ($script:su) { & $adb shell "su -c '$($c -replace "'", "'\''")'" } else { & $adb shell $c } }
-function Say($t) { $l = "$(Get-Date -Format 'HH:mm:ss') $t"; Write-Host $l; Add-Content $log $l }
+# janela facil de ler: verde = teste ok, vermelho = falhou, amarelo = aviso, azul = teste comecando, cinza = passo; linha longa
+# fica curta na janela (o detalhe inteiro vai para o log e para a planilha)
+function Say($t) {
+    $l = "$(Get-Date -Format 'HH:mm:ss') $t"
+    Add-Content $log $l
+    $c = if ($t -match '^\s*OK ') { 'Green' } elseif ($t -match '^\s*(FALHA|parou)') { 'Red' } elseif ($t -match '^\s*>>|^=+') { 'Cyan' } elseif ($t -match 'falhou|nao respondeu|nao ligou|erro|travou|lento') { 'Yellow' } else { 'Gray' }
+    $w = 200; try { $w = [Math]::Max(80, 2 * $Host.UI.RawUI.WindowSize.Width - 2) } catch { }
+    if ($l.Length -gt $w) { $l = $l.Substring(0, $w - 12) + " ...(no log)" }
+    Write-Host $l -ForegroundColor $c
+}
+function Set-Title($t) { try { $Host.UI.RawUI.WindowTitle = "Tinker agente - $t" } catch { } }
 function Hdr($extra) {
     $h = @{ "User-Agent" = "Tinker"; "Cache-Control" = "no-cache" }
     $t = (Get-Content $tok -ErrorAction SilentlyContinue | Select-Object -First 1)
@@ -1285,6 +1295,10 @@ function Run-RealGame($dg) {
     function Items { Step "itens" 900 | Out-Null; @(($script:last -split "`n") | Where-Object { $_ -like "item *" } | ForEach-Object { $f = $_ -split ' '; [pscustomobject]@{ nome = $f[1]; v = $f[2]; addr = $f[4] } }) }
     # um teste da lista: falha de um nao para os outros; cada um vai para a planilha com OK/FALHA e o tempo
     function T($name, [scriptblock]$b) {
+        $okN = @($script:rr | Where-Object { $_ -like "OK *" }).Count
+        $faN = @($script:rr | Where-Object { $_ -like "FALHA *" }).Count
+        Set-Title "$nome $v - teste $name - $okN ok, $faN falha(s)"
+        Say ">> $name"
         $t0 = Get-Date
         try { $r = & $b; $script:rr += "OK $name`: $r ($([int]((Get-Date) - $t0).TotalSeconds) s)" }
         catch { $script:rr += "FALHA $name`: $($_.Exception.Message) ($([int]((Get-Date) - $t0).TotalSeconds) s)" }
@@ -1607,6 +1621,14 @@ function Run-RealGame($dg) {
     if ($guid) { & $adb shell cmd connectivity set-package-networking-enabled true $dg | Out-Null } else { & $adb shell cmd connectivity airplane-mode disable }
     $fails = ($res | Where-Object { $_ -like "FALHA*" -or $_ -like "parou*" }) -join "`n"
     Post-Sheet "agente PC: $nome de verdade, $ok de $(@($script:rr | Where-Object { $_ -match '^(OK|FALHA) ' }).Count) ok" $fails ($res -join "`n") $v "$nome (emulador)"
+    # resumo da rodada: uma linha por teste, na cor do resultado
+    Say "==================== RODADA $v ($nome): $ok de $(@($script:rr | Where-Object { $_ -match '^(OK|FALHA) ' }).Count) ok ===================="
+    foreach ($r in $script:rr) {
+        if ($r -match '^(OK|FALHA) (.+?): .*\((\d+) s\)$') { Say ("  {0,-6} {1} ({2} s)" -f $Matches[1], $Matches[2], $Matches[3]) }
+        elseif ($r -like "parou*") { Say "  $r" }
+    }
+    Say "detalhe de cada teste: planilha (aba Relatorios) e $log"
+    Set-Title "$nome $v pronta: $ok ok - esperando a proxima versao"
     Say "rodada pronta (resultado na planilha). Espero a proxima versao do Tinker."
 }
 
