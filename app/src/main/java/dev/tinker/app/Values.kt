@@ -369,14 +369,18 @@ internal fun applySaveEdits(text: String, edits: Map<SaveField, String>): String
  * depois vêm dois tempos que andam juntos, e o 1.0 fica até 140 bytes depois do primeiro. Os tempos podem ser Double ou
  * Qword inteiro: o SpeedHackFinder do GG lê Qword, e era o que achava no Orecraft (o Tinker só lia Double e achava 0).
  */
-internal fun speedOffsets(w: List<Int>): List<Int> = speedClock(w)?.let { o1 -> (1..35).map { o1 + 4 * it }.filter { it / 4 < w.size && w[it / 4] == 0x3f800000 } }.orEmpty()
+internal fun speedOffsets(w: List<Int>, o1: Int? = speedClock(w)): List<Int> = o1?.let { (1..35).map { o1 + 4 * it }.filter { it / 4 < w.size && w[it / 4] == 0x3f800000 } }.orEmpty()
 
-/** Onde fica o 1º dos dois tempos (16, 20 ou 24 bytes depois do 0.99999994), ou null se não tem cara de relógio. */
-internal fun speedClock(w: List<Int>): Int? {
+/**
+ * Onde fica o 1º dos dois tempos (16, 20 ou 24 bytes depois do 0.99999994), ou null se não tem cara de relógio. `wide`: de 8 a
+ * 56 bytes (o Orecraft no emulador não tinha o par em nenhuma das 3 posições do GG; quem achar assim só vale conferido em 2x).
+ */
+internal fun speedClock(w: List<Int>, wide: Boolean = false): Int? {
     fun q(off: Int) = (w[off / 4].toLong() and 0xffffffffL) or (w[off / 4 + 1].toLong() shl 32)
     // >= e nao >: o GG le o 2o tempo 150 ms depois do 1o; lidos juntos, os dois tempos podem ser iguais (Orecraft: 343 relogios, 0 achados)
     fun ok(t1: Double, t2: Double) = t1 > 100 && t1 < 1e6 && t2 >= t1 && t2 < t1 + 250
-    for ((o1, o2) in listOf(20 to 28, 16 to 24, 24 to 32)) {
+    val pairs = if (!wide) listOf(20 to 28, 16 to 24, 24 to 32) else (8..56 step 4).filter { it !in setOf(16, 20, 24) && it / 4 + 3 < w.size }.map { it to it + 8 }
+    for ((o1, o2) in pairs) {
         if (ok(java.lang.Double.longBitsToDouble(q(o1)), java.lang.Double.longBitsToDouble(q(o2))) || ok(q(o1).toDouble(), q(o2).toDouble())) return o1
     }
     return null

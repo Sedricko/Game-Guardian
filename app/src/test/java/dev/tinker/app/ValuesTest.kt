@@ -470,6 +470,10 @@ class ValuesTest {
         assertEquals(20, speedClock(w))
         w[7] = 500                              // os dois tempos iguais no mesmo instante: ainda é relógio
         assertEquals(20, speedClock(w))
+        val e = MutableList(64) { 0 }                // o par em +40/+48 (fora das posições do GG): só no modo largo
+        e[10] = 300; e[12] = 320
+        assertEquals(null, speedClock(e))
+        assertEquals(40, speedClock(e, wide = true))
         assertEquals(500.0, clockValue(500), 0.0)
         assertEquals(1234.5, clockValue(java.lang.Double.doubleToLongBits(1234.5)), 0.0)
     }

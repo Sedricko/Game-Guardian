@@ -4315,32 +4315,30 @@ class Engine private constructor(private val app: Context) {
      */
     suspend fun findGameSpeed(): List<String> {
         // (lugar do 1.0, os dois tempos do mesmo relógio)
+        var wide = false  // achado fora das 3 posições do GG: só vale se passar na conferência em 2x
         val cands = call { d ->
             val n = d.send("search i32 1065353214").status.toLongOrNull() ?: 0
             speedClocks = n
             if (n == 0L || n > 50_000) return@call emptyList()
-            val out = LinkedHashMap<String, List<Long>>()
-            sample.clear()
-            d.send("list ${minOf(n, 20_000)}", quiet = true).lines.forEach { line ->
-                val a = line.substringBefore(' ').toLongOrNull(16) ?: return@forEach
-                val w = runCatching { d.send("dump ${a.toString(16)} i32 48", quiet = true).lines.map { it.substringAfter(' ').toLongOrNull()?.toInt() } }.getOrNull()
-                if (w == null || w.size != 48 || w.any { it == null }) return@forEach
-                val words = w.map { it!! }
-                val o1 = speedClock(words)
-                if (o1 == null) {
-                    if (sample.size < 4) sample += "0x${a.toString(16)}: " + (16..36 step 4).joinToString(" ") { o -> "+$o=${words[o / 4]}" }
-                    return@forEach
-                }
-                speedOffsets(words).forEach { out.putIfAbsent((a + it).toString(16), listOf(a + o1, a + o1 + 8)) }
+            val words = d.send("list ${minOf(n, 20_000)}", quiet = true).lines.mapNotNull { line ->
+                val a = line.substringBefore(' ').toLongOrNull(16) ?: return@mapNotNull null
+                val w = runCatching { d.send("dump ${a.toString(16)} i32 64", quiet = true).lines.map { it.substringAfter(' ').toLongOrNull()?.toInt() } }.getOrNull()
+                if (w == null || w.size != 64 || w.any { it == null }) null else a to w.map { it!! }
             }
-            out.toList()
+            fun pass(wd: Boolean) = LinkedHashMap<String, List<Long>>().also { out ->
+                words.forEach { (a, w) -> speedClock(w, wd)?.let { o1 -> speedOffsets(w, o1).forEach { out.putIfAbsent((a + it).toString(16), listOf(a + o1, a + o1 + 8)) } } }
+            }.toList()
+            sample.clear()
+            words.filter { speedClock(it.second) == null }.take(4).forEach { (a, w) -> sample += "0x${a.toString(16)}: " + (8..56 step 4).joinToString(" ") { o -> "+$o=${w[o / 4]}" } }
+            pass(false).ifEmpty { wide = true; pass(true) }
         }
         // confere cada um como o relógio manda: em 2x, o tempo do jogo tem de andar mais rápido (pega todo 1.0 perto do relógio,
         // e um deles pode ser outra coisa); volta para 1 logo depois
-        val checked = cands.take(8).map { (s, clocks) -> s to speedCheck(s, clocks) }
+        val checked = cands.take(if (wide) 16 else 8).map { (s, clocks) -> s to speedCheck(s, clocks) }
         val sure = checked.filter { it.second == true }.map { it.first }
-        val out = sure.ifEmpty { cands.map { it.first } }
-        if (cands.isEmpty()) {
+        val out = if (wide) sure else sure.ifEmpty { cands.map { it.first } }
+        if (wide && cands.isNotEmpty()) Diag.add("Velocidade: ${cands.size} com o par de tempos fora das posições do GG; conferidos em 2x: ${sure.size}")
+        if (out.isEmpty()) {
             Diag.add("Velocidade: nenhum relógio com os dois tempos; amostra dos Dwords depois do 0.99999994: ${sample.joinToString(" | ")}")
             // o jeito do Tinker não achou: roda o SpeedHackFinder do GG (o script que achou no celular do usuário), tal qual
             val gg = withContext(Dispatchers.IO) { speedByGgScript() }
