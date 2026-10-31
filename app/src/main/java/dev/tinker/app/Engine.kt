@@ -4339,7 +4339,15 @@ class Engine private constructor(private val app: Context) {
         val checked = cands.take(8).map { (s, clocks) -> s to speedCheck(s, clocks) }
         val sure = checked.filter { it.second == true }.map { it.first }
         val out = sure.ifEmpty { cands.map { it.first } }
-        if (cands.isEmpty()) Diag.add("Velocidade: nenhum relógio com os dois tempos; amostra dos Dwords depois do 0.99999994: ${sample.joinToString(" | ")}")
+        if (cands.isEmpty()) {
+            Diag.add("Velocidade: nenhum relógio com os dois tempos; amostra dos Dwords depois do 0.99999994: ${sample.joinToString(" | ")}")
+            // o jeito do Tinker não achou: roda o SpeedHackFinder do GG (o script que achou no celular do usuário), tal qual
+            val gg = withContext(Dispatchers.IO) { speedByGgScript() }
+            speedNote = if (gg.isEmpty()) "Nem o meu jeito nem o script do GG (SpeedHackFinder) acharam: abra uma fase com o jogo andando e tente de novo."
+                else "Achado pelo script do GG (SpeedHackFinder), sem a conferência em 2x."
+            Diag.add("Velocidade pelo script do GG: ${gg.size} lugares (${gg.joinToString { "0x$it" }})")
+            return gg
+        }
         speedNote = when {
             sure.isNotEmpty() -> "Conferido: em 2x o relógio do jogo andou mais rápido."
             out.isEmpty() -> "Nenhum dos relógios do Unity tem os dois tempos (o jogo está pausado ou numa janela?). A amostra ficou no Registro."
@@ -4348,6 +4356,26 @@ class Engine private constructor(private val app: Context) {
         }
         Diag.add("Velocidade do jogo: ${out.size} lugares (${out.joinToString { "0x$it" }}) · ${checked.joinToString { "0x${it.first}=${it.second}" }}")
         return out
+    }
+
+    /** O SpeedHackFinder (script do GG colado pelo usuário em 31/10) rodado pelo GgLua; devolve os endereços do gg.loadResults. */
+    private fun speedByGgScript(): List<String> {
+        val got = mutableListOf<String>()
+        val host = object : GgHost {
+            override val pkg = Session.process?.pkg.orEmpty()
+            override val dataDir = File(app.filesDir, "scripts-dados")
+            override fun send(cmd: String) = luaSend(cmd)
+            override fun ask(q: LuaAsk): Any? = 1  // os alerts de erro dele: só OK
+            override fun toast(text: String) {}
+            override fun copy(text: String) {}
+            override fun listItems() = emptyList<LuaItem>()
+            override fun addItems(items: List<LuaItem>) { items.forEach { got += it.address.toString(16) } }
+            override fun removeItems(items: List<LuaItem>) {}
+            override fun http(url: String, headers: Map<String, String>, body: String?) = throw IOException("sem internet aqui")
+            override fun log(line: String) { Diag.add("SpeedHackFinder: $line") }
+        }
+        GgLua(host).run(SPEED_HACK_FINDER, "SpeedHackFinder.lua")?.let { Diag.add("SpeedHackFinder: $it") }
+        return got.distinct()
     }
 
     /** true = em 2x o relógio andou pelo menos 1,5× mais; false = andou igual; null = relógio parado ou ilegível. */
@@ -5451,3 +5479,63 @@ class Engine private constructor(private val app: Context) {
         if (savedPkg != null) backupMemorySoon()  // o perfil do jogo no backup acompanha os salvos
     }
 }
+
+/** SpeedHackFinder do GameGuardian, como o usuário colou (achou a velocidade no Orecraft do celular). */
+private const val SPEED_HACK_FINDER = """REG=1
+::XREGION::
+if REG==1 then gg.setRanges(gg.REGION_ANONYMOUS) end
+if REG==2 then gg.setRanges(gg.REGION_C_ALLOC) end
+if REG==3 then gg.setRanges(gg.REGION_C_DATA) end
+if REG==4 then gg.setRanges(gg.REGION_OTHER) end
+gg.clearResults() t1={} t2={} TRY=1 SPEED={}
+gg.searchNumber("3F7FFFFEh",4)
+    if gg.getResultsCount()==0 and REG<4 then REG=REG+1 goto XREGION return end
+    if gg.getResultsCount()==0 and REG==4 then
+        gg.alert("×× ERROR ××\nNo Search Results ","OK",nil,xTAGx)
+        return
+   end
+local res=gg.getResults(gg.getResultsCount())
+gg.clearResults() O1=20 O2=28
+::TRYAGAIN::
+    for i, v in ipairs(res) do
+        t1[i]={} t2[i]={}
+        t1[i].address=v.address+O1 t1[i].flags=32
+        t2[i].address=v.address+O2 t2[i].flags=32
+    end
+t3={} x=0
+t1=gg.getValues(t1) gg.sleep(150) t2=gg.getValues(t2)
+    for i, v in ipairs(t1) do
+        if #(tostring(v.value))<7 and v.value>100 and t2[i].value<v.value+250 and t2[i].value>v.value then
+            x=x+1 t3[x]={}
+            t3[x].address=v.address t3[x].flags=16
+        end
+    end
+    if x==0 and TRY==1 then O1=16 O2=24 TRY=TRY+1 goto TRYAGAIN return end
+    if x==0 and TRY==2 then O1=24 O2=32 TRY=TRY+1 goto TRYAGAIN return end
+    if x==0 and TRY==3 and REG<4 then REG=REG+1 goto XREGION return end
+    if x==0 and TRY==3 and REG==4 then
+        gg.alert("×× ERROR ××\nNo Time Value Found","EXIT",nil, xTAGx)
+        gg.setVisible(true) os.exit()
+        return
+    end
+    x=0
+    for z=1,35 do
+        for i, v in ipairs(t3) do
+            v.address=v.address+4 v.flags=16
+        end
+        t3=gg.getValues(t3)
+        for i, v in ipairs(t3) do
+            if v.value==1 then
+                x=x+1 SPEED[x]={}
+                SPEED[x].address=v.address SPEED[x].flags=16
+            end
+        end
+    end
+    if x==0 and REG<4 then REG=REG+1 goto XREGION return end
+    if x==0 and REG==4 then
+        gg.alert("×× ERROR ××\nNo Speed Value Found","EXIT",nil, xTAGx)
+        gg.setVisible(true) os.exit()
+        return
+    end
+gg.loadResults(SPEED)
+"""
