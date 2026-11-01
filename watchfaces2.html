@@ -1,0 +1,107 @@
+<title>Ultra Faces 2</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@500;700&family=Chakra+Petch:wght@500;700&family=Barlow:wght@400;500&display=swap">
+<style>
+/* Layout: grid of watch cases, each a live 480px AMOLED face scaled to fit. Single dark look, orange accent from the Ultra action button. */
+:root{
+  --bg:#0c0d0f; --panel:#15171a; --ink:#e9eaec; --mute:#8b9097; --line:#2a2d32;
+  --orange:#ff6a1a; --titan:#3a3d42; --glass:#000;
+  --display:'Saira Condensed','Arial Narrow',sans-serif;
+  --tech:'Chakra Petch','Courier New',monospace;
+  --body:'Barlow',system-ui,sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:400 16px/1.5 var(--body);
+  padding-block:32px 56px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+main{max-width:1040px;margin:0 auto}
+h1{font:700 clamp(40px,8vw,72px)/.95 var(--display);letter-spacing:.01em;margin:0 0 12px;text-wrap:balance}
+h1 span{color:var(--orange)}
+.lead{max-width:60ch;color:var(--mute);margin:0 0 36px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:20px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:20px;display:flex;flex-direction:column;gap:16px;min-width:0}
+.case{position:relative;width:100%;max-width:300px;aspect-ratio:1;margin:0 auto;border-radius:30%;
+  background:linear-gradient(145deg,#4a4e54,#1f2124 60%,#33363b);padding:6%;box-shadow:0 12px 30px #000a}
+.case::before{content:"";position:absolute;top:-1.5%;right:19%;width:9%;height:5%;border-radius:3px;background:var(--orange)}
+.case svg{display:block;width:100%;height:100%;border-radius:50%;background:var(--glass)}
+.card h2{font:700 24px/1 var(--display);letter-spacing:.04em;text-transform:uppercase;margin:0}
+.card p{margin:4px 0 0;color:var(--mute);font-size:14px}
+.tags{display:flex;flex-wrap:wrap;gap:6px;margin:0;padding:0;list-style:none}
+.tags li{font:500 11px/1 var(--tech);letter-spacing:.08em;text-transform:uppercase;color:var(--orange);border:1px solid var(--line);border-radius:4px;padding:5px 7px}
+text{font-family:var(--display);font-weight:700}
+.t{font-family:var(--tech);font-weight:500}
+.o{fill:var(--orange)}.g{fill:#7d8086}.w{fill:#f2f2f2}
+</style>
+
+<main>
+<h1>Galaxy Watch Ultra<br><span>Mais conceitos</span></h1>
+<p class="lead">Seis mostradores novos, no mesmo estilo laranja sobre preto. Todos mostram a hora atual ao vivo.</p>
+<div class="grid">
+<section class="card"><div class="case"><svg viewBox="0 0 480 480" role="img" aria-label="Rings"><g fill="none" stroke-width="20" stroke-linecap="round" transform="rotate(-90 240 240)">
+<circle cx="240" cy="240" r="205" stroke="#2a1608" pathLength="100"/><circle cx="240" cy="240" r="205" stroke="#ff6a1a" pathLength="100" stroke-dasharray="78 100"/>
+<circle cx="240" cy="240" r="175" stroke="#1d1e20" pathLength="100"/><circle cx="240" cy="240" r="175" stroke="#f2f2f2" pathLength="100" stroke-dasharray="52 100"/>
+<circle cx="240" cy="240" r="145" stroke="#1d1e20" pathLength="100"/><circle cx="240" cy="240" r="145" stroke="#7d8086" pathLength="100" stroke-dasharray="66 100"/></g>
+<text class="t o" x="240" y="180" text-anchor="middle" font-size="22" style="font-weight:500" letter-spacing="2">412 KCAL</text>
+<text class="w" x="240" y="272" text-anchor="middle" font-size="112"><tspan data-f="HH">10</tspan>:<tspan data-f="MM">27</tspan></text>
+<text class="t g" x="240" y="312" text-anchor="middle" font-size="22" style="font-weight:500" letter-spacing="2"><tspan data-f="DOW">SUN</tspan> <tspan data-f="DD">06</tspan> <tspan data-f="MON">SEP</tspan></text></svg></div>
+<div><h2>Rings</h2><p>Três anéis de atividade em volta da hora, no estilo dos treinos do Ultra.</p></div>
+<ul class="tags"><li>Movimento</li><li>Exercício</li><li>Em pé</li></ul></section>
+<section class="card"><div class="case"><svg viewBox="0 0 480 480" role="img" aria-label="Pulse"><text class="w" x="240" y="170" text-anchor="middle" font-size="130"><tspan data-f="HH">10</tspan>:<tspan data-f="MM">27</tspan></text>
+<polyline points="50,300 120,300 140,300 152,262 166,336 180,282 192,300 250,300 270,300 282,250 298,344 314,276 326,300 430,300" fill="none" stroke="#ff6a1a" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="430" cy="300" r="8" class="o"/>
+<text class="w" x="240" y="244" text-anchor="middle" font-size="40">118 <tspan class="t g" font-size="18" style="font-weight:500">BPM</tspan></text>
+<g><rect x="110" y="372" width="48" height="10" rx="3" fill="#2a2d32"/><rect x="164" y="372" width="48" height="10" rx="3" fill="#2a2d32"/><rect x="218" y="372" width="48" height="10" rx="3" fill="#2a2d32"/><rect x="272" y="372" width="48" height="10" rx="3" fill="#ff6a1a"/><rect x="326" y="372" width="48" height="10" rx="3" fill="#2a2d32"/></g>
+<text class="t o" x="240" y="414" text-anchor="middle" font-size="18" style="font-weight:500" letter-spacing="3">ZONA 4 · CARDIO</text></svg></div>
+<div><h2>Pulse</h2><p>Hora grande e traçado do batimento cardíaco, com a zona de esforço em destaque.</p></div>
+<ul class="tags"><li>Batimentos</li><li>Zonas</li><li>Hora</li></ul></section>
+<section class="card"><div class="case"><svg viewBox="0 0 480 480" role="img" aria-label="Digital rugged"><g id="dy9"></g>
+<text class="t" x="240" y="262" text-anchor="middle" font-size="140" fill="#2a1306" style="font-weight:700">88:88</text>
+<text class="t o" x="240" y="262" text-anchor="middle" font-size="140" style="font-weight:700"><tspan data-f="HH">10</tspan>:<tspan data-f="MM">27</tspan></text>
+<text class="t w" x="240" y="302" text-anchor="middle" font-size="26" style="font-weight:700" letter-spacing="3"><tspan data-f="DOW">SUN</tspan> <tspan data-f="DD">06</tspan> <tspan data-f="MON">SEP</tspan></text>
+<rect x="120" y="340" width="110" height="14" rx="3" fill="#2a2d32"/><rect x="120" y="340" width="96" height="14" rx="3" class="o"/>
+<text class="t g" x="120" y="384" font-size="18" style="font-weight:500">BAT 87%</text><text class="t w" x="360" y="384" text-anchor="end" font-size="18" style="font-weight:500">8 412 PASSOS</text></svg></div>
+<div><h2>Digital rugged</h2><p>Visor digital de contraste alto, com a semana em barras e bateria. Pensado para trilha e sol forte.</p></div>
+<ul class="tags"><li>Semana</li><li>Bateria</li><li>Passos</li></ul></section>
+<section class="card"><div class="case"><svg viewBox="0 0 480 480" role="img" aria-label="Index"><g id="tk10"></g>
+<rect x="320" y="222" width="68" height="36" rx="6" fill="#15171a" stroke="#2a2d32"/><text class="t w" x="354" y="248" text-anchor="middle" font-size="24" style="font-weight:700" data-f="DD">06</text>
+<g data-hand="h" data-cx="240" data-cy="240"><path d="M240 250V130" stroke="#f2f2f2" stroke-width="12" stroke-linecap="round"/></g>
+<g data-hand="m" data-cx="240" data-cy="240"><path d="M240 250V62" stroke="#f2f2f2" stroke-width="8" stroke-linecap="round"/></g>
+<g data-hand="s" data-cx="240" data-cy="240"><path d="M240 276V46" stroke="#ff6a1a" stroke-width="3"/><circle cx="240" cy="240" r="8" class="o"/></g></svg></div>
+<div><h2>Index</h2><p>Analógico limpo: barras de índice, ponteiro laranja e janela de data.</p></div>
+<ul class="tags"><li>Data</li><li>Segundos</li></ul></section>
+<section class="card"><div class="case"><svg viewBox="0 0 480 480" role="img" aria-label="Storm"><text class="g" x="240" y="104" text-anchor="middle" font-size="52"><tspan data-f="HH">10</tspan>:<tspan data-f="MM">27</tspan></text>
+<text class="w" x="240" y="272" text-anchor="middle" font-size="190">28<tspan class="o">°</tspan></text>
+<text class="t o" x="240" y="316" text-anchor="middle" font-size="22" style="font-weight:700" letter-spacing="4">NUBLADO</text>
+<g fill="#3a3d42"><rect x="116" y="368" width="20" height="30" rx="3"/><rect x="148" y="360" width="20" height="38" rx="3"/><rect x="180" y="352" width="20" height="46" rx="3" fill="#ff6a1a"/><rect x="212" y="346" width="20" height="52" rx="3"/><rect x="244" y="344" width="20" height="54" rx="3"/><rect x="276" y="350" width="20" height="48" rx="3"/><rect x="308" y="358" width="20" height="40" rx="3"/><rect x="340" y="368" width="20" height="30" rx="3"/></g>
+<text class="t g" x="240" y="424" text-anchor="middle" font-size="15" style="font-weight:500" letter-spacing="2">PRÓXIMAS 8 H</text></svg></div>
+<div><h2>Storm</h2><p>Temperatura gigante e previsão por hora, com a hora atual em laranja.</p></div>
+<ul class="tags"><li>Tempo</li><li>Previsão 8 h</li></ul></section>
+<section class="card"><div class="case"><svg viewBox="0 0 480 480" role="img" aria-label="Chrono"><g id="tk12"></g>
+<g fill="#0a0a0a" stroke="#3a3d42" stroke-width="2"><circle cx="240" cy="150" r="46"/><circle cx="150" cy="300" r="46"/><circle cx="330" cy="300" r="46"/></g>
+<g data-hand="s" data-cx="240" data-cy="150"><path d="M240 160V116" stroke="#ff6a1a" stroke-width="3"/></g>
+<path d="M150 300l-30-26" stroke="#f2f2f2" stroke-width="3"/><path d="M330 300l30-26" stroke="#ff6a1a" stroke-width="3"/>
+<text class="t g" x="150" y="334" text-anchor="middle" font-size="13" style="font-weight:500">BAT</text><text class="t g" x="330" y="334" text-anchor="middle" font-size="13" style="font-weight:500">PASSOS</text>
+<g data-hand="h" data-cx="240" data-cy="240"><path d="M240 250V150" stroke="#f2f2f2" stroke-width="12" stroke-linecap="round"/></g>
+<g data-hand="m" data-cx="240" data-cy="240"><path d="M240 250V70" stroke="#f2f2f2" stroke-width="8" stroke-linecap="round"/></g>
+<g data-hand="s" data-cx="240" data-cy="240"><path d="M240 270V60" stroke="#ff6a1a" stroke-width="3"/><circle cx="240" cy="240" r="7" class="o"/></g></svg></div>
+<div><h2>Chrono</h2><p>Cronógrafo com três subdials: segundos, bateria e passos.</p></div>
+<ul class="tags"><li>Subdials</li><li>Bateria</li><li>Passos</li></ul></section>
+</div>
+</main>
+<script>
+var NS='http://www.w3.org/2000/svg';
+function mk(p,n,a){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);p.appendChild(e);return e}
+function ticks(id,big12){var g=document.getElementById(id);for(var i=0;i<60;i++){var a=i*6*Math.PI/180,b=i%5==0;if(big12&&!b)continue;var r2=b?196:208;
+mk(g,'line',{x1:240+228*Math.sin(a),y1:240-228*Math.cos(a),x2:240+r2*Math.sin(a),y2:240-r2*Math.cos(a),stroke:i==0?'#ff6a1a':(b?'#f2f2f2':'#666'),"stroke-width":b?(big12?9:5):2})}}
+ticks('tk10',true);ticks('tk12',false);
+var DAYS=['DOM','SEG','TER','QUA','QUI','SEX','SÁB'],MON=['JAN','FEV','MAR','ABR','MAI','JUN','JUL','AGO','SET','OUT','NOV','DEZ'];
+(function(){var g=document.getElementById('dy9');for(var i=0;i<7;i++){mk(g,'rect',{x:118+i*40,y:96,width:34,height:10,rx:3,'data-day':i,fill:'#2a2d32'})}})();
+function p2(n){return ('0'+n).slice(-2)}
+function tick(){var d=new Date(),s=d.getSeconds()+d.getMilliseconds()/1000,m=d.getMinutes()+s/60,h=d.getHours()%12+m/60;
+var v={HH:p2(d.getHours()),MM:p2(d.getMinutes()),DOW:DAYS[d.getDay()],DD:p2(d.getDate()),MON:MON[d.getMonth()]};
+document.querySelectorAll('[data-f]').forEach(function(e){e.textContent=v[e.dataset.f]});
+document.querySelectorAll('[data-day]').forEach(function(e){e.setAttribute('fill',e.dataset.day==d.getDay()?'#ff6a1a':'#2a2d32')});
+var rot={h:h*30,m:m*6,s:s*6};
+document.querySelectorAll('[data-hand]').forEach(function(e){e.setAttribute('transform','rotate('+rot[e.dataset.hand]+' '+e.dataset.cx+' '+e.dataset.cy+')')})}
+tick();setInterval(tick,200);
+</script>
