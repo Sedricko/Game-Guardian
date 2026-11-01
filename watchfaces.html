@@ -1,0 +1,156 @@
+<title>Ultra Faces</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@500;700&family=Chakra+Petch:wght@500;700&family=Barlow:wght@400;500&display=swap">
+<style>
+/* Layout: grid of watch cases, each a live 480px AMOLED face scaled to fit. Single dark look, orange accent from the Ultra action button. */
+:root{
+  --bg:#0c0d0f; --panel:#15171a; --ink:#e9eaec; --mute:#8b9097; --line:#2a2d32;
+  --orange:#ff6a1a; --titan:#3a3d42; --glass:#000;
+  --display:'Saira Condensed','Arial Narrow',sans-serif;
+  --tech:'Chakra Petch','Courier New',monospace;
+  --body:'Barlow',system-ui,sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:400 16px/1.5 var(--body);
+  padding-block:32px 56px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+main{max-width:1040px;margin:0 auto}
+h1{font:700 clamp(40px,8vw,72px)/.95 var(--display);letter-spacing:.01em;margin:0 0 12px;text-wrap:balance}
+h1 span{color:var(--orange)}
+.lead{max-width:60ch;color:var(--mute);margin:0 0 36px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:20px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:20px;display:flex;flex-direction:column;gap:16px;min-width:0}
+.case{position:relative;width:100%;max-width:300px;aspect-ratio:1;margin:0 auto;border-radius:30%;
+  background:linear-gradient(145deg,#4a4e54,#1f2124 60%,#33363b);padding:6%;box-shadow:0 12px 30px #000a}
+.case::before{content:"";position:absolute;top:-1.5%;right:19%;width:9%;height:5%;border-radius:3px;background:var(--orange)}
+.case svg{display:block;width:100%;height:100%;border-radius:50%;background:var(--glass)}
+.card h2{font:700 24px/1 var(--display);letter-spacing:.04em;text-transform:uppercase;margin:0}
+.card p{margin:4px 0 0;color:var(--mute);font-size:14px}
+.tags{display:flex;flex-wrap:wrap;gap:6px;margin:0;padding:0;list-style:none}
+.tags li{font:500 11px/1 var(--tech);letter-spacing:.08em;text-transform:uppercase;color:var(--orange);border:1px solid var(--line);border-radius:4px;padding:5px 7px}
+text{font-family:var(--display);font-weight:700}
+.t{font-family:var(--tech);font-weight:500}
+.o{fill:var(--orange)}.g{fill:#7d8086}.w{fill:#f2f2f2}
+</style>
+
+<main>
+<h1>Galaxy Watch Ultra<br><span>Face concepts</span></h1>
+<p class="lead">Six dials drawn for the 47 mm round AMOLED, built from the orange-on-black look of your references. All six show the current time and tick live.</p>
+<div class="grid">
+
+<!-- 1 Split -->
+<section class="card"><div class="case"><svg viewBox="0 0 480 480" role="img" aria-label="Split face: large grey hour, orange minute">
+<text class="g" x="14" y="345" font-size="290" textLength="250" lengthAdjust="spacingAndGlyphs" data-f="HH">10</text>
+<text class="o" x="268" y="250" font-size="170" data-f="MM">27</text>
+<text class="g" x="268" y="345" font-size="96" data-f="SS">58</text>
+<g class="t w" font-size="22" style="font-weight:500"><text class="t w" x="150" y="108">453 st</text><path d="M236 108c-12-9-19-15-12-23 5-5 10-2 12 2 2-4 7-7 12-2 7 8 0 14-12 23z" class="o"/><text class="t w" x="256" y="108">118</text><text class="t w" x="316" y="108">28°</text></g>
+<text class="o" x="180" y="408" font-size="30">SUN</text><text class="w" x="236" y="408" font-size="30">06 SEPT</text>
+</svg></div>
+<div><h2>Split Mono</h2><p>Grey hour, orange minute, quiet seconds. Reads at a glance on a run.</p></div>
+<ul class="tags"><li>Steps</li><li>Heart rate</li><li>Weather</li><li>Date</li></ul></section>
+
+<!-- 2 Outline -->
+<section class="card"><div class="case"><svg viewBox="0 0 480 480" role="img" aria-label="Outline face with 24 hour bezel">
+<g id="bz2"></g>
+<path d="M240 20l-10 18h20z" class="o"/>
+<text class="g" x="18" y="320" font-size="270" data-f="HH">05</text>
+<text x="262" y="236" font-size="170" fill="none" stroke="#ff6a1a" stroke-width="4" data-f="MM">48</text>
+<text x="262" y="300" font-size="64" fill="none" stroke="#cfd1d4" stroke-width="2" data-f="MON">AUG</text>
+<text class="t w" x="262" y="350" font-size="34" style="font-weight:500" data-f="DD">22</text><text class="o" x="318" y="350" font-size="34" data-f="DOW">SAT</text>
+<text class="o" x="120" y="400" font-size="26">24H</text>
+<g transform="translate(180 372)" class="w"><circle cx="14" cy="4" r="5"/><path d="M14 12l-6 14 8 6M14 12l8 12 10 2M12 20l-8 12" stroke="#f2f2f2" stroke-width="4" fill="none" stroke-linecap="round"/></g>
+<text class="t w" x="222" y="402" font-size="26" style="font-weight:500">1092</text>
+</svg></div>
+<div><h2>Outline 24H</h2><p>Hollow minutes over a solid hour, with a 24-hour bezel ring and an orange index.</p></div>
+<ul class="tags"><li>24h ring</li><li>Steps</li><li>Date</li></ul></section>
+
+<!-- 3 HUD -->
+<section class="card"><div class="case"><svg viewBox="0 0 480 480" role="img" aria-label="Tactical HUD face">
+<defs><pattern id="hz" width="14" height="14" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="7" height="14" fill="#ff6a1a"/></pattern></defs>
+<g fill="#0a0a0a" stroke="#ff6a1a" stroke-width="3">
+<path d="M130 80h220l30 36-24 70H124l-24-70z"/>
+<path d="M50 215l60-14 70 12v76l-70 14-60-18z"/>
+<path d="M430 215l-60-14-70 12v76l70 14 60-18z"/>
+<path d="M120 320l70-14h100l70 14-30 64H150z"/></g>
+<rect x="150" y="62" width="180" height="12" fill="url(#hz)"/>
+<text class="t w" x="240" y="158" text-anchor="middle" font-size="76" style="font-weight:700"><tspan data-f="HH">10</tspan>:<tspan data-f="MM">59</tspan></text>
+<text class="t g" x="240" y="182" text-anchor="middle" font-size="22" style="font-weight:500"><tspan data-f="DOW">MON</tspan> <tspan data-f="DD">26</tspan> · <tspan data-f="SS">08</tspan></text>
+<rect x="196" y="204" width="88" height="34" rx="4" fill="#ff6a1a"/><text x="240" y="230" text-anchor="middle" font-size="30" fill="#000">100%</text>
+<text class="t w" x="116" y="262" font-size="34" style="font-weight:700">72</text><text class="t o" x="116" y="285" font-size="15">BPM</text>
+<text class="t w" x="384" y="262" text-anchor="end" font-size="34" style="font-weight:700">4.2</text><text class="t o" x="384" y="285" text-anchor="end" font-size="15">KM/H</text>
+<text class="t w" x="240" y="344" text-anchor="middle" font-size="30" style="font-weight:700">2765</text><text class="t o" x="240" y="368" text-anchor="middle" font-size="15">STEPS · 2.1 KM</text>
+</svg></div>
+<div><h2>Tactical HUD</h2><p>Hex panels and hazard stripes in the style of your first reference. Battery sits in the centre.</p></div>
+<ul class="tags"><li>Battery</li><li>Heart rate</li><li>Speed</li><li>Steps</li><li>Distance</li></ul></section>
+
+<!-- 4 Dive -->
+<section class="card"><div class="case"><svg viewBox="0 0 480 480" role="img" aria-label="Dive analog face">
+<g id="tk4"></g>
+<path d="M120 380a150 150 0 0 0 240 0" fill="none" stroke="#2a2d32" stroke-width="10" stroke-linecap="round"/>
+<path d="M120 380a150 150 0 0 0 60 52" fill="none" stroke="#ff6a1a" stroke-width="10" stroke-linecap="round"/>
+<text class="t g" x="240" y="305" text-anchor="middle" font-size="18" style="font-weight:500" letter-spacing="3">DEPTH</text>
+<text class="w" x="240" y="352" text-anchor="middle" font-size="50">12.4<tspan font-size="26" class="g"> m</tspan></text>
+<text class="t o" x="240" y="392" text-anchor="middle" font-size="18" style="font-weight:500" letter-spacing="2">WATER 18°C</text>
+<g data-hand="h"><path d="M240 250V140" stroke="#f2f2f2" stroke-width="14" stroke-linecap="round"/></g>
+<g data-hand="m"><path d="M240 250V76" stroke="#f2f2f2" stroke-width="9" stroke-linecap="round"/><path d="M240 250V76" stroke="#ff6a1a" stroke-width="3"/></g>
+<g data-hand="s"><path d="M240 270V60" stroke="#ff6a1a" stroke-width="3"/><circle cx="240" cy="240" r="7" class="o"/></g>
+</svg></div>
+<div><h2>Dive</h2><p>Analog hands with a lume-style index and a depth arc along the bottom edge.</p></div>
+<ul class="tags"><li>Depth</li><li>Water temp</li></ul></section>
+
+<!-- 5 Trail -->
+<section class="card"><div class="case"><svg viewBox="0 0 480 480" role="img" aria-label="Trail compass face">
+<g id="cp5"></g>
+<text class="t w" x="240" y="225" text-anchor="middle" font-size="84" style="font-weight:700"><tspan data-f="HH">10</tspan>:<tspan data-f="MM">27</tspan></text>
+<text class="t g" x="240" y="262" text-anchor="middle" font-size="22" style="font-weight:500" letter-spacing="2"><tspan data-f="DOW">SUN</tspan> <tspan data-f="DD">06</tspan> <tspan data-f="MON">SEP</tspan></text>
+<text class="t o" x="240" y="168" text-anchor="middle" font-size="24" style="font-weight:700">NE 42°</text>
+<path d="M130 340q110-90 220 0" fill="none" stroke="#2a2d32" stroke-width="6" stroke-linecap="round"/>
+<path d="M130 340q40-32 80-48" fill="none" stroke="#ff6a1a" stroke-width="6" stroke-linecap="round"/>
+<circle cx="210" cy="292" r="8" class="o"/>
+<text class="t g" x="120" y="372" font-size="18" style="font-weight:500">05:48</text><text class="t g" x="360" y="372" text-anchor="end" font-size="18" style="font-weight:500">18:21</text>
+<text class="t w" x="240" y="402" text-anchor="middle" font-size="24" style="font-weight:700">▲ 1 284 m</text>
+</svg></div>
+<div><h2>Trail</h2><p>Compass bezel, sun arc and altitude for hikes. The bezel turns the heading to the top.</p></div>
+<ul class="tags"><li>Compass</li><li>Sunrise · sunset</li><li>Altitude</li></ul></section>
+
+<!-- 6 Night -->
+<section class="card"><div class="case"><svg viewBox="0 0 480 480" role="img" aria-label="Always-on night face">
+<g fill="none" stroke="#6b6e73" stroke-width="2.5"><text x="125" y="275" text-anchor="middle" font-size="210" data-f="HH">10</text><text x="355" y="275" text-anchor="middle" font-size="210" data-f="MM">27</text></g>
+<circle cx="240" cy="225" r="6" class="o"/><circle cx="240" cy="275" r="6" class="o"/>
+<text class="t g" x="240" y="388" text-anchor="middle" font-size="22" style="font-weight:500" letter-spacing="4"><tspan data-f="DOW">SUN</tspan> <tspan data-f="DD">06</tspan> <tspan data-f="MON">SEP</tspan></text>
+<text class="t o" x="240" y="105" text-anchor="middle" font-size="22" style="font-weight:500">87%</text>
+</svg></div>
+<div><h2>Night</h2><p>Always-on layout with outlines only, so few pixels light up and the battery lasts.</p></div>
+<ul class="tags"><li>Always-on</li><li>Battery</li><li>Date</li></ul></section>
+
+</div>
+</main>
+<script>
+var NS='http://www.w3.org/2000/svg';
+function mk(p,n,a){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);p.appendChild(e);return e}
+// 24h bezel for Outline: 01..24, numbers every 2 hours
+(function(){var g=document.getElementById('bz2');
+for(var i=0;i<24;i++){var a=i*15*Math.PI/180,r1=222,r2=i%2?228:216;
+mk(g,'line',{x1:240+r1*Math.sin(a),y1:240-r1*Math.cos(a),x2:240+(r2-0)*Math.sin(a)*0+ (r1-(i%2?6:14))*Math.sin(a),y2:240-(r1-(i%2?6:14))*Math.cos(a),stroke:'#555',"stroke-width":2});
+if(i%2==0){var t=mk(g,'text',{x:240+196*Math.sin(a),y:240-196*Math.cos(a)+6,'text-anchor':'middle','font-size':16,fill:'#8b9097','class':'t'});t.textContent=('0'+(i||24)).slice(-2)}}})();
+// minute ticks for Dive
+(function(){var g=document.getElementById('tk4');
+for(var i=0;i<60;i++){var a=i*6*Math.PI/180,big=i%5==0,r2=big?196:208;
+mk(g,'line',{x1:240+228*Math.sin(a),y1:240-228*Math.cos(a),x2:240+r2*Math.sin(a),y2:240-r2*Math.cos(a),stroke:big?'#f2f2f2':'#666',"stroke-width":big?5:2})}
+mk(g,'path',{d:'M240 18l-12 22h24z',fill:'#ff6a1a'})})();
+// compass ring for Trail
+(function(){var g=document.getElementById('cp5');
+for(var i=0;i<72;i++){var d=i*5,a=d*Math.PI/180,big=d%45==0,r2=big?198:210;
+mk(g,'line',{x1:240+228*Math.sin(a),y1:240-228*Math.cos(a),x2:240+r2*Math.sin(a),y2:240-r2*Math.cos(a),stroke:d==0?'#ff6a1a':(big?'#f2f2f2':'#666'),"stroke-width":big?4:2})}
+[['N',0],['E',90],['S',180],['W',270]].forEach(function(c){var a=c[1]*Math.PI/180,t=mk(g,'text',{x:240+176*Math.sin(a),y:240-176*Math.cos(a)+9,'text-anchor':'middle','font-size':26,fill:c[0]=='N'?'#ff6a1a':'#f2f2f2'});t.textContent=c[0]});
+mk(g,'path',{d:'M240 14l-9 16h18z',fill:'#ff6a1a'})})();
+
+var DAYS=['SUN','MON','TUE','WED','THU','FRI','SAT'],MON=['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+function p2(n){return ('0'+n).slice(-2)}
+function tick(){var d=new Date(),s=d.getSeconds()+d.getMilliseconds()/1000,m=d.getMinutes()+s/60,h=d.getHours()%12+m/60;
+var v={HH:p2(d.getHours()),MM:p2(d.getMinutes()),SS:p2(d.getSeconds()),DOW:DAYS[d.getDay()],DD:p2(d.getDate()),MON:MON[d.getMonth()]};
+document.querySelectorAll('[data-f]').forEach(function(e){e.textContent=v[e.dataset.f]});
+var rot={h:h*30,m:m*6,s:s*6};
+document.querySelectorAll('[data-hand]').forEach(function(e){e.setAttribute('transform','rotate('+rot[e.dataset.hand]+' 240 240)')})}
+tick();setInterval(tick,200);
+</script>
