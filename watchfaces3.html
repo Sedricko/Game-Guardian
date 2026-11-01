@@ -1,0 +1,107 @@
+<title>Ultra Faces 3</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@500;700&family=Chakra+Petch:wght@500;700&family=Barlow:wght@300;400;500;600&family=Press+Start+2P&display=swap">
+<style>
+/* Layout: grid of watch cases, each a live 480px AMOLED face scaled to fit. Single dark look, orange accent from the Ultra action button. */
+:root{
+  --bg:#0c0d0f; --panel:#15171a; --ink:#e9eaec; --mute:#8b9097; --line:#2a2d32;
+  --orange:#ff6a1a; --titan:#3a3d42; --glass:#000;
+  --display:'Saira Condensed','Arial Narrow',sans-serif;
+  --tech:'Chakra Petch','Courier New',monospace;
+  --body:'Barlow',system-ui,sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:400 16px/1.5 var(--body);
+  padding-block:32px 56px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+main{max-width:1040px;margin:0 auto}
+h1{font:700 clamp(40px,8vw,72px)/.95 var(--display);letter-spacing:.01em;margin:0 0 12px;text-wrap:balance}
+h1 span{color:var(--orange)}
+.lead{max-width:60ch;color:var(--mute);margin:0 0 36px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:20px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:20px;display:flex;flex-direction:column;gap:16px;min-width:0}
+.case{position:relative;width:100%;max-width:300px;aspect-ratio:1;margin:0 auto;border-radius:30%;
+  background:linear-gradient(145deg,#4a4e54,#1f2124 60%,#33363b);padding:6%;box-shadow:0 12px 30px #000a}
+.case::before{content:"";position:absolute;top:-1.5%;right:19%;width:9%;height:5%;border-radius:3px;background:var(--orange)}
+.case svg{display:block;width:100%;height:100%;border-radius:50%;background:var(--glass)}
+.card h2{font:700 24px/1 var(--display);letter-spacing:.04em;text-transform:uppercase;margin:0}
+.card p{margin:4px 0 0;color:var(--mute);font-size:14px}
+.tags{display:flex;flex-wrap:wrap;gap:6px;margin:0;padding:0;list-style:none}
+.tags li{font:500 11px/1 var(--tech);letter-spacing:.08em;text-transform:uppercase;color:var(--orange);border:1px solid var(--line);border-radius:4px;padding:5px 7px}
+text{font-family:var(--display);font-weight:700}
+.t{font-family:var(--tech);font-weight:500}
+.px{font-family:"Press Start 2P",monospace;font-weight:400}.sw{font-family:var(--body);font-weight:600}.lt{font-family:var(--body);font-weight:300}
+.o{fill:var(--orange)}.g{fill:#7d8086}.w{fill:#f2f2f2}
+</style>
+
+<main>
+<h1>Galaxy Watch Ultra<br><span>Outros estilos</span></h1>
+<p class="lead">Seis direções visuais bem diferentes do laranja sobre preto: neon, suíço claro, relevo, hora por extenso, pixel e gradiente.</p>
+<div class="grid">
+<section class="card"><div class="case"><svg viewBox="0 0 480 480" role="img" aria-label="Synthwave"><defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd23f"/><stop offset="1" stop-color="#ff2a8a"/></linearGradient><filter id="gl" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter><clipPath id="sc"><rect x="0" y="0" width="480" height="340"/></clipPath></defs>
+<rect width="480" height="480" fill="#0b0018"/>
+<g clip-path="url(#sc)"><circle cx="240" cy="290" r="110" fill="url(#sg)"/><g fill="#0b0018"><rect x="120" y="296" width="240" height="4"/><rect x="120" y="314" width="240" height="7"/><rect x="120" y="330" width="240" height="10"/></g></g>
+<g id="gr3" stroke="#ff2a8a" stroke-width="1.5" opacity=".8"></g>
+<text class="t" x="240" y="198" text-anchor="middle" font-size="104" fill="#3df2ff" filter="url(#gl)" style="font-weight:700"><tspan data-f="HH">10</tspan>:<tspan data-f="MM">27</tspan></text>
+<text class="t" x="240" y="104" text-anchor="middle" font-size="22" fill="#ff2a8a" style="font-weight:700" letter-spacing="5" filter="url(#gl)"><tspan data-f="DOW">DOM</tspan> <tspan data-f="DD">06</tspan> <tspan data-f="MON">SET</tspan></text></svg></div>
+<div><h2>Synthwave</h2><p>Sol de néon sobre uma grade em perspectiva. Ciano e magenta, para a noite.</p></div>
+<ul class="tags"><li>Neon</li><li>Retrô 80s</li></ul></section>
+<section class="card"><div class="case"><svg viewBox="0 0 480 480" role="img" aria-label="Swiss"><rect width="480" height="480" fill="#f1f0ec"/>
+<text class="sw" x="92" y="262" font-size="210" fill="#111" letter-spacing="-8" data-f="HH">10</text>
+<text class="sw" x="92" y="424" font-size="210" fill="#111" letter-spacing="-8" data-f="MM">27</text>
+<circle cx="362" cy="332" r="15" fill="#e63312"/>
+<text class="sw" x="328" y="150" font-size="24" fill="#111" style="font-weight:500" data-f="DOW">DOM</text>
+<text class="sw" x="328" y="180" font-size="24" fill="#777" style="font-weight:500"><tspan data-f="DD">06</tspan> <tspan data-f="MON">SET</tspan></text></svg></div>
+<div><h2>Swiss</h2><p>Tipografia suíça em fundo claro: dois números grandes e um ponto vermelho.</p></div>
+<ul class="tags"><li>Claro</li><li>Minimal</li></ul></section>
+<section class="card"><div class="case"><svg viewBox="0 0 480 480" role="img" aria-label="Topo"><rect width="480" height="480" fill="#0f1a14"/><g id="tp3" fill="none" stroke="#2d4a37" stroke-width="2"></g>
+<text class="lt" x="240" y="262" text-anchor="middle" font-size="130" fill="#f1ead8"><tspan data-f="HH">10</tspan>:<tspan data-f="MM">27</tspan></text>
+<text class="t" x="240" y="312" text-anchor="middle" font-size="22" fill="#c6f24a" style="font-weight:500" letter-spacing="4"><tspan data-f="DOW">DOM</tspan> <tspan data-f="DD">06</tspan> <tspan data-f="MON">SET</tspan></text>
+<text class="t" x="240" y="392" text-anchor="middle" font-size="18" fill="#8fb39a" style="font-weight:500">▲ 1 284 m · 8,4 km</text></svg></div>
+<div><h2>Topo</h2><p>Curvas de nível no fundo e hora em creme. Feito para quem vive em trilha.</p></div>
+<ul class="tags"><li>Relevo</li><li>Verde</li></ul></section>
+<section class="card"><div class="case"><svg viewBox="0 0 480 480" role="img" aria-label="Por extenso"><rect width="480" height="480" fill="#0a0a0a"/>
+<text class="t" x="240" y="130" text-anchor="middle" font-size="18" fill="#d9b25f" style="font-weight:500" letter-spacing="6">SÃO</text>
+<text class="sw" x="240" y="226" text-anchor="middle" font-size="76" fill="#f4efe6" id="wh">dez</text>
+<text class="t" x="240" y="262" text-anchor="middle" font-size="18" fill="#d9b25f" style="font-weight:500" letter-spacing="6" id="wl">HORAS</text>
+<text class="lt" x="240" y="334" text-anchor="middle" font-size="44" fill="#f4efe6" id="wm">e vinte e sete</text>
+<text class="t" x="240" y="396" text-anchor="middle" font-size="16" fill="#777" style="font-weight:500" letter-spacing="3"><tspan data-f="DOW">DOM</tspan> <tspan data-f="DD">06</tspan> <tspan data-f="MON">SET</tspan></text></svg></div>
+<div><h2>Por extenso</h2><p>A hora escrita em português, com o relógio em palavras grandes.</p></div>
+<ul class="tags"><li>Palavras</li><li>Editorial</li></ul></section>
+<section class="card"><div class="case"><svg viewBox="0 0 480 480" role="img" aria-label="Pixel"><rect width="480" height="480" fill="#9bbc0f"/>
+<text class="px" x="240" y="140" text-anchor="middle" font-size="16" fill="#0f380f"><tspan data-f="DOW">DOM</tspan> <tspan data-f="DD">06</tspan> <tspan data-f="MON">SET</tspan></text>
+<text class="px" x="240" y="268" text-anchor="middle" font-size="62" fill="#0f380f"><tspan data-f="HH">10</tspan>:<tspan data-f="MM">27</tspan></text>
+<g fill="#0f380f"><rect x="150" y="320" width="28" height="20"/><rect x="184" y="320" width="28" height="20"/><rect x="218" y="320" width="28" height="20"/><rect x="252" y="320" width="28" height="20"/><rect x="286" y="320" width="28" height="20" fill="#8bac0f" stroke="#0f380f" stroke-width="4"/></g>
+<text class="px" x="240" y="392" text-anchor="middle" font-size="16" fill="#0f380f">8412 PASSOS</text></svg></div>
+<div><h2>Pixel</h2><p>Visor verde de portátil antigo, com fonte de pixels e barra de bateria em blocos.</p></div>
+<ul class="tags"><li>Retrô</li><li>8 bits</li></ul></section>
+<section class="card"><div class="case"><svg viewBox="0 0 480 480" role="img" aria-label="Aurora"><defs><filter id="bl" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="46"/></filter></defs>
+<rect width="480" height="480" fill="#06060c"/>
+<g filter="url(#bl)"><circle cx="150" cy="150" r="120" fill="#6b3cff" opacity=".85"/><circle cx="350" cy="190" r="110" fill="#00d1b2" opacity=".7"/><circle cx="250" cy="370" r="130" fill="#ff4f8b" opacity=".7"/></g>
+<text class="lt" x="240" y="268" text-anchor="middle" font-size="140" fill="#fff" letter-spacing="-3"><tspan data-f="HH">10</tspan>:<tspan data-f="MM">27</tspan></text>
+<text class="lt" x="240" y="320" text-anchor="middle" font-size="24" fill="#ffffffcc" letter-spacing="6"><tspan data-f="DOW">DOM</tspan> <tspan data-f="DD">06</tspan> <tspan data-f="MON">SET</tspan></text>
+<text class="lt" x="240" y="104" text-anchor="middle" font-size="22" fill="#ffffffaa">87%</text></svg></div>
+<div><h2>Aurora</h2><p>Manchas de luz suaves e hora fina. Pensado para o modo ambiente do dia a dia.</p></div>
+<ul class="tags"><li>Gradiente</li><li>Suave</li></ul></section>
+</div>
+</main>
+<script>
+var NS='http://www.w3.org/2000/svg';
+function mk(p,n,a){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);p.appendChild(e);return e}
+(function(){var g=document.getElementById('gr3');
+for(var i=-8;i<=8;i++)mk(g,'line',{x1:240+i*14,y1:340,x2:240+i*80,y2:480});
+[345,356,372,396,430,475].forEach(function(y){mk(g,'line',{x1:0,y1:y,x2:480,y2:y})})})();
+(function(){var g=document.getElementById('tp3');
+for(var k=1;k<=11;k++){var pts=[];for(var i=0;i<=90;i++){var a=i*4*Math.PI/180,r=k*24*(1+.12*Math.sin(3*a+k*.6)+.07*Math.sin(5*a+k));pts.push((240+r*Math.cos(a)).toFixed(1)+','+(240+r*Math.sin(a)).toFixed(1))}
+mk(g,'polygon',{points:pts.join(' '),stroke:k%4==0?'#4f7a5d':'#2d4a37'})}})();
+var U=['zero','um','dois','três','quatro','cinco','seis','sete','oito','nove','dez','onze','doze','treze','catorze','quinze','dezesseis','dezessete','dezoito','dezenove'],TN=['','','vinte','trinta','quarenta','cinquenta'];
+function nw(n){return n<20?U[n]:TN[Math.floor(n/10)]+(n%10?' e '+U[n%10]:'')}
+var DAYS=['DOM','SEG','TER','QUA','QUI','SEX','SÁB'],MON=['JAN','FEV','MAR','ABR','MAI','JUN','JUL','AGO','SET','OUT','NOV','DEZ'];
+function p2(n){return ('0'+n).slice(-2)}
+function tick(){var d=new Date(),h=d.getHours(),m=d.getMinutes();
+var v={HH:p2(h),MM:p2(m),DOW:DAYS[d.getDay()],DD:p2(d.getDate()),MON:MON[d.getMonth()]};
+document.querySelectorAll('[data-f]').forEach(function(e){e.textContent=v[e.dataset.f]});
+document.getElementById('wh').textContent=nw(h);document.getElementById('wl').textContent=h==1?'HORA':'HORAS';
+document.getElementById('wm').textContent=m?'e '+nw(m):'em ponto'}
+tick();setInterval(tick,1000);
+</script>
