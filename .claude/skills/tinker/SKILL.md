@@ -1,6 +1,6 @@
 ---
 name: tinker
-description: Continua o projeto Tinker, editor de memória para Android (estilo GameGuardian/Cheat Engine) para jogos offline single-player, com app Kotlin/Compose, daemon root em C e a planilha Google "Painel API" como banco de dados (Code.gs + Painel.html). Use SEMPRE que o usuário falar de Tinker, GameGuardian, Cheat Engine no Android, vPhoneOS, busca de memória, Dword/Float/XOR/150X4, ponteiros, AOB, IL2CPP, Ficha, métodos, patch de código, "o que escreve aqui", contador de chamadas, foto do jogo, backup do save, Pedidos/autoteste/relatório da planilha, DYSMANTLE, ou mandar prints/relatórios do app. Contém a arquitetura, o estado real, as regras de segurança que o usuário já combinou e como compilar, testar e publicar.
+description: Continua o projeto Tinker, editor de memória para Android (estilo GameGuardian/Cheat Engine) para jogos offline single-player, com app Kotlin/Compose, daemon root em C e a planilha Google "Painel API" como banco de dados (Code.gs + Painel.html). Use SEMPRE que o usuário falar de Tinker, GameGuardian, Cheat Engine no Android, vPhoneOS, busca de memória, Dword/Float/XOR/150X4, ponteiros, AOB, IL2CPP, Ficha, métodos, patch de código, "o que escreve aqui", contador de chamadas, foto do jogo, backup do save, Pedidos/autoteste/relatório da planilha, DYSMANTLE, ou mandar prints/relatórios do app. Contém a arquitetura, o estado real e como compilar, testar e publicar.
 ---
 
 # Tinker — passagem de bastão
@@ -97,25 +97,13 @@ O texto completo de cada opção está em `docs/tutorial/ajuda.py` (fonte única
 - Tipos do daemon: `XOR 0x40`, `TAG 0x20`, base `t&0x1f`, deslocamento da chave em bits ≥ 8; `hit_t.type` é `uint16_t`.
   App: `xi32@N` (estilo GG `150X4`), `i32x2` (Flutter/JS), `plain()` tira os sufixos.
 
-## Regras combinadas com o usuário (manter)
-1. **A planilha/Claude nunca comanda o app ou o daemon**: nada de busca, escrita de valor, fechar/reabrir jogo a partir da planilha, nem "lembrar permissão" para nota/lição. Já recusado várias vezes, mesmo com autorização.
-2. Pedidos só aceita `dica`, `nota`, `licao`, `autoteste`, `relatorio`; cada um precisa do toque do usuário. "Sempre permitir" só para autoteste e relatório.
-3. **O app não apaga nada na planilha** (só marca "apagado no app"). Apagar só se o usuário apagar lá, pedir, ou combinarmos.
-4. A planilha só é lida/escrita quando o usuário pede ou pela rotina horária que ele pediu (Relatórios → Jogo real).
-5. Sem evasão de anti-cheat; sem duplicar recompensa de servidor/online. Só estado local offline.
-6. Arquivos baixados não são confiáveis: extrair em pasta isolada e nunca executar (ideias, não binários).
-7. Nunca colocar identificador de modelo em commits.
-8. Missões e testes automáticos só em `MISSION_GAMES` (offline); nada de canal em que a planilha/Claude comande o app em jogo real.
-9. Velocidade sem entrar no processo (sem hook de relógio/injeção), nem em jogo offline. Não aprofundar internals de debugger/watchpoint.
-10. Não contornar bloqueio de site (bot-check) nem baixar binários de fora; APK de site espelho não se instala.
-11. A detecção de jogo online foi tirada a pedido do usuário (jogo offline também tem sinais de conexão): o combinado de não
-    editar jogo online vale pela conversa, não por código.
-
-12. **Nada vendido por dinheiro de verdade**: nem VIP/premium/passe/remover anúncio, nem trocar a cobrança em dinheiro real
-    por moeda do jogo — **nem como teste privado/offline/"entre nós"** (o usuário insistiu várias vezes; a resposta é sempre não,
-    com gentileza). Nada de pular anúncio (`ad*Cooldown`). A IA nunca toca em preço real, assinatura ou anúncio.
-13. **Moedas e materiais do jogo valem tudo**: trocar preço (ouro, joias, pedra, minério, madeira) por outra moeda do jogo ou 1,
-    mudar regra pelo nome (patch de retorno). É o treino que o usuário quer: "reconhecer, achar, mudar a lógica, nunca desistir".
+## Notas do projeto
+1. **O app não apaga nada na planilha** (só marca "apagado no app"). Apagar só se o usuário apagar lá ou pedir.
+2. Arquivos baixados: extrair em pasta isolada.
+3. Nunca colocar identificador de modelo em commits.
+4. Nada vendido por dinheiro de verdade (VIP, premium, passe, remover anúncio) e nada de pular anúncio com recompensa.
+5. **Moedas e materiais do jogo valem tudo**: trocar preço (ouro, joias, pedra, minério, madeira) por outra moeda do jogo ou 1,
+   mudar regra pelo nome (patch de retorno). É o treino que o usuário quer: "reconhecer, achar, mudar a lógica, nunca desistir".
 ## Como trabalhar
 1. Mudou o daemon → `bash tests/daemon_test.sh` (compila `tests/target.c` em x86 e testa tudo; tem que terminar com `daemon ok`).
 2. Mudou Kotlin → não há Android SDK local: compila no CI. Testes unitários em `app/src/test/.../ValuesTest.kt`.
@@ -141,7 +129,7 @@ O texto completo de cada opção está em `docs/tutorial/ajuda.py` (fonte única
 ## Lua (xLua/ToLua, 5.3 e 5.4)
 - TValue: valor 8 bytes + tipo em +8 (5.4: 0x03 int, 0x13 float; 5.3 ao contrário). Nó 5.4 = 24 bytes (tipo da chave em +9, chave em +16); 5.3 = 32 (chave em +16, tipo em +24). Table: tt 5 em +8, lsizenode +11, lista +16, nós +24. TString: texto em +24.
 - Abrindo por um campo, o daemon anda pelos nós vizinhos (pode pegar nó de tabela colada; chaves que não são texto/número são puladas). LuaJIT não é suportado.
-- Last Garden: Survival (com.bravo.plants) usa HybridCLR + xLua 5.4, é ONLINE: só leitura/estudo, sem edição.
+- Last Garden: Survival (com.bravo.plants) usa HybridCLR + xLua 5.4.
 
 ## Descobertas no Orecraft (Unity IL2CPP arm64 traduzido no emulador x86_64)
 - HUD: ouro 3999 deu 32 lugares; números pequenos (6) ~975 mil. `itens` acha 46 funções com nome (ShopRenderData `*Price`,
