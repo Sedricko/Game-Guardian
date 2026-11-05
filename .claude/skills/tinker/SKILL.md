@@ -12,6 +12,11 @@ em uma linha o que mudou; também primeira vitória num teste ou algo que precis
 Quando o agente manda "agente PC: foto do jogo ANTES/DEPOIS (...)" para Relatórios (jpeg base64 na coluna F, só pedido
 que deu certo), decodificar, salvar no scratchpad e mandar ao usuário com SendUserFile: ele quer ver a tela do jogo mudada.
 
+## Estado (05/11/2026)
+- Última versão do Tinker: **2.97.4** (31/10, editor de save ignora os modelos do AppLovin e arquivos .js).
+- Desde 31/10 o trabalho seguiu no **Unit** (repositório `Sedricko/Unit`, app novo feito peça por peça); a passagem de bastão
+  dele fica em `.claude/skills/unit/SKILL.md` daquele repositório. O Tinker não mudou desde então.
+
 ## Onde está tudo
 - Repositório `Sedricko/Game-Guardian` (**público**: nunca pôr token do painel no código), branch de trabalho `ccr-92c99132-2ne91y`.
 - Cada push compila no GitHub Actions e publica `v<versionName>` em Releases (`Tinker-X.Y.Z.apk`, arm64).
